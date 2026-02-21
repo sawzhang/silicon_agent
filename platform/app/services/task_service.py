@@ -20,7 +20,11 @@ class TaskService:
     async def list_tasks(
         self, page: int = 1, page_size: int = 20, status: Optional[str] = None
     ) -> TaskListResponse:
-        query = select(TaskModel).options(selectinload(TaskModel.stages))
+        query = select(TaskModel).options(
+            selectinload(TaskModel.stages),
+            selectinload(TaskModel.template),
+            selectinload(TaskModel.project),
+        )
         count_query = select(func.count()).select_from(TaskModel)
 
         if status:
@@ -69,13 +73,28 @@ class TaskService:
                     self.session.add(stage)
 
         await self.session.commit()
-        await self.session.refresh(task, attribute_names=["stages"])
+
+        # Re-fetch with eager loading to avoid lazy load issues in async
+        result = await self.session.execute(
+            select(TaskModel)
+            .options(
+                selectinload(TaskModel.stages),
+                selectinload(TaskModel.template),
+                selectinload(TaskModel.project),
+            )
+            .where(TaskModel.id == task.id)
+        )
+        task = result.scalar_one()
         return self._task_to_response(task)
 
     async def get_task(self, task_id: str) -> Optional[TaskDetailResponse]:
         result = await self.session.execute(
             select(TaskModel)
-            .options(selectinload(TaskModel.stages))
+            .options(
+                selectinload(TaskModel.stages),
+                selectinload(TaskModel.template),
+                selectinload(TaskModel.project),
+            )
             .where(TaskModel.id == task_id)
         )
         task = result.scalar_one_or_none()
@@ -95,7 +114,11 @@ class TaskService:
     async def cancel_task(self, task_id: str) -> Optional[TaskDetailResponse]:
         result = await self.session.execute(
             select(TaskModel)
-            .options(selectinload(TaskModel.stages))
+            .options(
+                selectinload(TaskModel.stages),
+                selectinload(TaskModel.template),
+                selectinload(TaskModel.project),
+            )
             .where(TaskModel.id == task_id)
         )
         task = result.scalar_one_or_none()

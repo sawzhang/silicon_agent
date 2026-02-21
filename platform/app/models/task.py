@@ -39,8 +39,8 @@ class TaskModel(Base):
     stages: Mapped[List["TaskStageModel"]] = relationship(
         back_populates="task", cascade="all, delete-orphan"
     )
-    template = relationship("TaskTemplateModel", lazy="joined")
-    project = relationship("ProjectModel", lazy="joined")
+    template = relationship("TaskTemplateModel", lazy="selectin")
+    project = relationship("ProjectModel", lazy="selectin")
 
 
 class TaskStageModel(Base):
