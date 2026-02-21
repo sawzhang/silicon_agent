@@ -26,6 +26,8 @@ class TaskStageResponse(BaseModel):
     tokens_used: int = 0
     turns_used: int = 0
     self_fix_count: int = 0
+    output_summary: Optional[str] = None
+    error_message: Optional[str] = None
 
     model_config = {"from_attributes": True}
 

@@ -61,5 +61,7 @@ class TaskStageModel(Base):
     tokens_used: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     turns_used: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     self_fix_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    output_summary: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
     task: Mapped[TaskModel] = relationship(back_populates="stages")

@@ -9,12 +9,15 @@ from app.api.webhooks import jira, gitlab
 from app.config import settings
 from app.db.init_db import init_db
 from app.db.session import async_session_factory, engine
+from app.integration.llm_client import close_llm_client
 from app.integration.skillkit_bridge import init_bridge
 from app.middleware.auth import JWTAuthMiddleware
 from app.middleware.error_handler import ErrorHandlerMiddleware
 from app.services.agent_service import AgentService
+from app.services.seed_service import seed_demo_data
 from app.services.template_service import TemplateService
 from app.websocket.manager import ws_manager
+from app.worker import start_worker, stop_worker
 
 logging.basicConfig(
     level=logging.DEBUG if settings.DEBUG else logging.INFO,
@@ -39,16 +42,26 @@ async def lifespan(app: FastAPI):
         await template_service.seed_builtin_templates()
         logger.info("Builtin task templates seeded")
 
+    # Seed demo data (skills, gates, audit logs, sample tasks)
+    async with async_session_factory() as session:
+        await seed_demo_data(session)
+
     logger.info("Initializing SkillKit bridge...")
     await init_bridge(use_skillkit=settings.SKILLKIT_ENABLED)
 
     logger.info("Initializing WebSocket manager Redis connection...")
     await ws_manager.init_redis(settings.REDIS_URL)
 
+    if settings.WORKER_ENABLED:
+        logger.info("Starting worker...")
+        await start_worker()
+
     logger.info("Platform startup complete")
     yield
     # Shutdown
     logger.info("Platform shutting down")
+    await stop_worker()
+    await close_llm_client()
 
 
 app = FastAPI(
