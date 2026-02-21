@@ -13,6 +13,7 @@ from app.integration.skillkit_bridge import init_bridge
 from app.middleware.auth import JWTAuthMiddleware
 from app.middleware.error_handler import ErrorHandlerMiddleware
 from app.services.agent_service import AgentService
+from app.services.template_service import TemplateService
 from app.websocket.manager import ws_manager
 
 logging.basicConfig(
@@ -28,10 +29,15 @@ async def lifespan(app: FastAPI):
     logger.info("Initializing database tables...")
     await init_db(engine)
 
-    # Seed default agents
+    # Seed default agents and templates
     async with async_session_factory() as session:
         agent_service = AgentService(session)
         await agent_service.ensure_agents_exist()
+
+    async with async_session_factory() as session:
+        template_service = TemplateService(session)
+        await template_service.seed_builtin_templates()
+        logger.info("Builtin task templates seeded")
 
     logger.info("Initializing SkillKit bridge...")
     await init_bridge(use_skillkit=settings.SKILLKIT_ENABLED)

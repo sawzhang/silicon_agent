@@ -10,6 +10,8 @@ class TaskCreateRequest(BaseModel):
     jira_id: Optional[str] = None
     title: str
     description: Optional[str] = None
+    template_id: Optional[str] = None
+    project_id: Optional[str] = None
 
 
 class TaskStageResponse(BaseModel):
@@ -39,6 +41,10 @@ class TaskDetailResponse(BaseModel):
     created_at: datetime
     completed_at: Optional[datetime] = None
     stages: List[TaskStageResponse] = []
+    template_id: Optional[str] = None
+    project_id: Optional[str] = None
+    template_name: Optional[str] = None
+    project_name: Optional[str] = None
 
     model_config = {"from_attributes": True}
 

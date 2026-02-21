@@ -14,6 +14,7 @@ const KPI = React.lazy(() => import('@/pages/KPI/index'));
 const Audit = React.lazy(() => import('@/pages/Audit/index'));
 const Config = React.lazy(() => import('@/pages/Config/index'));
 const CircuitBreaker = React.lazy(() => import('@/pages/CircuitBreaker/index'));
+const Projects = React.lazy(() => import('@/pages/Projects/index'));
 
 const Loading = () => <Spin size="large" style={{ display: 'block', margin: '200px auto' }} />;
 
@@ -27,6 +28,7 @@ const App: React.FC = () => {
           <Route path="/" element={<Navigate to="/dashboard" replace />} />
           <Route path="/dashboard" element={<Dashboard />} />
           <Route path="/tasks" element={<Tasks />} />
+          <Route path="/projects" element={<Projects />} />
           <Route path="/tasks/:id" element={<TaskDetail />} />
           <Route path="/gates" element={<Gates />} />
           <Route path="/skills" element={<Skills />} />

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from datetime import datetime, timezone
 from typing import List, Optional
 
@@ -8,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.models.task import TaskModel, TaskStageModel
+from app.models.template import TaskTemplateModel
 from app.schemas.task import TaskCreateRequest, TaskDetailResponse, TaskListResponse, TaskStageResponse
 
 
@@ -35,7 +37,7 @@ class TaskService:
         tasks = result.scalars().all()
 
         return TaskListResponse(
-            items=[TaskDetailResponse.model_validate(t) for t in tasks],
+            items=[self._task_to_response(t) for t in tasks],
             total=total,
             page=page,
             page_size=page_size,
@@ -47,11 +49,28 @@ class TaskService:
             description=request.description,
             jira_id=request.jira_id,
             status="pending",
+            template_id=request.template_id,
+            project_id=request.project_id,
         )
         self.session.add(task)
+        await self.session.flush()
+
+        if request.template_id:
+            template = await self.session.get(TaskTemplateModel, request.template_id)
+            if template and template.stages:
+                stage_defs = json.loads(template.stages)
+                for stage_def in stage_defs:
+                    stage = TaskStageModel(
+                        task_id=task.id,
+                        stage_name=stage_def["name"],
+                        agent_role=stage_def["agent_role"],
+                        status="pending",
+                    )
+                    self.session.add(stage)
+
         await self.session.commit()
         await self.session.refresh(task, attribute_names=["stages"])
-        return TaskDetailResponse.model_validate(task)
+        return self._task_to_response(task)
 
     async def get_task(self, task_id: str) -> Optional[TaskDetailResponse]:
         result = await self.session.execute(
@@ -62,7 +81,7 @@ class TaskService:
         task = result.scalar_one_or_none()
         if task is None:
             return None
-        return TaskDetailResponse.model_validate(task)
+        return self._task_to_response(task)
 
     async def get_stages(self, task_id: str) -> List[TaskStageResponse]:
         result = await self.session.execute(
@@ -83,9 +102,28 @@ class TaskService:
         if task is None:
             return None
         if task.status in ("completed", "failed", "cancelled"):
-            return TaskDetailResponse.model_validate(task)
+            return self._task_to_response(task)
         task.status = "cancelled"
         task.completed_at = datetime.now(timezone.utc)
         await self.session.commit()
         await self.session.refresh(task)
-        return TaskDetailResponse.model_validate(task)
+        return self._task_to_response(task)
+
+    @staticmethod
+    def _task_to_response(task: TaskModel) -> TaskDetailResponse:
+        return TaskDetailResponse(
+            id=task.id,
+            jira_id=task.jira_id,
+            title=task.title,
+            description=task.description,
+            status=task.status,
+            total_tokens=task.total_tokens,
+            total_cost_rmb=task.total_cost_rmb,
+            created_at=task.created_at,
+            completed_at=task.completed_at,
+            stages=[TaskStageResponse.model_validate(s) for s in task.stages],
+            template_id=task.template_id,
+            project_id=task.project_id,
+            template_name=task.template.display_name if task.template else None,
+            project_name=task.project.display_name if task.project else None,
+        )

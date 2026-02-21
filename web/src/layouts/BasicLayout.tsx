@@ -10,6 +10,7 @@ import {
   FileSearchOutlined,
   SettingOutlined,
   ThunderboltOutlined,
+  ProjectOutlined,
 } from '@ant-design/icons';
 import { Badge } from 'antd';
 import { useNotificationStore } from '@/stores/notificationStore';
@@ -18,6 +19,7 @@ const menuRoutes = {
   routes: [
     { path: '/dashboard', name: '集群总览', icon: <DashboardOutlined /> },
     { path: '/tasks', name: '任务管线', icon: <UnorderedListOutlined /> },
+    { path: '/projects', name: '项目管理', icon: <ProjectOutlined /> },
     { path: '/gates', name: '审批中心', icon: <AuditOutlined /> },
     { path: '/skills', name: 'Skills管理', icon: <ToolOutlined /> },
     { path: '/kpi', name: 'KPI监控', icon: <BarChartOutlined /> },

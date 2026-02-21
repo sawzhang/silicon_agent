@@ -28,6 +28,10 @@ export interface Task {
   total_tokens: number;
   total_cost_usd: number;
   created_by: string;
+  template_id: string | null;
+  project_id: string | null;
+  template_name: string | null;
+  project_name: string | null;
 }
 
 export interface TaskListResponse {
@@ -41,4 +45,6 @@ export interface TaskCreateRequest {
   title: string;
   description: string;
   priority?: 'low' | 'medium' | 'high' | 'critical';
+  template_id?: string;
+  project_id?: string;
 }

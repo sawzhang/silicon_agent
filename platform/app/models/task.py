@@ -29,9 +29,18 @@ class TaskModel(Base):
     )
     completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
-    stages: Mapped[List[TaskStageModel]] = relationship(
+    template_id: Mapped[Optional[str]] = mapped_column(
+        String(36), ForeignKey("task_templates.id"), nullable=True
+    )
+    project_id: Mapped[Optional[str]] = mapped_column(
+        String(36), ForeignKey("projects.id"), nullable=True
+    )
+
+    stages: Mapped[List["TaskStageModel"]] = relationship(
         back_populates="task", cascade="all, delete-orphan"
     )
+    template = relationship("TaskTemplateModel", lazy="joined")
+    project = relationship("ProjectModel", lazy="joined")
 
 
 class TaskStageModel(Base):

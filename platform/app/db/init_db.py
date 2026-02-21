@@ -9,6 +9,8 @@ import app.models.skill  # noqa: F401
 import app.models.gate  # noqa: F401
 import app.models.kpi  # noqa: F401
 import app.models.audit  # noqa: F401
+import app.models.template  # noqa: F401
+import app.models.project  # noqa: F401
 
 
 async def init_db(engine: AsyncEngine) -> None:

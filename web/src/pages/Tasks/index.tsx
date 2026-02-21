@@ -6,9 +6,12 @@ import type { ActionType, ProColumns } from '@ant-design/pro-components';
 import { Link } from 'react-router-dom';
 import { listTasks } from '@/services/taskApi';
 import { useCreateTask } from '@/hooks/useTasks';
+import { useTemplateList } from '@/hooks/useTemplates';
+import { useProjectList } from '@/hooks/useProjects';
 import { formatTimestamp, formatCost } from '@/utils/formatters';
 import type { Task, TaskCreateRequest } from '@/types/task';
 import { ModalForm, ProFormText, ProFormTextArea, ProFormSelect } from '@ant-design/pro-components';
+import { STAGE_NAMES } from '@/utils/constants';
 
 const STATUS_COLOR: Record<string, string> = {
   queued: 'default',
@@ -25,10 +28,19 @@ const PRIORITY_COLOR: Record<string, string> = {
   critical: 'red',
 };
 
+const STAGE_DISPLAY: Record<string, string> = Object.fromEntries(
+  STAGE_NAMES.map((s) => [s.key, s.name])
+);
+
 const TaskList: React.FC = () => {
   const actionRef = React.useRef<ActionType>();
   const createTask = useCreateTask();
+  const { data: templateData } = useTemplateList();
+  const { data: projectData } = useProjectList();
   const [createOpen, setCreateOpen] = useState(false);
+  const [selectedTemplateId, setSelectedTemplateId] = useState<string | undefined>();
+
+  const selectedTemplate = templateData?.items?.find((t) => t.id === selectedTemplateId);
 
   const columns: ProColumns<Task>[] = [
     {
@@ -39,6 +51,20 @@ const TaskList: React.FC = () => {
       search: false,
     },
     { title: 'Title', dataIndex: 'title', ellipsis: true },
+    {
+      title: 'Template',
+      dataIndex: 'template_name',
+      width: 100,
+      search: false,
+      render: (_, record) => record.template_name ? <Tag>{record.template_name}</Tag> : '-',
+    },
+    {
+      title: 'Project',
+      dataIndex: 'project_name',
+      width: 120,
+      search: false,
+      render: (_, record) => record.project_name || '-',
+    },
     {
       title: 'Status',
       dataIndex: 'status',
@@ -90,12 +116,17 @@ const TaskList: React.FC = () => {
       <ModalForm
         title="Create Task"
         open={createOpen}
-        onOpenChange={setCreateOpen}
+        onOpenChange={(open) => {
+          setCreateOpen(open);
+          if (!open) setSelectedTemplateId(undefined);
+        }}
         onFinish={async (values: Record<string, string>) => {
           await createTask.mutateAsync({
             title: values.title,
             description: values.description,
             priority: values.priority as TaskCreateRequest['priority'],
+            template_id: values.template_id || undefined,
+            project_id: values.project_id || undefined,
           });
           message.success('Task created');
           actionRef.current?.reload();
@@ -114,6 +145,34 @@ const TaskList: React.FC = () => {
             { label: 'High', value: 'high' },
             { label: 'Critical', value: 'critical' },
           ]}
+        />
+        <ProFormSelect
+          name="template_id"
+          label="Pipeline Template"
+          placeholder="Select a template"
+          options={templateData?.items?.map((t) => ({
+            label: `${t.display_name} (${t.stages.length} stages)`,
+            value: t.id,
+          })) || []}
+          fieldProps={{
+            allowClear: true,
+            onChange: (val: string) => setSelectedTemplateId(val),
+          }}
+          help={
+            selectedTemplate && selectedTemplate.stages.length > 0
+              ? `Stages: ${selectedTemplate.stages.map((s) => STAGE_DISPLAY[s.name] || s.name).join(' → ')}`
+              : undefined
+          }
+        />
+        <ProFormSelect
+          name="project_id"
+          label="Project"
+          placeholder="Select a project"
+          options={projectData?.items?.map((p) => ({
+            label: `${p.display_name}${p.repo_url ? ` (${p.repo_url})` : ''}`,
+            value: p.id,
+          })) || []}
+          fieldProps={{ allowClear: true }}
         />
       </ModalForm>
     </>

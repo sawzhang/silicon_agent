@@ -9,8 +9,10 @@ from app.services.audit_service import AuditService
 from app.services.circuit_breaker_service import CircuitBreakerService
 from app.services.gate_service import GateService
 from app.services.kpi_service import KPIService
+from app.services.project_service import ProjectService
 from app.services.skill_service import SkillService
 from app.services.task_service import TaskService
+from app.services.template_service import TemplateService
 
 
 async def get_agent_service(
@@ -53,3 +55,15 @@ async def get_circuit_breaker_service(
     session: AsyncSession = Depends(get_db),
 ) -> CircuitBreakerService:
     return CircuitBreakerService(session)
+
+
+async def get_template_service(
+    session: AsyncSession = Depends(get_db),
+) -> TemplateService:
+    return TemplateService(session)
+
+
+async def get_project_service(
+    session: AsyncSession = Depends(get_db),
+) -> ProjectService:
+    return ProjectService(session)
