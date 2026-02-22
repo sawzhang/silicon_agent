@@ -15,6 +15,8 @@ const Audit = React.lazy(() => import('@/pages/Audit/index'));
 const Config = React.lazy(() => import('@/pages/Config/index'));
 const CircuitBreaker = React.lazy(() => import('@/pages/CircuitBreaker/index'));
 const Projects = React.lazy(() => import('@/pages/Projects/index'));
+const ROI = React.lazy(() => import('@/pages/ROI/index'));
+const Cockpit = React.lazy(() => import('@/pages/Cockpit/index'));
 
 const Loading = () => <Spin size="large" style={{ display: 'block', margin: '200px auto' }} />;
 
@@ -33,7 +35,9 @@ const App: React.FC = () => {
           <Route path="/gates" element={<Gates />} />
           <Route path="/skills" element={<Skills />} />
           <Route path="/skills/:name" element={<SkillDetail />} />
+          <Route path="/cockpit" element={<Cockpit />} />
           <Route path="/kpi" element={<KPI />} />
+          <Route path="/roi" element={<ROI />} />
           <Route path="/audit" element={<Audit />} />
           <Route path="/config" element={<Config />} />
           <Route path="/circuit-breaker" element={<CircuitBreaker />} />

@@ -1,5 +1,5 @@
 import api from './api';
-import type { KPISummary, KPITimeSeries } from '@/types/kpi';
+import type { KPISummary, KPITimeSeries, ROISummary, CockpitData } from '@/types/kpi';
 
 export async function getKPISummary(period?: string): Promise<KPISummary> {
   const { data } = await api.get<KPISummary>('/kpi/summary', {
@@ -10,9 +10,9 @@ export async function getKPISummary(period?: string): Promise<KPISummary> {
 
 export async function getKPITimeSeries(
   metric: string,
-  params?: { period?: string; interval?: string },
+  params?: { period?: string; agent_role?: string },
 ): Promise<KPITimeSeries> {
-  const { data } = await api.get<KPITimeSeries>(`/kpi/timeseries/${metric}`, { params });
+  const { data } = await api.get<KPITimeSeries>(`/kpi/metrics/${metric}`, { params });
   return data;
 }
 
@@ -24,7 +24,14 @@ export async function getKPIReport(period?: string): Promise<Blob> {
   return data;
 }
 
-export async function getPSPCompare(): Promise<Record<string, unknown>> {
-  const { data } = await api.get('/kpi/psp-compare');
+export async function getROISummary(days?: number): Promise<ROISummary> {
+  const { data } = await api.get<ROISummary>('/kpi/roi', {
+    params: days ? { days } : undefined,
+  });
+  return data;
+}
+
+export async function getCockpit(): Promise<CockpitData> {
+  const { data } = await api.get<CockpitData>('/kpi/cockpit');
   return data;
 }

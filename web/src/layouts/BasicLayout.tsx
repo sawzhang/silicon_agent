@@ -11,6 +11,8 @@ import {
   SettingOutlined,
   ThunderboltOutlined,
   ProjectOutlined,
+  ControlOutlined,
+  FundOutlined,
 } from '@ant-design/icons';
 import { Badge } from 'antd';
 import { useNotificationStore } from '@/stores/notificationStore';
@@ -18,11 +20,13 @@ import { useNotificationStore } from '@/stores/notificationStore';
 const menuRoutes = {
   routes: [
     { path: '/dashboard', name: '集群总览', icon: <DashboardOutlined /> },
+    { path: '/cockpit', name: '指挥台', icon: <ControlOutlined /> },
     { path: '/tasks', name: '任务管线', icon: <UnorderedListOutlined /> },
     { path: '/projects', name: '项目管理', icon: <ProjectOutlined /> },
     { path: '/gates', name: '审批中心', icon: <AuditOutlined /> },
     { path: '/skills', name: 'Skills管理', icon: <ToolOutlined /> },
     { path: '/kpi', name: 'KPI监控', icon: <BarChartOutlined /> },
+    { path: '/roi', name: 'ROI 分析', icon: <FundOutlined /> },
     { path: '/audit', name: '审计日志', icon: <FileSearchOutlined /> },
     { path: '/config', name: 'Agent配置', icon: <SettingOutlined /> },
     { path: '/circuit-breaker', name: '止损控制', icon: <ThunderboltOutlined /> },

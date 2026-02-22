@@ -20,7 +20,37 @@ class Settings(BaseSettings):
     WORKER_POLL_INTERVAL: float = 5.0
     WORKER_GATE_POLL_INTERVAL: float = 3.0
 
-    model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
+    # Database pool
+    DB_POOL_SIZE: int = 5
+    DB_MAX_OVERFLOW: int = 10
+    DB_POOL_TIMEOUT: int = 30
+
+    # Circuit breaker configuration
+    CB_MAX_TOKENS_PER_TASK: int = 200000
+    CB_MAX_COST_PER_TASK_RMB: float = 50.0
+    CB_TOKEN_PRICE_PER_1K: float = 0.01
+
+    # Webhook secrets (empty = skip verification)
+    JIRA_WEBHOOK_SECRET: str = ""
+    GITLAB_WEBHOOK_SECRET: str = ""
+
+    # CORS
+    CORS_ORIGINS: str = "http://localhost:3000,http://localhost:5173"
+
+    # GitHub integration (optional, raises rate limit)
+    GITHUB_TOKEN: str = ""
+
+    # ROI benchmark: estimated manual effort per task
+    ESTIMATED_HOURS_PER_TASK: float = 8.0
+    HOURLY_RATE_RMB: float = 150.0
+
+    # Memory & compression configuration
+    MEMORY_ENABLED: bool = True
+    MEMORY_COMPRESSION_ENABLED: bool = True
+    MEMORY_MAX_ENTRIES_PER_CATEGORY: int = 50
+    MEMORY_MAX_CONTEXT_TOKENS: int = 2000
+
+    model_config = {"env_file": ".env", "env_file_encoding": "utf-8", "extra": "ignore"}
 
 
 settings = Settings()
