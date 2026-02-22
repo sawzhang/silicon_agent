@@ -226,7 +226,7 @@ async def analyze_repo(repo_url: str, branch: str = "main") -> RepoContext:
     """
     owner, repo = parse_repo_url(repo_url)
 
-    async with httpx.AsyncClient(timeout=30.0) as client:
+    async with httpx.AsyncClient(timeout=30.0, proxy=None) as client:
         # Fetch README and tree in parallel
         readme = await _fetch_readme(client, owner, repo)
         tree_str, root_files = await _fetch_tree(client, owner, repo, branch)

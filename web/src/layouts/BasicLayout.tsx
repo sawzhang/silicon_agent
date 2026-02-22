@@ -15,7 +15,7 @@ import {
   FundOutlined,
 } from '@ant-design/icons';
 import { Badge } from 'antd';
-import { useNotificationStore } from '@/stores/notificationStore';
+import { useGateList } from '@/hooks/useGates';
 
 const menuRoutes = {
   routes: [
@@ -36,7 +36,8 @@ const menuRoutes = {
 const BasicLayout: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
-  const unreadCount = useNotificationStore((s) => s.unreadCount());
+  const { data: pendingGates } = useGateList({ status: 'pending' });
+  const pendingGateCount = pendingGates?.length ?? 0;
 
   return (
     <ProLayout
@@ -47,8 +48,8 @@ const BasicLayout: React.FC = () => {
       route={menuRoutes}
       menuItemRender={(item, dom) => (
         <a onClick={() => item.path && navigate(item.path)}>
-          {item.path === '/gates' && unreadCount > 0 ? (
-            <Badge count={unreadCount} size="small" offset={[8, 0]}>{dom}</Badge>
+          {item.path === '/gates' && pendingGateCount > 0 ? (
+            <Badge count={pendingGateCount} size="small" offset={[8, 0]}>{dom}</Badge>
           ) : (
             dom
           )}
