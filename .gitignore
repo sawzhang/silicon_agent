@@ -27,3 +27,9 @@ Thumbs.db
 .env
 !.env.example
 !web/.env
+
+# Large binary files (PDFs, videos, Office docs)
+docs/media/
+*.mp4
+*.pdf
+*.docx
