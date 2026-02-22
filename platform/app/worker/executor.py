@@ -1,22 +1,32 @@
-"""Single-stage executor: build prompt -> call LLM -> update DB -> broadcast events."""
+"""Single-stage executor: build prompt -> AgentRunner chat -> update DB -> broadcast events."""
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from datetime import datetime, timezone
-from typing import List, Dict
+from typing import List, Dict, Optional
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.integration.llm_client import ChatMessage, get_llm_client
 from app.models.agent import AgentModel
 from app.models.task import TaskModel, TaskStageModel
 from app.websocket.events import AGENT_STATUS_CHANGED, TASK_STAGE_UPDATE
 from app.websocket.manager import ws_manager
-from app.worker.prompts import StageContext, build_messages
+from app.config import settings
+from app.worker.agents import get_agent
+from app.worker.prompts import StageContext, build_user_prompt
 
 logger = logging.getLogger(__name__)
+
+
+async def _safe_broadcast(event: str, data: dict) -> None:
+    """Broadcast a WebSocket event, swallowing any errors."""
+    try:
+        await ws_manager.broadcast(event, data)
+    except Exception:
+        logger.warning("WS broadcast failed for event %s, ignoring", event, exc_info=True)
 
 
 async def execute_stage(
@@ -24,10 +34,13 @@ async def execute_stage(
     task: TaskModel,
     stage: TaskStageModel,
     prior_outputs: List[Dict[str, str]],
+    compressed_outputs: Optional[List[Dict[str, str]]] = None,
+    project_memory: Optional[str] = None,
+    repo_context: Optional[str] = None,
 ) -> str:
-    """Execute a single stage: call LLM and update DB/broadcast.
+    """Execute a single stage: call AgentRunner and update DB/broadcast.
 
-    Returns the LLM output text.
+    Returns the agent output text.
     """
     now = datetime.now(timezone.utc)
 
@@ -44,21 +57,22 @@ async def execute_stage(
         agent.started_at = now
         agent.last_active_at = now
         await session.commit()
-        await ws_manager.broadcast(AGENT_STATUS_CHANGED, {
+        await _safe_broadcast(AGENT_STATUS_CHANGED, {
             "role": agent.role,
             "status": "running",
             "current_task_id": task.id,
+            "current_stage": stage.stage_name,
         })
 
     # 3. Broadcast stage running
-    await ws_manager.broadcast(TASK_STAGE_UPDATE, {
+    await _safe_broadcast(TASK_STAGE_UPDATE, {
         "task_id": task.id,
         "stage_id": stage.id,
         "stage_name": stage.stage_name,
         "status": "running",
     })
 
-    # 4. Build prompt and call LLM
+    # 4. Build prompt and call AgentRunner
     start_time = time.monotonic()
     ctx = StageContext(
         task_title=task.title,
@@ -66,34 +80,65 @@ async def execute_stage(
         stage_name=stage.stage_name,
         agent_role=stage.agent_role,
         prior_outputs=prior_outputs,
+        compressed_outputs=compressed_outputs,
+        project_memory=project_memory,
+        repo_context=repo_context,
     )
-    messages_dicts = build_messages(ctx)
-    messages = [ChatMessage(role=m["role"], content=m["content"]) for m in messages_dicts]
+    user_prompt = build_user_prompt(ctx)
 
-    llm_client = get_llm_client()
-    llm_response = await llm_client.chat(messages)
+    runner = get_agent(stage.agent_role, str(task.id))
+    runner.reset_usage()
+
+    # Retry loop with exponential backoff
+    last_error: Optional[Exception] = None
+    for attempt in range(settings.WORKER_STAGE_MAX_RETRIES + 1):
+        try:
+            response = await runner.chat(user_prompt, reset=True)
+            break
+        except Exception as e:
+            last_error = e
+            if attempt < settings.WORKER_STAGE_MAX_RETRIES:
+                delay = settings.WORKER_STAGE_RETRY_DELAY * (2 ** attempt)
+                logger.warning(
+                    "Stage %s LLM call failed (attempt %d/%d), retrying in %.1fs: %s",
+                    stage.stage_name, attempt + 1, settings.WORKER_STAGE_MAX_RETRIES + 1,
+                    delay, e,
+                )
+                await asyncio.sleep(delay)
+            else:
+                logger.error(
+                    "Stage %s LLM call failed after %d attempts",
+                    stage.stage_name, settings.WORKER_STAGE_MAX_RETRIES + 1,
+                )
+                raise last_error
+
     elapsed = time.monotonic() - start_time
+
+    output = response.text_content
+    total_tokens = runner.cumulative_usage.total_tokens
 
     # 5. Update stage as completed
     stage.status = "completed"
     stage.completed_at = datetime.now(timezone.utc)
     stage.duration_seconds = round(elapsed, 2)
-    stage.tokens_used = llm_response.total_tokens
-    stage.output_summary = llm_response.content
+    stage.tokens_used = total_tokens
+    stage.output_summary = output
     await session.commit()
 
-    # 6. Update task total tokens
-    task.total_tokens += llm_response.total_tokens
+    # 6. Update task total tokens and cost
+    task.total_tokens += total_tokens
+    cost = total_tokens * settings.CB_TOKEN_PRICE_PER_1K / 1000
+    task.total_cost_rmb += cost
     await session.commit()
 
     # 7. Broadcast stage completed
-    await ws_manager.broadcast(TASK_STAGE_UPDATE, {
+    await _safe_broadcast(TASK_STAGE_UPDATE, {
         "task_id": task.id,
         "stage_id": stage.id,
         "stage_name": stage.stage_name,
         "status": "completed",
         "duration_seconds": stage.duration_seconds,
-        "tokens_used": llm_response.total_tokens,
+        "tokens_used": total_tokens,
     })
 
     # 8. Reset agent to idle
@@ -102,19 +147,20 @@ async def execute_stage(
         agent.current_task_id = None
         agent.last_active_at = datetime.now(timezone.utc)
         await session.commit()
-        await ws_manager.broadcast(AGENT_STATUS_CHANGED, {
+        await _safe_broadcast(AGENT_STATUS_CHANGED, {
             "role": agent.role,
             "status": "idle",
             "current_task_id": None,
+            "current_stage": None,
         })
 
     logger.info(
         "Stage %s completed: %.1fs, %d tokens",
         stage.stage_name,
         elapsed,
-        llm_response.total_tokens,
+        total_tokens,
     )
-    return llm_response.content
+    return output
 
 
 async def mark_stage_failed(
@@ -135,14 +181,15 @@ async def mark_stage_failed(
         agent.status = "idle"
         agent.current_task_id = None
         await session.commit()
-        await ws_manager.broadcast(AGENT_STATUS_CHANGED, {
+        await _safe_broadcast(AGENT_STATUS_CHANGED, {
             "role": agent.role,
             "status": "idle",
             "current_task_id": None,
+            "current_stage": None,
         })
 
     # Broadcast failure
-    await ws_manager.broadcast(TASK_STAGE_UPDATE, {
+    await _safe_broadcast(TASK_STAGE_UPDATE, {
         "task_id": task.id,
         "stage_id": stage.id,
         "stage_name": stage.stage_name,

@@ -19,6 +19,9 @@ class Settings(BaseSettings):
     WORKER_ENABLED: bool = True
     WORKER_POLL_INTERVAL: float = 5.0
     WORKER_GATE_POLL_INTERVAL: float = 3.0
+    WORKER_GATE_MAX_WAIT_SECONDS: int = 3600     # gate max wait 1h
+    WORKER_STAGE_MAX_RETRIES: int = 2            # stage LLM failure retry count
+    WORKER_STAGE_RETRY_DELAY: float = 5.0        # retry base delay (exponential backoff)
 
     # Database pool
     DB_POOL_SIZE: int = 5
