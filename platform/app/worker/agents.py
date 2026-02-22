@@ -100,51 +100,69 @@ class SandboxedAgentRunner(_BaseRunner):  # type: ignore[misc]
         return await super()._execute_tool(tool_call, on_output)
 
 
-def get_agent(role: str, task_id: str) -> "SandboxedAgentRunner":
-    """Return (or create) a SandboxedAgentRunner for the given (role, task_id)."""
+def _create_runner(
+    role: str, task_id: str, *, enable_tools: bool = True,
+) -> "SandboxedAgentRunner":
+    """Internal helper to create a SandboxedAgentRunner."""
     if not SKILLKIT_AVAILABLE:
         raise RuntimeError(
             "SkillKit is not installed. Install it via 'pip install skillkit' "
             "or set WORKER_ENABLED=false to run without the agent worker."
         )
+
+    workdir = Path(tempfile.gettempdir()) / "silicon_agent" / "tasks" / task_id
+    workdir.mkdir(parents=True, exist_ok=True)
+
+    system_prompt = SYSTEM_PROMPTS.get(role, SYSTEM_PROMPTS["orchestrator"])
+    system_prompt += f"\n\n你的工作目录是: {workdir}\n所有文件操作请在此目录下进行。"
+
+    max_turns = _MAX_TURNS.get(role, _DEFAULT_MAX_TURNS)
+    allowed = ROLE_TOOLS.get(role, _ALL_TOOLS) if enable_tools else set()
+
+    skill_dirs = _get_skill_dirs(role)
+    base = AgentRunner.create(
+        skill_dirs=skill_dirs,
+        system_prompt=system_prompt,
+        max_turns=max_turns,
+        enable_tools=enable_tools,
+        load_context_files=False,
+    )
+    runner = SandboxedAgentRunner(
+        engine=base.engine,
+        config=base.config,
+        default_cwd=str(workdir),
+        allowed_tools=allowed,
+    )
+    logger.info(
+        "Created SandboxedAgentRunner for role=%s task=%s tools=%s enable_tools=%s cwd=%s",
+        role, task_id, sorted(allowed), enable_tools, workdir,
+    )
+    return runner
+
+
+def get_agent(role: str, task_id: str) -> "SandboxedAgentRunner":
+    """Return (or create) a SandboxedAgentRunner for the given (role, task_id)."""
     key = f"{role}:{task_id}"
     if key not in _agents:
-        workdir = Path(tempfile.gettempdir()) / "silicon_agent" / "tasks" / task_id
-        workdir.mkdir(parents=True, exist_ok=True)
+        _agents[key] = _create_runner(role, task_id, enable_tools=True)
+    return _agents[key]
 
-        system_prompt = SYSTEM_PROMPTS.get(role, SYSTEM_PROMPTS["orchestrator"])
-        system_prompt += f"\n\n你的工作目录是: {workdir}\n所有文件操作请在此目录下进行。"
 
-        max_turns = _MAX_TURNS.get(role, _DEFAULT_MAX_TURNS)
-        allowed = ROLE_TOOLS.get(role, _ALL_TOOLS)
+def get_agent_text_only(role: str, task_id: str) -> "SandboxedAgentRunner":
+    """Return a text-only AgentRunner (no tools) for fallback when tool calling fails.
 
-        # Build base AgentRunner, then wrap as SandboxedAgentRunner
-        skill_dirs = _get_skill_dirs(role)
-        base = AgentRunner.create(
-            skill_dirs=skill_dirs,
-            system_prompt=system_prompt,
-            max_turns=max_turns,
-            enable_tools=True,
-            load_context_files=False,
-        )
-        runner = SandboxedAgentRunner(
-            engine=base.engine,
-            config=base.config,
-            default_cwd=str(workdir),
-            allowed_tools=allowed,
-        )
-        _agents[key] = runner
-        logger.info(
-            "Created SandboxedAgentRunner for role=%s task=%s tools=%s cwd=%s skills=%s",
-            role, task_id, sorted(allowed), workdir,
-            [d.name for d in skill_dirs],
-        )
+    Used when the LLM model (e.g. MiniMax) doesn't support reliable tool calling.
+    Creates a separate cached instance with a ':textonly' suffix.
+    """
+    key = f"{role}:{task_id}:textonly"
+    if key not in _agents:
+        _agents[key] = _create_runner(role, task_id, enable_tools=False)
     return _agents[key]
 
 
 def close_agents_for_task(task_id: str) -> None:
     """Discard all cached AgentRunner instances for a specific task."""
-    keys_to_remove = [k for k in _agents if k.endswith(f":{task_id}")]
+    keys_to_remove = [k for k in _agents if f":{task_id}" in k]
     for k in keys_to_remove:
         del _agents[k]
     if keys_to_remove:

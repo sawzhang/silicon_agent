@@ -15,7 +15,7 @@ from app.models.task import TaskModel, TaskStageModel
 from app.websocket.events import AGENT_STATUS_CHANGED, TASK_STAGE_UPDATE
 from app.websocket.manager import ws_manager
 from app.config import settings
-from app.worker.agents import get_agent
+from app.worker.agents import get_agent, get_agent_text_only
 from app.worker.prompts import StageContext, build_user_prompt
 
 logger = logging.getLogger(__name__)
@@ -89,8 +89,22 @@ async def execute_stage(
     runner = get_agent(stage.agent_role, str(task.id))
     runner.reset_usage()
 
+    # Tool-call error patterns (e.g. MiniMax model returns invalid tool JSON)
+    _TOOL_CALL_ERROR_PATTERNS = (
+        "invalid function arguments",
+        "invalid_request_error",
+        "tool_use_failed",
+        "function_call",
+    )
+
+    def _is_tool_call_error(err: Exception) -> bool:
+        """Check if the error is caused by the LLM generating invalid tool calls."""
+        msg = str(err).lower()
+        return any(p in msg for p in _TOOL_CALL_ERROR_PATTERNS)
+
     # Retry loop with exponential backoff + per-call timeout
     last_error: Optional[Exception] = None
+    used_text_only_fallback = False
     for attempt in range(settings.WORKER_STAGE_MAX_RETRIES + 1):
         try:
             response = await asyncio.wait_for(
@@ -113,6 +127,17 @@ async def execute_stage(
             await asyncio.sleep(delay)
         except Exception as e:
             last_error = e
+            # Detect tool-calling errors and fall back to text-only mode
+            if _is_tool_call_error(e) and not used_text_only_fallback:
+                logger.warning(
+                    "Stage %s tool-call error detected, falling back to text-only mode: %s",
+                    stage.stage_name, e,
+                )
+                runner = get_agent_text_only(stage.agent_role, str(task.id))
+                runner.reset_usage()
+                used_text_only_fallback = True
+                # Don't count this as a retry attempt — continue the loop
+                continue
             if attempt < settings.WORKER_STAGE_MAX_RETRIES:
                 delay = settings.WORKER_STAGE_RETRY_DELAY * (2 ** attempt)
                 logger.warning(
