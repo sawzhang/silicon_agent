@@ -26,7 +26,7 @@ const Dashboard: React.FC = () => {
         updateAgent(agent.role, {
           role: agent.role,
           status: agent.status as 'running' | 'idle' | 'waiting' | 'error' | 'stopped',
-          model: agent.model || 'claude-sonnet-4-20250514',
+          model: agent.model_name || 'claude-sonnet-4-20250514',
           current_task_id: agent.current_task_id || null,
         });
       }

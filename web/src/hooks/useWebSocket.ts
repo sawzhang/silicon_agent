@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { useAgentStore } from '@/stores/agentStore';
 import { useActivityStore } from '@/stores/activityStore';
 import { useNotificationStore } from '@/stores/notificationStore';
@@ -8,6 +9,7 @@ export function useWebSocket() {
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout>>();
   const heartbeatTimerRef = useRef<ReturnType<typeof setInterval>>();
+  const queryClient = useQueryClient();
 
   const updateAgent = useAgentStore((s) => s.updateAgent);
   const addActivity = useActivityStore((s) => s.addActivity);
@@ -63,6 +65,17 @@ export function useWebSocket() {
           });
           break;
         }
+        case 'task_update': {
+          const tp = msg.payload as { task_id?: string; status?: string };
+          if (tp.task_id) {
+            queryClient.invalidateQueries({ queryKey: ['task', tp.task_id] });
+          }
+          queryClient.invalidateQueries({ queryKey: ['tasks'] });
+          queryClient.invalidateQueries({ queryKey: ['cockpit'] });
+          queryClient.invalidateQueries({ queryKey: ['kpi-summary'] });
+          useNotificationStore.getState().bumpRefresh();
+          break;
+        }
         case 'activity': {
           const p = msg.payload as WSActivityPayload;
           addActivity(p);
@@ -109,5 +122,5 @@ export function useWebSocket() {
       if (heartbeatTimerRef.current) clearInterval(heartbeatTimerRef.current);
       wsRef.current?.close();
     };
-  }, [updateAgent, addActivity, addNotification]);
+  }, [updateAgent, addActivity, addNotification, queryClient]);
 }

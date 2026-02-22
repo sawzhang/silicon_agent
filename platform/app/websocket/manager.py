@@ -11,9 +11,9 @@ logger = logging.getLogger(__name__)
 _EVENT_TYPE_MAP = {
     "agent:status_changed": "agent_status",
     "agent:session_update": "agent_status",
-    "task:created": "activity",
-    "task:status_changed": "activity",
-    "task:stage_update": "activity",
+    "task:created": "task_update",
+    "task:status_changed": "task_update",
+    "task:stage_update": "task_update",
     "gate:created": "gate_created",
     "gate:approved": "gate_resolved",
     "gate:rejected": "gate_resolved",

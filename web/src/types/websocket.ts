@@ -1,6 +1,7 @@
 export type WSMessageType =
   | 'agent_status'
   | 'activity'
+  | 'task_update'
   | 'gate_created'
   | 'gate_resolved'
   | 'tool_executing'

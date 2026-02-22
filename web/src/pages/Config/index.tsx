@@ -13,10 +13,7 @@ const ConfigPage: React.FC = () => {
   const handleSave = async (role: string, values: Record<string, unknown>) => {
     try {
       await updateConfig(role, {
-        model: values.model as string,
-        temperature: values.temperature as number,
-        max_tokens: values.max_tokens as number,
-        enabled: values.enabled as boolean,
+        model_name: values.model as string,
       });
       message.success(`${ROLE_DISPLAY_NAMES[role]} config updated`);
     } catch {

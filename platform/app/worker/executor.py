@@ -133,6 +133,37 @@ async def execute_stage(
     output = response.text_content
     total_tokens = runner.cumulative_usage.total_tokens
 
+    # Detect truncated output from max turns limit and attempt continuation
+    _MAX_CONTINUATIONS = 3
+    _TRUNCATION_SENTINEL = "Max turns reached"
+    continuations = 0
+    while _TRUNCATION_SENTINEL in (output or "") and continuations < _MAX_CONTINUATIONS:
+        continuations += 1
+        logger.warning(
+            "Stage %s hit max turns (continuation %d/%d), sending continue prompt",
+            stage.stage_name, continuations, _MAX_CONTINUATIONS,
+        )
+        try:
+            cont_response = await asyncio.wait_for(
+                runner.chat("请继续完成上面的输出，从你停下的地方继续。", reset=False),
+                timeout=settings.WORKER_STAGE_TIMEOUT,
+            )
+            cont_text = cont_response.text_content or ""
+            # Replace the sentinel with continuation output
+            output = output.replace(f"[{_TRUNCATION_SENTINEL}. Please continue the conversation.]", "").strip()
+            output = f"{output}\n\n{cont_text}".strip()
+            total_tokens = runner.cumulative_usage.total_tokens
+        except Exception as e:
+            logger.warning("Continuation %d failed for stage %s: %s", continuations, stage.stage_name, e)
+            break
+
+    # If output still contains the sentinel after all continuations, log a warning
+    if _TRUNCATION_SENTINEL in (output or ""):
+        logger.warning(
+            "Stage %s output still truncated after %d continuations",
+            stage.stage_name, _MAX_CONTINUATIONS,
+        )
+
     # 5. Update stage as completed
     stage.status = "completed"
     stage.completed_at = datetime.now(timezone.utc)

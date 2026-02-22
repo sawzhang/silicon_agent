@@ -23,6 +23,8 @@ _agents: dict[str, AgentRunner] = {}
 _MAX_TURNS: dict[str, int] = {
     "spec": 20,
     "coding": 20,
+    "doc": 20,
+    "test": 20,
 }
 _DEFAULT_MAX_TURNS = 10
 
