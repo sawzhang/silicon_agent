@@ -89,12 +89,28 @@ async def execute_stage(
     runner = get_agent(stage.agent_role, str(task.id))
     runner.reset_usage()
 
-    # Retry loop with exponential backoff
+    # Retry loop with exponential backoff + per-call timeout
     last_error: Optional[Exception] = None
     for attempt in range(settings.WORKER_STAGE_MAX_RETRIES + 1):
         try:
-            response = await runner.chat(user_prompt, reset=True)
+            response = await asyncio.wait_for(
+                runner.chat(user_prompt, reset=True),
+                timeout=settings.WORKER_STAGE_TIMEOUT,
+            )
             break
+        except asyncio.TimeoutError:
+            last_error = asyncio.TimeoutError(
+                f"Stage {stage.stage_name} LLM call timed out after {settings.WORKER_STAGE_TIMEOUT}s"
+            )
+            logger.warning(
+                "Stage %s LLM call timed out (attempt %d/%d, timeout=%.0fs)",
+                stage.stage_name, attempt + 1, settings.WORKER_STAGE_MAX_RETRIES + 1,
+                settings.WORKER_STAGE_TIMEOUT,
+            )
+            if attempt >= settings.WORKER_STAGE_MAX_RETRIES:
+                raise last_error
+            delay = settings.WORKER_STAGE_RETRY_DELAY * (2 ** attempt)
+            await asyncio.sleep(delay)
         except Exception as e:
             last_error = e
             if attempt < settings.WORKER_STAGE_MAX_RETRIES:

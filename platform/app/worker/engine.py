@@ -96,7 +96,22 @@ async def _poll_loop() -> None:
                 task = await _pick_pending_task(session)
                 if task:
                     logger.info("Worker picked up task: %s (%s)", task.title, task.id)
-                    await _process_task(session, task)
+                    try:
+                        await asyncio.wait_for(
+                            _process_task(session, task),
+                            timeout=settings.WORKER_TASK_TIMEOUT,
+                        )
+                    except asyncio.TimeoutError:
+                        logger.error(
+                            "Task %s timed out after %.0fs",
+                            task.id, settings.WORKER_TASK_TIMEOUT,
+                        )
+                        await _fail_task(
+                            session, task,
+                            f"Task timed out after {settings.WORKER_TASK_TIMEOUT:.0f}s",
+                        )
+                        from app.worker.agents import close_agents_for_task
+                        close_agents_for_task(str(task.id))
         except asyncio.CancelledError:
             break
         except Exception:

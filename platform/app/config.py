@@ -22,6 +22,8 @@ class Settings(BaseSettings):
     WORKER_GATE_MAX_WAIT_SECONDS: int = 3600     # gate max wait 1h
     WORKER_STAGE_MAX_RETRIES: int = 2            # stage LLM failure retry count
     WORKER_STAGE_RETRY_DELAY: float = 5.0        # retry base delay (exponential backoff)
+    WORKER_STAGE_TIMEOUT: float = 300.0          # single LLM call timeout (seconds)
+    WORKER_TASK_TIMEOUT: float = 1800.0          # entire task timeout (seconds)
 
     # Database pool
     DB_POOL_SIZE: int = 5
