@@ -1,10 +1,10 @@
 import React, { useState } from 'react';
-import { Button, Tag, message, Popconfirm } from 'antd';
-import { PlusOutlined, DeleteOutlined } from '@ant-design/icons';
+import { Button, Tag, message, Popconfirm, Space, Tooltip } from 'antd';
+import { PlusOutlined, DeleteOutlined, SyncOutlined } from '@ant-design/icons';
 import { ProTable } from '@ant-design/pro-components';
 import type { ActionType, ProColumns } from '@ant-design/pro-components';
 import { ModalForm, ProFormText, ProFormTextArea } from '@ant-design/pro-components';
-import { listProjects } from '@/services/projectApi';
+import { listProjects, syncProject } from '@/services/projectApi';
 import { useCreateProject, useDeleteProject } from '@/hooks/useProjects';
 import { formatTimestamp } from '@/utils/formatters';
 import type { Project, ProjectCreateRequest } from '@/types/project';
@@ -14,11 +14,44 @@ const STATUS_COLOR: Record<string, string> = {
   archived: 'default',
 };
 
+const TECH_COLORS: Record<string, string> = {
+  'Python': 'blue',
+  'FastAPI': 'cyan',
+  'React': 'geekblue',
+  'TypeScript': 'purple',
+  'Node.js': 'green',
+  'Docker': 'volcano',
+  'Go': 'lime',
+  'Rust': 'orange',
+  'Java': 'red',
+  'Vue.js': 'green',
+  'Next.js': 'geekblue',
+  'SQLAlchemy': 'gold',
+};
+
 const ProjectList: React.FC = () => {
   const actionRef = React.useRef<ActionType>();
   const createProject = useCreateProject();
   const deleteProject = useDeleteProject();
   const [createOpen, setCreateOpen] = useState(false);
+  const [syncingIds, setSyncingIds] = useState<Set<string>>(new Set());
+
+  const handleSync = async (projectId: string) => {
+    setSyncingIds((prev) => new Set(prev).add(projectId));
+    try {
+      const result = await syncProject(projectId);
+      message.success(`Synced: ${result.tech_stack.join(', ') || 'no tech detected'}`);
+      actionRef.current?.reload();
+    } catch (err: any) {
+      message.error(err?.response?.data?.detail || 'Sync failed');
+    } finally {
+      setSyncingIds((prev) => {
+        const next = new Set(prev);
+        next.delete(projectId);
+        return next;
+      });
+    }
+  };
 
   const columns: ProColumns<Project>[] = [
     {
@@ -47,6 +80,24 @@ const ProjectList: React.FC = () => {
         ),
     },
     {
+      title: 'Tech Stack',
+      dataIndex: 'tech_stack',
+      width: 220,
+      search: false,
+      render: (_, record) =>
+        record.tech_stack && record.tech_stack.length > 0 ? (
+          <Space size={[0, 4]} wrap>
+            {record.tech_stack.map((tech) => (
+              <Tag key={tech} color={TECH_COLORS[tech] || 'default'}>
+                {tech}
+              </Tag>
+            ))}
+          </Space>
+        ) : (
+          '-'
+        ),
+    },
+    {
       title: 'Branch',
       dataIndex: 'branch',
       width: 100,
@@ -60,27 +111,38 @@ const ProjectList: React.FC = () => {
       render: (_, record) => <Tag color={STATUS_COLOR[record.status]}>{record.status}</Tag>,
     },
     {
-      title: 'Created',
-      dataIndex: 'created_at',
-      width: 180,
+      title: 'Last Synced',
+      dataIndex: 'last_synced_at',
+      width: 160,
       search: false,
-      render: (_, record) => formatTimestamp(record.created_at),
+      render: (_, record) => record.last_synced_at ? formatTimestamp(record.last_synced_at) : '-',
     },
     {
       title: 'Action',
-      width: 80,
+      width: 120,
       search: false,
       render: (_, record) => (
-        <Popconfirm
-          title="Delete this project?"
-          onConfirm={async () => {
-            await deleteProject.mutateAsync(record.id);
-            message.success('Project deleted');
-            actionRef.current?.reload();
-          }}
-        >
-          <Button type="link" danger icon={<DeleteOutlined />} size="small" />
-        </Popconfirm>
+        <Space size="small">
+          <Tooltip title={record.repo_url ? 'Sync repo info' : 'No repo URL configured'}>
+            <Button
+              type="link"
+              icon={<SyncOutlined spin={syncingIds.has(record.id)} />}
+              size="small"
+              disabled={!record.repo_url}
+              onClick={() => handleSync(record.id)}
+            />
+          </Tooltip>
+          <Popconfirm
+            title="Delete this project?"
+            onConfirm={async () => {
+              await deleteProject.mutateAsync(record.id);
+              message.success('Project deleted');
+              actionRef.current?.reload();
+            }}
+          >
+            <Button type="link" danger icon={<DeleteOutlined />} size="small" />
+          </Popconfirm>
+        </Space>
       ),
     },
   ];

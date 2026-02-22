@@ -16,8 +16,8 @@ const GatesPage: React.FC = () => {
     message.success('Gate approved');
   };
 
-  const handleReject = async (id: string, comment: string, reason: string) => {
-    await rejectGate.mutateAsync({ id, req: { comment, reason } });
+  const handleReject = async (id: string, comment: string) => {
+    await rejectGate.mutateAsync({ id, req: { comment } });
     message.success('Gate rejected');
   };
 

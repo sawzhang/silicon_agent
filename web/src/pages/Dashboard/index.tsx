@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { Row, Col, Card, Statistic, Typography, Badge } from 'antd';
 import { Link } from 'react-router-dom';
 import { useAgentStore } from '@/stores/agentStore';
@@ -6,13 +6,32 @@ import { AGENT_ROLES } from '@/utils/constants';
 import AgentCard from '@/components/AgentCard';
 import ActivityFeed from '@/components/ActivityFeed';
 import { useGateList } from '@/hooks/useGates';
+import { useKPISummary } from '@/hooks/useKPI';
+import { useAgentList } from '@/hooks/useAgents';
 
 const { Title } = Typography;
 
 const Dashboard: React.FC = () => {
   const agents = useAgentStore((s) => s.agents);
+  const updateAgent = useAgentStore((s) => s.updateAgent);
   const { data: pendingGates } = useGateList({ status: 'pending' });
+  const { data: kpiSummary } = useKPISummary();
+  const { data: agentListData } = useAgentList();
   const pendingCount = pendingGates?.length ?? 0;
+
+  // Sync REST agent data into Zustand store on load
+  useEffect(() => {
+    if (agentListData?.agents) {
+      for (const agent of agentListData.agents) {
+        updateAgent(agent.role, {
+          role: agent.role,
+          status: agent.status as 'running' | 'idle' | 'waiting' | 'error' | 'stopped',
+          model: agent.model || 'claude-sonnet-4-20250514',
+          current_task_id: agent.current_task_id || null,
+        });
+      }
+    }
+  }, [agentListData, updateAgent]);
 
   return (
     <div>
@@ -20,17 +39,30 @@ const Dashboard: React.FC = () => {
       <Row gutter={[16, 16]} style={{ marginBottom: 24 }}>
         <Col xs={12} sm={6}>
           <Card size="small">
-            <Statistic title="Tasks Completed" value={0} suffix="/ day" />
+            <Statistic
+              title="Tasks Total / Completed"
+              value={kpiSummary?.completed_tasks ?? 0}
+              suffix={`/ ${kpiSummary?.total_tasks ?? 0}`}
+            />
           </Card>
         </Col>
         <Col xs={12} sm={6}>
           <Card size="small">
-            <Statistic title="Tokens Used" value={0} suffix="K" />
+            <Statistic
+              title="Tokens Used"
+              value={kpiSummary?.total_tokens ?? 0}
+              suffix="tokens"
+            />
           </Card>
         </Col>
         <Col xs={12} sm={6}>
           <Card size="small">
-            <Statistic title="Cost" value={0} prefix="¥" precision={2} />
+            <Statistic
+              title="Cost"
+              value={kpiSummary?.total_cost_rmb ?? 0}
+              prefix="¥"
+              precision={2}
+            />
           </Card>
         </Col>
         <Col xs={12} sm={6}>
@@ -66,6 +98,14 @@ const Dashboard: React.FC = () => {
               value={Object.values(agents).filter((a) => a.status === 'running' || a.status === 'idle').length}
               suffix={`/ ${AGENT_ROLES.length}`}
             />
+            {kpiSummary && kpiSummary.success_rate > 0 && (
+              <Statistic
+                title="Success Rate"
+                value={kpiSummary.success_rate}
+                suffix="%"
+                style={{ marginTop: 16 }}
+              />
+            )}
           </Card>
         </Col>
       </Row>

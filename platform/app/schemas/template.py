@@ -23,6 +23,7 @@ class TemplateCreateRequest(BaseModel):
     description: Optional[str] = None
     stages: List[StageDefinition] = []
     gates: List[GateDefinition] = []
+    estimated_hours: Optional[float] = None
 
 
 class TemplateUpdateRequest(BaseModel):
@@ -30,6 +31,7 @@ class TemplateUpdateRequest(BaseModel):
     description: Optional[str] = None
     stages: Optional[List[StageDefinition]] = None
     gates: Optional[List[GateDefinition]] = None
+    estimated_hours: Optional[float] = None
 
 
 class TemplateResponse(BaseModel):
@@ -39,6 +41,7 @@ class TemplateResponse(BaseModel):
     description: Optional[str] = None
     stages: List[Any] = []
     gates: List[Any] = []
+    estimated_hours: Optional[float] = None
     is_builtin: bool = False
     created_at: datetime
     updated_at: datetime

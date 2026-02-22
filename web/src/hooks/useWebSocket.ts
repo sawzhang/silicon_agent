@@ -66,6 +66,7 @@ export function useWebSocket() {
         case 'activity': {
           const p = msg.payload as WSActivityPayload;
           addActivity(p);
+          useNotificationStore.getState().bumpRefresh();
           break;
         }
         case 'gate_created': {
@@ -78,6 +79,7 @@ export function useWebSocket() {
             timestamp: msg.timestamp,
             read: false,
           });
+          useNotificationStore.getState().bumpRefresh();
           break;
         }
         case 'gate_resolved': {
@@ -90,6 +92,7 @@ export function useWebSocket() {
             timestamp: msg.timestamp,
             read: false,
           });
+          useNotificationStore.getState().bumpRefresh();
           break;
         }
         case 'pong':

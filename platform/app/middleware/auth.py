@@ -10,7 +10,7 @@ from app.config import settings
 
 logger = logging.getLogger(__name__)
 
-EXEMPT_PATHS = {"/health", "/docs", "/redoc", "/openapi.json", "/ws"}
+EXEMPT_PATHS = {"/health", "/docs", "/redoc", "/openapi.json", "/ws", "/api/v1/auth/token"}
 
 
 class JWTAuthMiddleware(BaseHTTPMiddleware):

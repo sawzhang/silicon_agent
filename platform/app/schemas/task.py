@@ -56,3 +56,41 @@ class TaskListResponse(BaseModel):
     total: int
     page: int
     page_size: int
+
+
+# --- PRD Decompose ---
+
+class TaskDecomposeRequest(BaseModel):
+    prd_text: str
+    project_id: Optional[str] = None
+    template_id: Optional[str] = None
+
+
+class DecomposedTask(BaseModel):
+    title: str
+    description: str
+    priority: str = "medium"
+
+
+class TaskDecomposeResponse(BaseModel):
+    tasks: List[DecomposedTask]
+    summary: str
+    tokens_used: int = 0
+
+
+# --- Batch Create ---
+
+class BatchTaskItem(BaseModel):
+    title: str
+    description: Optional[str] = None
+    template_id: Optional[str] = None
+    project_id: Optional[str] = None
+
+
+class TaskBatchCreateRequest(BaseModel):
+    tasks: List[BatchTaskItem]
+
+
+class TaskBatchCreateResponse(BaseModel):
+    created: int
+    tasks: List[TaskDetailResponse]

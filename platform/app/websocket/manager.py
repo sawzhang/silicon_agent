@@ -1,10 +1,26 @@
 import json
 import logging
+from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import WebSocket
 
 logger = logging.getLogger(__name__)
+
+# Map backend event constants to frontend WSMessageType values
+_EVENT_TYPE_MAP = {
+    "agent:status_changed": "agent_status",
+    "agent:session_update": "agent_status",
+    "task:created": "activity",
+    "task:status_changed": "activity",
+    "task:stage_update": "activity",
+    "gate:created": "gate_created",
+    "gate:approved": "gate_resolved",
+    "gate:rejected": "gate_resolved",
+    "circuit_breaker:triggered": "activity",
+    "circuit_breaker:resolved": "activity",
+    "kpi:update": "activity",
+}
 
 
 class ConnectionManager:
@@ -39,7 +55,17 @@ class ConnectionManager:
         logger.info("WebSocket client disconnected (total: %d)", len(self._connections))
 
     async def broadcast(self, event: str, data: Any = None) -> None:
-        message = json.dumps({"event": event, "data": data})
+        """Broadcast a message to all connected clients.
+
+        Emits messages in the format expected by the frontend:
+        {"type": "<mapped_type>", "payload": <data>, "timestamp": "<iso>"}
+        """
+        msg_type = _EVENT_TYPE_MAP.get(event, "activity")
+        message = json.dumps({
+            "type": msg_type,
+            "payload": data,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        })
 
         if self._use_redis and self._redis:
             try:
@@ -61,7 +87,12 @@ class ConnectionManager:
             self.disconnect(ws)
 
     async def send_to(self, websocket: WebSocket, event: str, data: Any = None) -> None:
-        message = json.dumps({"event": event, "data": data})
+        msg_type = _EVENT_TYPE_MAP.get(event, event)
+        message = json.dumps({
+            "type": msg_type,
+            "payload": data,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        })
         try:
             await websocket.send_text(message)
         except Exception:

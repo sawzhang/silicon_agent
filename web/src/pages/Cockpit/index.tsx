@@ -1,8 +1,9 @@
 import React, { useState } from 'react';
-import { Row, Col, Typography, Spin, Card, Empty, Statistic, Table, Tag, Button, Space } from 'antd';
+import { Row, Col, Typography, Spin, Card, Empty, Statistic, Table, Tag, Button, Space, Popconfirm, message } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import { useNavigate } from 'react-router-dom';
 import { useCockpit } from '@/hooks/useKPI';
+import { useCancelTask, useRetryTask } from '@/hooks/useTasks';
 import { approveGate, rejectGate } from '@/services/gateApi';
 import { useQueryClient } from '@tanstack/react-query';
 import GateApprovalCard from '@/components/GateApprovalCard';
@@ -15,7 +16,11 @@ const CockpitPage: React.FC = () => {
   const { data, isLoading } = useCockpit();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const cancelTask = useCancelTask();
+  const retryTask = useRetryTask();
   const [gateLoading, setGateLoading] = useState<string | null>(null);
+  const [cancellingId, setCancellingId] = useState<string | null>(null);
+  const [retryingId, setRetryingId] = useState<string | null>(null);
 
   const handleApprove = async (id: string, comment?: string) => {
     setGateLoading(id);
@@ -34,6 +39,26 @@ const CockpitPage: React.FC = () => {
       queryClient.invalidateQueries({ queryKey: ['cockpit'] });
     } finally {
       setGateLoading(null);
+    }
+  };
+
+  const handleCancel = async (id: string) => {
+    setCancellingId(id);
+    try {
+      await cancelTask.mutateAsync(id);
+      message.success('Task cancelled');
+    } finally {
+      setCancellingId(null);
+    }
+  };
+
+  const handleRetry = async (id: string) => {
+    setRetryingId(id);
+    try {
+      await retryTask.mutateAsync(id);
+      message.success('Task resubmitted');
+    } finally {
+      setRetryingId(null);
     }
   };
 
@@ -61,6 +86,16 @@ const CockpitPage: React.FC = () => {
       key: 'total_tokens',
       width: 100,
       render: (v: number) => formatTokens(v),
+    },
+    {
+      title: '',
+      key: 'action',
+      width: 80,
+      render: (_: unknown, record) => (
+        <Popconfirm title="Cancel this task?" onConfirm={() => handleCancel(record.id)}>
+          <Button size="small" danger loading={cancellingId === record.id}>Cancel</Button>
+        </Popconfirm>
+      ),
     },
   ];
 
@@ -91,11 +126,14 @@ const CockpitPage: React.FC = () => {
     {
       title: '',
       key: 'action',
-      width: 70,
+      width: 140,
       render: (_: unknown, record) => (
-        <Button size="small" onClick={() => navigate(`/tasks/${record.id}`)}>
-          View
-        </Button>
+        <Space>
+          <Popconfirm title="Retry this task?" onConfirm={() => handleRetry(record.id)}>
+            <Button size="small" type="primary" loading={retryingId === record.id}>Retry</Button>
+          </Popconfirm>
+          <Button size="small" onClick={() => navigate(`/tasks/${record.id}`)}>View</Button>
+        </Space>
       ),
     },
   ];

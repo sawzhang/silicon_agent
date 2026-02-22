@@ -9,6 +9,7 @@ from app.schemas.project import (
     ProjectCreateRequest,
     ProjectListResponse,
     ProjectResponse,
+    ProjectSyncResponse,
     ProjectUpdateRequest,
 )
 from app.services.project_service import ProjectService
@@ -55,6 +56,20 @@ async def update_project(
     if project is None:
         raise HTTPException(status_code=404, detail="Project not found")
     return project
+
+
+@router.post("/{project_id}/sync", response_model=ProjectSyncResponse)
+async def sync_project(
+    project_id: str,
+    service: ProjectService = Depends(get_project_service),
+):
+    try:
+        result = await service.sync_repo(project_id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    if result is None:
+        raise HTTPException(status_code=404, detail="Project not found")
+    return result
 
 
 @router.delete("/{project_id}", status_code=204)

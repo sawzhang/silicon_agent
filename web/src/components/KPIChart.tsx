@@ -13,7 +13,7 @@ const KPIChart: React.FC<KPIChartProps> = ({ data, type = 'line', height = 300 }
     tooltip: { trigger: 'axis' as const },
     xAxis: {
       type: 'category' as const,
-      data: data.points.map((p) => p.timestamp),
+      data: data.data.map((p) => p.timestamp),
       axisLabel: {
         formatter: (val: string) => {
           const d = new Date(val);
@@ -27,9 +27,9 @@ const KPIChart: React.FC<KPIChartProps> = ({ data, type = 'line', height = 300 }
     },
     series: [
       {
-        name: data.display_name,
+        name: data.metric_name,
         type,
-        data: data.points.map((p) => p.value),
+        data: data.data.map((p) => p.value),
         smooth: type === 'line',
         areaStyle: type === 'line' ? { opacity: 0.1 } : undefined,
       },

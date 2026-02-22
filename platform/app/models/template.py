@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import Boolean, DateTime, String, Text, func
+from sqlalchemy import Boolean, DateTime, Float, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
@@ -21,6 +21,7 @@ class TaskTemplateModel(Base):
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     stages: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
     gates: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
+    estimated_hours: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     is_builtin: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime, nullable=False, server_default=func.now()

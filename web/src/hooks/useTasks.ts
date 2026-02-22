@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { listTasks, createTask, cancelTask, getTask } from '@/services/taskApi';
+import { listTasks, createTask, cancelTask, retryTask, getTask } from '@/services/taskApi';
 import type { TaskCreateRequest } from '@/types/task';
 
 export function useTaskList(params?: {
@@ -20,6 +20,10 @@ export function useTask(id: string) {
     queryKey: ['task', id],
     queryFn: () => getTask(id),
     enabled: !!id,
+    refetchInterval: (query) => {
+      const task = query.state.data;
+      return task?.status === 'running' ? 3000 : false;
+    },
   });
 }
 
@@ -39,6 +43,18 @@ export function useCancelTask() {
     mutationFn: (id: string) => cancelTask(id),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['tasks'] });
+      qc.invalidateQueries({ queryKey: ['cockpit'] });
+    },
+  });
+}
+
+export function useRetryTask() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => retryTask(id),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['tasks'] });
+      qc.invalidateQueries({ queryKey: ['cockpit'] });
     },
   });
 }

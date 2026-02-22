@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import logging
+from datetime import datetime, timezone
 from typing import List, Optional
 
 from sqlalchemy import func, select
@@ -10,8 +12,11 @@ from app.schemas.project import (
     ProjectCreateRequest,
     ProjectListResponse,
     ProjectResponse,
+    ProjectSyncResponse,
     ProjectUpdateRequest,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class ProjectService:
@@ -88,3 +93,30 @@ class ProjectService:
         await self.session.delete(project)
         await self.session.commit()
         return True
+
+    async def sync_repo(self, project_id: str) -> Optional[ProjectSyncResponse]:
+        """Analyze the project's GitHub repo and store tech_stack, tree, etc."""
+        project = await self.session.get(ProjectModel, project_id)
+        if project is None:
+            return None
+        if not project.repo_url:
+            raise ValueError("Project has no repo_url configured")
+
+        from app.services.repo_analyzer import analyze_repo
+
+        ctx = await analyze_repo(project.repo_url, branch=project.branch)
+
+        now = datetime.now(timezone.utc)
+        project.tech_stack = ctx.tech_stack
+        project.repo_tree = ctx.tree
+        project.last_synced_at = now
+        await self.session.commit()
+
+        logger.info("Synced repo for project %s: tech=%s", project_id, ctx.tech_stack)
+
+        return ProjectSyncResponse(
+            tech_stack=ctx.tech_stack,
+            tree_depth=2,
+            readme_length=len(ctx.readme_summary),
+            synced_at=now,
+        )

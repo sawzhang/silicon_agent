@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.session import async_session_factory
 from app.models.task import TaskModel, TaskStageModel
 from app.models.gate import HumanGateModel
+from app.models.template import TaskTemplateModel
 
 
 @pytest_asyncio.fixture
@@ -114,10 +115,10 @@ async def seed_tasks():
 
     # Cleanup
     async with async_session_factory() as session:
-        for model_cls in [TaskStageModel, HumanGateModel, TaskModel]:
+        for model_cls in [TaskStageModel, HumanGateModel, TaskModel, TaskTemplateModel]:
             result = await session.execute(select(model_cls))
             for obj in result.scalars().all():
-                if obj.id.startswith(("roi-", "cockpit-", "stage-roi-", "stage-cockpit-", "gate-cockpit-")):
+                if obj.id.startswith(("roi-", "cockpit-", "stage-roi-", "stage-cockpit-", "gate-cockpit-", "tmpl-")):
                     await session.delete(obj)
         await session.commit()
 
@@ -264,3 +265,130 @@ async def test_cockpit_task_item_structure(client, seed_tasks):
                           "current_stage", "total_tokens", "total_cost_rmb"]
         for field in expected_fields:
             assert field in task, f"Missing field: {field}"
+
+
+# ── Retry Endpoint Tests ──────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_retry_failed_task(client, seed_tasks):
+    """Retrying a failed task resets it to pending."""
+    resp = await client.post("/api/v1/tasks/cockpit-task-failed/retry")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["status"] == "pending"
+    assert data["completed_at"] is None
+    assert data["total_tokens"] == 0
+    assert data["total_cost_rmb"] == 0.0
+    assert len(data["stages"]) == 0
+
+
+@pytest.mark.asyncio
+async def test_retry_non_failed_task(client, seed_tasks):
+    """Retrying a non-failed task returns the task unchanged."""
+    resp = await client.post("/api/v1/tasks/cockpit-task-running/retry")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["status"] == "running"  # unchanged
+
+
+@pytest.mark.asyncio
+async def test_retry_not_found(client):
+    """Retrying a non-existent task returns 404."""
+    resp = await client.post("/api/v1/tasks/nonexistent-id/retry")
+    assert resp.status_code == 404
+
+
+# ── Template estimated_hours Tests ────────────────────
+
+
+@pytest_asyncio.fixture
+async def seed_template_with_hours():
+    """Seed a template with custom estimated_hours and a completed task using it."""
+    now = datetime.now(timezone.utc)
+    async with async_session_factory() as session:
+        tmpl = TaskTemplateModel(
+            id="tmpl-custom-hours",
+            name="custom_hours_template",
+            display_name="Custom Hours Template",
+            description="Template with custom estimated_hours",
+            stages="[]",
+            gates="[]",
+            estimated_hours=2.0,
+        )
+        session.add(tmpl)
+
+        t = TaskModel(
+            id="roi-task-tmpl",
+            title="Task with Template Hours",
+            status="completed",
+            total_tokens=10000,
+            total_cost_rmb=0.1,
+            template_id="tmpl-custom-hours",
+            created_at=now - timedelta(hours=1),
+            completed_at=now - timedelta(minutes=30),
+        )
+        session.add(t)
+        await session.commit()
+
+    yield
+
+    # Cleanup
+    async with async_session_factory() as session:
+        for model_cls in [TaskModel, TaskTemplateModel]:
+            result = await session.execute(select(model_cls))
+            for obj in result.scalars().all():
+                if obj.id.startswith(("roi-task-tmpl", "tmpl-")):
+                    await session.delete(obj)
+        await session.commit()
+
+
+@pytest.mark.asyncio
+async def test_roi_uses_template_estimated_hours(client, seed_template_with_hours):
+    """ROI uses template estimated_hours when available."""
+    resp = await client.get("/api/v1/kpi/roi", params={"days": 30})
+    assert resp.status_code == 200
+    data = resp.json()
+
+    # Find the task with template
+    task = next(
+        (t for t in data["recent_tasks"] if t["task_id"] == "roi-task-tmpl"),
+        None,
+    )
+    assert task is not None
+    # Should use 2.0h from template, not 8.0h global default
+    assert task["estimated_manual_hours"] == 2.0
+    # estimated_manual_rmb = 2.0 * 150.0 = 300.0
+    assert task["estimated_manual_rmb"] == 300.0
+
+
+@pytest.mark.asyncio
+async def test_template_estimated_hours_in_schema(client):
+    """Template CRUD includes estimated_hours field."""
+    # Create template with estimated_hours
+    resp = await client.post("/api/v1/templates", json={
+        "name": "tmpl-test-hours",
+        "display_name": "Test Hours Template",
+        "stages": [],
+        "gates": [],
+        "estimated_hours": 4.5,
+    })
+    assert resp.status_code == 201
+    data = resp.json()
+    assert data["estimated_hours"] == 4.5
+
+    # Verify via GET
+    tmpl_id = data["id"]
+    resp = await client.get(f"/api/v1/templates/{tmpl_id}")
+    assert resp.status_code == 200
+    assert resp.json()["estimated_hours"] == 4.5
+
+    # Cleanup
+    async with async_session_factory() as session:
+        result = await session.execute(
+            select(TaskTemplateModel).where(TaskTemplateModel.id == tmpl_id)
+        )
+        tmpl = result.scalar_one_or_none()
+        if tmpl:
+            await session.delete(tmpl)
+            await session.commit()

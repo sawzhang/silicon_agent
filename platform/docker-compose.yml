@@ -13,9 +13,13 @@ services:
       - SKILLKIT_ENABLED=false
       - DEBUG=true
     depends_on:
-      - postgres
-      - redis
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000
+    volumes:
+      - memory_data:/app/memory
 
   postgres:
     image: postgres:16-alpine
@@ -27,6 +31,11 @@ services:
       POSTGRES_DB: agent_platform
     volumes:
       - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
 
   redis:
     image: redis:7-alpine
@@ -34,7 +43,13 @@ services:
       - "6379:6379"
     volumes:
       - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
 
 volumes:
   pgdata:
   redisdata:
+  memory_data:

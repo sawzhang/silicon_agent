@@ -11,13 +11,16 @@ export interface Notification {
 
 interface NotificationStore {
   notifications: Notification[];
+  refreshVersion: number;
   addNotification: (notification: Notification) => void;
   markRead: (id: string) => void;
   unreadCount: () => number;
+  bumpRefresh: () => void;
 }
 
 export const useNotificationStore = create<NotificationStore>((set, get) => ({
   notifications: [],
+  refreshVersion: 0,
   addNotification: (notification) =>
     set((state) => ({
       notifications: [notification, ...state.notifications].slice(0, 50),
@@ -29,4 +32,5 @@ export const useNotificationStore = create<NotificationStore>((set, get) => ({
       ),
     })),
   unreadCount: () => get().notifications.filter((n) => !n.read).length,
+  bumpRefresh: () => set((state) => ({ refreshVersion: state.refreshVersion + 1 })),
 }));

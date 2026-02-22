@@ -21,10 +21,11 @@ class ErrorHandlerMiddleware(BaseHTTPMiddleware):
                 exc,
             )
             logger.debug(traceback.format_exc())
+            from app.config import settings
             return JSONResponse(
                 status_code=500,
                 content={
                     "detail": "Internal server error",
-                    "error": str(exc) if True else "Internal server error",
+                    "error": str(exc) if settings.DEBUG else "Internal server error",
                 },
             )

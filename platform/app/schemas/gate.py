@@ -29,10 +29,10 @@ class GateListResponse(BaseModel):
 
 
 class GateApproveRequest(BaseModel):
-    reviewer: str
+    reviewer: str = "system"
     comment: Optional[str] = None
 
 
 class GateRejectRequest(BaseModel):
-    reviewer: str
+    reviewer: str = "system"
     comment: str

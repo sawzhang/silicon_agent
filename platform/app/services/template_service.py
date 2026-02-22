@@ -112,6 +112,7 @@ class TemplateService:
             description=request.description,
             stages=json.dumps([s.model_dump() for s in request.stages], ensure_ascii=False),
             gates=json.dumps([g.model_dump() for g in request.gates], ensure_ascii=False),
+            estimated_hours=request.estimated_hours,
         )
         self.session.add(template)
         await self.session.commit()
@@ -138,6 +139,8 @@ class TemplateService:
             template.gates = json.dumps(
                 [g.model_dump() for g in request.gates], ensure_ascii=False
             )
+        if request.estimated_hours is not None:
+            template.estimated_hours = request.estimated_hours
         await self.session.commit()
         await self.session.refresh(template)
         return self._to_response(template)
@@ -180,6 +183,7 @@ class TemplateService:
             description=template.description,
             stages=json.loads(template.stages) if template.stages else [],
             gates=json.loads(template.gates) if template.gates else [],
+            estimated_hours=template.estimated_hours,
             is_builtin=template.is_builtin,
             created_at=template.created_at,
             updated_at=template.updated_at,

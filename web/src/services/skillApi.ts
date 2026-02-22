@@ -6,8 +6,8 @@ export async function listSkills(params?: {
   tag?: string;
   role?: string;
 }): Promise<Skill[]> {
-  const { data } = await api.get<Skill[]>('/skills', { params });
-  return data;
+  const { data } = await api.get<{ items: Skill[]; total: number }>('/skills', { params });
+  return data.items;
 }
 
 export async function createSkill(req: SkillCreateRequest): Promise<Skill> {
@@ -21,7 +21,7 @@ export async function getSkill(name: string): Promise<Skill> {
 }
 
 export async function updateSkill(name: string, req: SkillUpdateRequest): Promise<Skill> {
-  const { data } = await api.patch<Skill>(`/skills/${name}`, req);
+  const { data } = await api.put<Skill>(`/skills/${name}`, req);
   return data;
 }
 

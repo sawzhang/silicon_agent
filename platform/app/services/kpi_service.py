@@ -11,6 +11,7 @@ from app.config import settings
 from app.models.gate import HumanGateModel
 from app.models.kpi import KPIMetricModel
 from app.models.task import TaskModel, TaskStageModel
+from app.models.template import TaskTemplateModel
 from app.schemas.gate import GateDetailResponse
 from app.schemas.kpi import (
     AgentRoleEfficiency,
@@ -203,6 +204,7 @@ class KPIService:
         cutoff = datetime.now(timezone.utc) - timedelta(days=days)
         result = await self.session.execute(
             select(TaskModel)
+            .options(selectinload(TaskModel.template))
             .where(
                 TaskModel.status == "completed",
                 TaskModel.completed_at >= cutoff,
@@ -213,13 +215,22 @@ class KPIService:
 
         hours_per_task = settings.ESTIMATED_HOURS_PER_TASK
         hourly_rate = settings.HOURLY_RATE_RMB
-        estimated_manual_per_task = hours_per_task * hourly_rate
 
         recent_tasks: list[ROITaskBreakdown] = []
         total_agent_cost = 0.0
         total_agent_minutes = 0.0
+        total_estimated_manual = 0.0
+        total_estimated_manual_hours = 0.0
 
         for t in tasks:
+            # Use template-specific estimated_hours if available, else global default
+            task_hours = (
+                t.template.estimated_hours
+                if t.template and t.template.estimated_hours
+                else hours_per_task
+            )
+            estimated_manual_per_task = task_hours * hourly_rate
+
             agent_cost = t.total_cost_rmb or 0.0
             if t.completed_at and t.created_at:
                 duration_min = (t.completed_at - t.created_at).total_seconds() / 60
@@ -228,6 +239,8 @@ class KPIService:
             savings = estimated_manual_per_task - agent_cost
             total_agent_cost += agent_cost
             total_agent_minutes += duration_min
+            total_estimated_manual += estimated_manual_per_task
+            total_estimated_manual_hours += task_hours
 
             if len(recent_tasks) < 20:
                 recent_tasks.append(
@@ -238,16 +251,14 @@ class KPIService:
                         estimated_manual_rmb=round(estimated_manual_per_task, 2),
                         savings_rmb=round(savings, 2),
                         agent_duration_minutes=round(duration_min, 2),
-                        estimated_manual_hours=hours_per_task,
+                        estimated_manual_hours=task_hours,
                     )
                 )
 
         total_completed = len(tasks)
-        total_estimated_manual = estimated_manual_per_task * total_completed
         total_savings = total_estimated_manual - total_agent_cost
         roi_ratio = (total_savings / total_agent_cost) if total_agent_cost > 0 else 0.0
         total_agent_hours = total_agent_minutes / 60
-        total_estimated_manual_hours = hours_per_task * total_completed
         time_saved = total_estimated_manual_hours - total_agent_hours
 
         # Per-role efficiency

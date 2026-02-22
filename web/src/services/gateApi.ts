@@ -5,8 +5,8 @@ export async function listGates(params?: {
   status?: string;
   task_id?: string;
 }): Promise<Gate[]> {
-  const { data } = await api.get<Gate[]>('/gates', { params });
-  return data;
+  const { data } = await api.get<{ items: Gate[]; total: number }>('/gates', { params });
+  return data.items;
 }
 
 export async function getGate(id: string): Promise<Gate> {
@@ -28,6 +28,6 @@ export async function getGateHistory(params?: {
   page?: number;
   page_size?: number;
 }): Promise<Gate[]> {
-  const { data } = await api.get<Gate[]>('/gates/history', { params });
-  return data;
+  const { data } = await api.get<{ items: Gate[]; total: number }>('/gates/history', { params });
+  return data.items;
 }

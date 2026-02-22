@@ -1,5 +1,5 @@
 import api from './api';
-import type { Project, ProjectListResponse, ProjectCreateRequest, ProjectUpdateRequest } from '@/types/project';
+import type { Project, ProjectListResponse, ProjectCreateRequest, ProjectUpdateRequest, ProjectSyncResponse } from '@/types/project';
 
 export async function listProjects(params?: {
   page?: number;
@@ -27,4 +27,9 @@ export async function updateProject(id: string, req: ProjectUpdateRequest): Prom
 
 export async function deleteProject(id: string): Promise<void> {
   await api.delete(`/projects/${id}`);
+}
+
+export async function syncProject(id: string): Promise<ProjectSyncResponse> {
+  const { data } = await api.post<ProjectSyncResponse>(`/projects/${id}/sync`);
+  return data;
 }

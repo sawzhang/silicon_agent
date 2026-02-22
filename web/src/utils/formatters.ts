@@ -11,9 +11,9 @@ export function formatTokens(tokens: number): string {
   return String(tokens);
 }
 
-export function formatCost(costUsd: number): string {
-  const cny = costUsd * 7.2;
-  return `¥${cny.toFixed(2)}`;
+export function formatCost(costRmb: number): string {
+  if (costRmb == null || isNaN(costRmb)) return '¥0.00';
+  return `¥${costRmb.toFixed(2)}`;
 }
 
 export function formatDuration(seconds: number): string {

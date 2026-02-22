@@ -1,23 +1,22 @@
 export interface Gate {
   id: string;
+  gate_type: string;
   task_id: string;
-  stage: string;
-  gate_type: 'human_approval' | 'auto_check' | 'quality_gate';
-  status: 'pending' | 'approved' | 'rejected' | 'timeout';
-  content: string;
-  summary: string;
-  requested_at: string;
-  resolved_at: string | null;
-  resolved_by: string | null;
-  comment: string | null;
-  timeout_seconds: number;
+  agent_role: string;
+  content: Record<string, string> | null;
+  status: 'pending' | 'approved' | 'rejected';
+  reviewer: string | null;
+  review_comment: string | null;
+  created_at: string;
+  reviewed_at: string | null;
 }
 
 export interface GateApproveRequest {
+  reviewer?: string;
   comment?: string;
 }
 
 export interface GateRejectRequest {
+  reviewer?: string;
   comment: string;
-  reason: string;
 }

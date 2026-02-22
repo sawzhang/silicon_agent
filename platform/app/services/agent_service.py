@@ -57,10 +57,21 @@ class AgentService:
         agent = result.scalar_one_or_none()
         if agent is None:
             return None
-        if update.model_name is not None:
-            agent.model_name = update.model_name
+        resolved_model = update.get_model_name()
+        if resolved_model is not None:
+            agent.model_name = resolved_model
         if update.config is not None:
             agent.config = update.config
+        # Merge temperature/max_tokens into config JSON
+        extra = {}
+        if update.temperature is not None:
+            extra["temperature"] = update.temperature
+        if update.max_tokens is not None:
+            extra["max_tokens"] = update.max_tokens
+        if extra:
+            current = agent.config or {}
+            current.update(extra)
+            agent.config = current
         await self.session.commit()
         await self.session.refresh(agent)
         return AgentStatusResponse.model_validate(agent)

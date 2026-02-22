@@ -4,9 +4,11 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 
+from app.db.session import get_db
 from app.dependencies import get_skill_service
 from app.schemas.skill import SkillCreateRequest, SkillDetailResponse, SkillListResponse, SkillStatsResponse, SkillUpdateRequest
 from app.services.skill_service import SkillService
+from app.services.skill_sync_service import sync_skills_from_filesystem
 
 router = APIRouter(prefix="/skills", tags=["skills"])
 
@@ -77,5 +79,14 @@ async def rollback_skill(
 ):
     skill = await service.rollback(name, version)
     if skill is None:
-        raise HTTPException(status_code=404, detail=f"Skill '{name}' not found")
+        raise HTTPException(status_code=404, detail=f"Skill '{name}' or version '{version}' not found")
     return skill
+
+
+@router.post("/sync")
+async def sync_skills(session=Depends(get_db)):
+    """Sync skill definitions from filesystem into database."""
+    results = await sync_skills_from_filesystem(session)
+    created = sum(1 for v in results.values() if v == "created")
+    updated = sum(1 for v in results.values() if v == "updated")
+    return {"synced": len(results), "created": created, "updated": updated, "details": results}

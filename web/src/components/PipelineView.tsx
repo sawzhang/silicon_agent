@@ -24,7 +24,7 @@ const PipelineView: React.FC<PipelineViewProps> = ({ stages }) => {
 
   if (stages.length > 0) {
     const items = stages.map((stage) => ({
-      title: STAGE_DISPLAY[stage.name] || stage.name,
+      title: STAGE_DISPLAY[stage.stage_name] || stage.stage_name,
       status: STATUS_MAP[stage.status] || ('wait' as const),
       description: stage.agent_role || undefined,
     }));

@@ -1,20 +1,26 @@
 import React from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { Card, Descriptions, Tag, Button, Spin, Typography, Space, message } from 'antd';
+import { Card, Collapse, Descriptions, Empty, Tag, Button, Spin, Typography, Space, message } from 'antd';
 import { ArrowLeftOutlined, StopOutlined } from '@ant-design/icons';
 import { useTask, useCancelTask } from '@/hooks/useTasks';
 import PipelineView from '@/components/PipelineView';
+import { STAGE_NAMES } from '@/utils/constants';
 import { formatTimestamp, formatTokens, formatCost, formatDuration } from '@/utils/formatters';
 
 const { Title } = Typography;
 
 const STATUS_COLOR: Record<string, string> = {
-  queued: 'default',
+  pending: 'default',
   running: 'processing',
   completed: 'success',
   failed: 'error',
   cancelled: 'warning',
+  skipped: 'default',
 };
+
+const STAGE_DISPLAY: Record<string, string> = Object.fromEntries(
+  STAGE_NAMES.map((sn) => [sn.key, sn.name])
+);
 
 const TaskDetail: React.FC = () => {
   const { id } = useParams<{ id: string }>();
@@ -26,8 +32,8 @@ const TaskDetail: React.FC = () => {
     return <Spin size="large" style={{ display: 'block', margin: '100px auto' }} />;
   }
 
-  const duration = task.started_at && task.completed_at
-    ? (new Date(task.completed_at).getTime() - new Date(task.started_at).getTime()) / 1000
+  const duration = task.created_at && task.completed_at
+    ? (new Date(task.completed_at).getTime() - new Date(task.created_at).getTime()) / 1000
     : null;
 
   return (
@@ -36,7 +42,7 @@ const TaskDetail: React.FC = () => {
         <Button icon={<ArrowLeftOutlined />} onClick={() => navigate('/tasks')}>
           Back
         </Button>
-        {task.status === 'running' && (
+        {(task.status === 'running' || task.status === 'pending') && (
           <Button
             danger
             icon={<StopOutlined />}
@@ -57,20 +63,51 @@ const TaskDetail: React.FC = () => {
         <PipelineView stages={task.stages} />
       </Card>
 
+      {task.stages.length > 0 && (
+        <Card title="阶段产出" style={{ marginBottom: 16 }}>
+          <Collapse accordion>
+            {task.stages.map((stage) => (
+              <Collapse.Panel
+                key={stage.id}
+                header={
+                  <Space>
+                    <Tag color={STATUS_COLOR[stage.status]}>{stage.status}</Tag>
+                    <span>{STAGE_DISPLAY[stage.stage_name] || stage.stage_name}</span>
+                    <span style={{ color: '#999' }}>
+                      {stage.tokens_used > 0 && `${stage.tokens_used.toLocaleString()} tokens`}
+                      {stage.duration_seconds != null && ` · ${stage.duration_seconds.toFixed(1)}s`}
+                    </span>
+                  </Space>
+                }
+              >
+                {stage.output_summary ? (
+                  <Typography.Paragraph style={{ whiteSpace: 'pre-wrap' }}>
+                    {stage.output_summary}
+                  </Typography.Paragraph>
+                ) : stage.error_message ? (
+                  <Typography.Text type="danger">{stage.error_message}</Typography.Text>
+                ) : (
+                  <Empty description="暂无产出" />
+                )}
+              </Collapse.Panel>
+            ))}
+          </Collapse>
+        </Card>
+      )}
+
       <Card title="Task Details" style={{ marginBottom: 16 }}>
         <Descriptions column={2}>
           <Descriptions.Item label="ID">{task.id}</Descriptions.Item>
           <Descriptions.Item label="Status">
             <Tag color={STATUS_COLOR[task.status]}>{task.status}</Tag>
           </Descriptions.Item>
-          <Descriptions.Item label="Priority">{task.priority}</Descriptions.Item>
-          <Descriptions.Item label="Created By">{task.created_by}</Descriptions.Item>
+          <Descriptions.Item label="Template">{task.template_name || '-'}</Descriptions.Item>
+          <Descriptions.Item label="Project">{task.project_name || '-'}</Descriptions.Item>
           <Descriptions.Item label="Created At">{formatTimestamp(task.created_at)}</Descriptions.Item>
-          <Descriptions.Item label="Started At">{task.started_at ? formatTimestamp(task.started_at) : '-'}</Descriptions.Item>
           <Descriptions.Item label="Completed At">{task.completed_at ? formatTimestamp(task.completed_at) : '-'}</Descriptions.Item>
           <Descriptions.Item label="Duration">{duration != null ? formatDuration(duration) : '-'}</Descriptions.Item>
           <Descriptions.Item label="Total Tokens">{formatTokens(task.total_tokens)}</Descriptions.Item>
-          <Descriptions.Item label="Total Cost">{formatCost(task.total_cost_usd)}</Descriptions.Item>
+          <Descriptions.Item label="Total Cost">{formatCost(task.total_cost_rmb)}</Descriptions.Item>
         </Descriptions>
       </Card>
 

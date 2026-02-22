@@ -5,7 +5,7 @@ from typing import Dict, List, Optional
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.skill import SkillModel
+from app.models.skill import SkillModel, SkillVersionModel
 from app.schemas.skill import (
     SkillCreateRequest,
     SkillDetailResponse,
@@ -82,9 +82,18 @@ class SkillService:
         if skill is None:
             return None
 
+        # Snapshot current version before overwriting
+        snapshot = SkillVersionModel(
+            skill_id=skill.id,
+            version=skill.version,
+            content=skill.content,
+            change_summary=f"Snapshot before update to {request.version or skill.version}",
+        )
+        self.session.add(snapshot)
+
         update_data = request.model_dump(exclude_unset=True)
-        for field, value in update_data.items():
-            setattr(skill, field, value)
+        for fld, value in update_data.items():
+            setattr(skill, fld, value)
 
         await self.session.commit()
         await self.session.refresh(skill)
@@ -103,13 +112,64 @@ class SkillService:
         return SkillDetailResponse.model_validate(skill)
 
     async def get_versions(self, name: str) -> List[dict]:
-        skill = await self.get_skill(name)
+        result = await self.session.execute(
+            select(SkillModel).where(SkillModel.name == name)
+        )
+        skill = result.scalar_one_or_none()
         if skill is None:
             return []
-        return [{"version": skill.version, "created_at": skill.created_at.isoformat()}]
+
+        # Current version + historical snapshots
+        versions = [{"version": skill.version, "created_at": skill.updated_at.isoformat(), "current": True}]
+        ver_result = await self.session.execute(
+            select(SkillVersionModel)
+            .where(SkillVersionModel.skill_id == skill.id)
+            .order_by(SkillVersionModel.created_at.desc())
+        )
+        for v in ver_result.scalars().all():
+            versions.append({
+                "version": v.version,
+                "created_at": v.created_at.isoformat(),
+                "current": False,
+                "change_summary": v.change_summary,
+            })
+        return versions
 
     async def rollback(self, name: str, version: str) -> Optional[SkillDetailResponse]:
-        return await self.get_skill(name)
+        result = await self.session.execute(
+            select(SkillModel).where(SkillModel.name == name)
+        )
+        skill = result.scalar_one_or_none()
+        if skill is None:
+            return None
+
+        # Find the requested version snapshot
+        ver_result = await self.session.execute(
+            select(SkillVersionModel).where(
+                SkillVersionModel.skill_id == skill.id,
+                SkillVersionModel.version == version,
+            ).order_by(SkillVersionModel.created_at.desc()).limit(1)
+        )
+        target = ver_result.scalar_one_or_none()
+        if target is None:
+            return None
+
+        # Snapshot current state before rollback
+        snapshot = SkillVersionModel(
+            skill_id=skill.id,
+            version=skill.version,
+            content=skill.content,
+            change_summary=f"Snapshot before rollback to {version}",
+        )
+        self.session.add(snapshot)
+
+        # Restore
+        skill.version = target.version
+        skill.content = target.content
+
+        await self.session.commit()
+        await self.session.refresh(skill)
+        return SkillDetailResponse.model_validate(skill)
 
     async def get_stats(self) -> SkillStatsResponse:
         total_result = await self.session.execute(

@@ -30,6 +30,9 @@ class ProjectResponse(BaseModel):
     branch: str = "main"
     description: Optional[str] = None
     status: str = "active"
+    tech_stack: Optional[List[str]] = None
+    repo_tree: Optional[str] = None
+    last_synced_at: Optional[datetime] = None
     created_at: datetime
     updated_at: datetime
 
@@ -39,3 +42,10 @@ class ProjectResponse(BaseModel):
 class ProjectListResponse(BaseModel):
     items: List[ProjectResponse]
     total: int
+
+
+class ProjectSyncResponse(BaseModel):
+    tech_stack: List[str]
+    tree_depth: int
+    readme_length: int
+    synced_at: datetime

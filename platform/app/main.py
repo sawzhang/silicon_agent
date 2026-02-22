@@ -1,3 +1,4 @@
+import json
 import logging
 from contextlib import asynccontextmanager
 
@@ -9,20 +10,19 @@ from app.api.webhooks import jira, gitlab
 from app.config import settings
 from app.db.init_db import init_db
 from app.db.session import async_session_factory, engine
-from app.integration.llm_client import close_llm_client
 from app.integration.skillkit_bridge import init_bridge
+from app.logging_config import setup_logging
 from app.middleware.auth import JWTAuthMiddleware
 from app.middleware.error_handler import ErrorHandlerMiddleware
+from app.middleware.request_logging import RequestLoggingMiddleware
 from app.services.agent_service import AgentService
 from app.services.seed_service import seed_demo_data
+from app.services.skill_sync_service import sync_skills_from_filesystem
 from app.services.template_service import TemplateService
 from app.websocket.manager import ws_manager
 from app.worker import start_worker, stop_worker
 
-logging.basicConfig(
-    level=logging.DEBUG if settings.DEBUG else logging.INFO,
-    format="%(asctime)s %(levelname)s %(name)s: %(message)s",
-)
+setup_logging(debug=settings.DEBUG)
 logger = logging.getLogger(__name__)
 
 
@@ -46,6 +46,10 @@ async def lifespan(app: FastAPI):
     async with async_session_factory() as session:
         await seed_demo_data(session)
 
+    # Sync filesystem skill definitions → DB
+    async with async_session_factory() as session:
+        await sync_skills_from_filesystem(session)
+
     logger.info("Initializing SkillKit bridge...")
     await init_bridge(use_skillkit=settings.SKILLKIT_ENABLED)
 
@@ -53,6 +57,11 @@ async def lifespan(app: FastAPI):
     await ws_manager.init_redis(settings.REDIS_URL)
 
     if settings.WORKER_ENABLED:
+        if not settings.LLM_API_KEY:
+            logger.warning(
+                "WORKER_ENABLED=true but LLM_API_KEY is empty. "
+                "Agent tasks will fail when calling LLM. Set LLM_API_KEY in .env"
+            )
         logger.info("Starting worker...")
         await start_worker()
 
@@ -61,7 +70,6 @@ async def lifespan(app: FastAPI):
     # Shutdown
     logger.info("Platform shutting down")
     await stop_worker()
-    await close_llm_client()
 
 
 app = FastAPI(
@@ -72,11 +80,13 @@ app = FastAPI(
 )
 
 # Middleware (order matters: outermost first)
+app.add_middleware(RequestLoggingMiddleware)
 app.add_middleware(ErrorHandlerMiddleware)
 app.add_middleware(JWTAuthMiddleware)
+_cors_origins = [o.strip() for o in settings.CORS_ORIGINS.split(",") if o.strip()]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=_cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -99,7 +109,13 @@ async def websocket_endpoint(websocket: WebSocket):
     try:
         while True:
             data = await websocket.receive_text()
-            # Echo back for now; clients primarily receive broadcasts
-            await ws_manager.send_to(websocket, "echo", {"message": data})
+            # Handle ping/pong heartbeat from frontend
+            try:
+                msg = json.loads(data)
+                if msg.get("type") == "ping":
+                    await ws_manager.send_to(websocket, "pong", {})
+                    continue
+            except (json.JSONDecodeError, TypeError):
+                pass
     except WebSocketDisconnect:
         ws_manager.disconnect(websocket)

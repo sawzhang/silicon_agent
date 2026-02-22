@@ -1,5 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { getKPISummary, getKPITimeSeries, getROISummary, getCockpit } from '@/services/kpiApi';
+import { useNotificationStore } from '@/stores/notificationStore';
 
 export function useKPISummary(period?: string) {
   return useQuery({
@@ -24,8 +25,9 @@ export function useROISummary(days?: number) {
 }
 
 export function useCockpit() {
+  const refreshVersion = useNotificationStore((s) => s.refreshVersion);
   return useQuery({
-    queryKey: ['cockpit'],
+    queryKey: ['cockpit', refreshVersion],
     queryFn: getCockpit,
     refetchInterval: 10_000,
   });

@@ -135,29 +135,39 @@ class StageContext:
     stage_name: str
     agent_role: str
     prior_outputs: List[Dict[str, str]]  # [{"stage": name, "output": text}, ...]
+    compressed_outputs: Optional[List[Dict[str, str]]] = None  # sliding-window compressed
+    project_memory: Optional[str] = None  # injected project memory text
+    repo_context: Optional[str] = None  # injected repo context (tech stack + dir tree)
 
 
-def build_messages(ctx: StageContext) -> List[dict]:
-    """Build the message list for an LLM call based on stage context."""
-    system_prompt = SYSTEM_PROMPTS.get(ctx.agent_role, SYSTEM_PROMPTS["orchestrator"])
+def build_user_prompt(ctx: StageContext) -> str:
+    """Build the user prompt text for an AgentRunner chat call.
+
+    System prompt is already injected when the AgentRunner is created,
+    so this only returns the user-facing message text.
+    """
     stage_instruction = STAGE_INSTRUCTIONS.get(ctx.stage_name, "请完成当前阶段的工作。")
 
-    # Build the user message with task context and prior outputs
     parts: List[str] = []
     parts.append(f"## 任务\n**{ctx.task_title}**")
     if ctx.task_description:
         parts.append(f"\n{ctx.task_description}")
 
-    if ctx.prior_outputs:
+    # Inject repo context (tech stack + directory structure)
+    if ctx.repo_context:
+        parts.append(f"\n## 项目代码库信息\n{ctx.repo_context}")
+
+    # Inject project memory from historical tasks
+    if ctx.project_memory:
+        parts.append(f"\n## 项目上下文（来自历史任务）\n{ctx.project_memory}")
+
+    # Use compressed outputs (sliding-window) when available, otherwise raw
+    prior = ctx.compressed_outputs if ctx.compressed_outputs is not None else ctx.prior_outputs
+    if prior:
         parts.append("\n## 前序阶段产出")
-        for po in ctx.prior_outputs:
+        for po in prior:
             parts.append(f"\n### {po['stage']} 阶段输出\n{po['output']}")
 
     parts.append(f"\n## 当前阶段: {ctx.stage_name}\n{stage_instruction}")
 
-    user_content = "\n".join(parts)
-
-    return [
-        {"role": "system", "content": system_prompt},
-        {"role": "user", "content": user_content},
-    ]
+    return "\n".join(parts)

@@ -12,7 +12,7 @@ export async function getAgent(role: string): Promise<AgentStatus> {
 }
 
 export async function updateConfig(role: string, config: AgentConfigUpdate): Promise<AgentStatus> {
-  const { data } = await api.patch<AgentStatus>(`/agents/${role}/config`, config);
+  const { data } = await api.put<AgentStatus>(`/agents/${role}/config`, config);
   return data;
 }
 
