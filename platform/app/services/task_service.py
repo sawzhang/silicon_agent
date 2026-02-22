@@ -240,8 +240,6 @@ class TaskService:
         )
 
     async def retry_task(self, task_id: str) -> Optional[TaskDetailResponse]:
-        from sqlalchemy import delete as sa_delete
-
         result = await self.session.execute(
             select(TaskModel)
             .options(
@@ -257,20 +255,32 @@ class TaskService:
         if task.status != "failed":
             return self._task_to_response(task)
 
-        # Reset task status to pending
+        # Reset task status to pending (keep completed_at cleared)
         task.status = "pending"
         task.completed_at = None
-        task.total_tokens = 0
-        task.total_cost_rmb = 0.0
 
-        # Delete all existing stages via bulk delete
-        await self.session.execute(
-            sa_delete(TaskStageModel).where(TaskStageModel.task_id == task_id)
-        )
+        # Recalculate tokens/cost from completed stages only
+        completed_tokens = 0
+        completed_cost = 0.0
+        for stage in task.stages:
+            if stage.status == "completed":
+                completed_tokens += stage.tokens_used or 0
+            elif stage.status == "failed":
+                # Reset failed stage to pending so it can be re-executed
+                stage.status = "pending"
+                stage.error_message = None
+                stage.started_at = None
+                stage.completed_at = None
+                stage.duration_seconds = None
+                stage.tokens_used = 0
+                stage.output_summary = None
+            # pending stages stay as-is
+
+        from app.config import settings
+        task.total_tokens = completed_tokens
+        task.total_cost_rmb = completed_tokens * settings.CB_TOKEN_PRICE_PER_1K / 1000
 
         await self.session.commit()
-
-        # Expire cached state so re-fetch gets clean data
         self.session.expire_all()
 
         # Re-fetch with eager loading

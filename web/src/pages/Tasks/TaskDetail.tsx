@@ -1,8 +1,8 @@
 import React from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Card, Collapse, Descriptions, Empty, Tag, Button, Spin, Typography, Space, message } from 'antd';
-import { ArrowLeftOutlined, StopOutlined } from '@ant-design/icons';
-import { useTask, useCancelTask } from '@/hooks/useTasks';
+import { ArrowLeftOutlined, StopOutlined, ReloadOutlined } from '@ant-design/icons';
+import { useTask, useCancelTask, useRetryTask } from '@/hooks/useTasks';
 import PipelineView from '@/components/PipelineView';
 import { STAGE_NAMES } from '@/utils/constants';
 import { formatTimestamp, formatTokens, formatCost, formatDuration } from '@/utils/formatters';
@@ -27,6 +27,7 @@ const TaskDetail: React.FC = () => {
   const navigate = useNavigate();
   const { data: task, isLoading } = useTask(id!);
   const cancelTask = useCancelTask();
+  const retryTask = useRetryTask();
 
   if (isLoading || !task) {
     return <Spin size="large" style={{ display: 'block', margin: '100px auto' }} />;
@@ -53,6 +54,19 @@ const TaskDetail: React.FC = () => {
             loading={cancelTask.isPending}
           >
             Cancel Task
+          </Button>
+        )}
+        {task.status === 'failed' && (
+          <Button
+            type="primary"
+            icon={<ReloadOutlined />}
+            onClick={async () => {
+              await retryTask.mutateAsync(task.id);
+              message.success('任务已重新提交，将从失败阶段继续执行');
+            }}
+            loading={retryTask.isPending}
+          >
+            重试任务
           </Button>
         )}
       </Space>
@@ -85,7 +99,25 @@ const TaskDetail: React.FC = () => {
                     {stage.output_summary}
                   </Typography.Paragraph>
                 ) : stage.error_message ? (
-                  <Typography.Text type="danger">{stage.error_message}</Typography.Text>
+                  <div>
+                    <Typography.Text type="danger">{stage.error_message}</Typography.Text>
+                    {task.status === 'failed' && (
+                      <div style={{ marginTop: 12 }}>
+                        <Button
+                          type="primary"
+                          size="small"
+                          icon={<ReloadOutlined />}
+                          onClick={async () => {
+                            await retryTask.mutateAsync(task.id);
+                            message.success('任务已重新提交，将从失败阶段继续执行');
+                          }}
+                          loading={retryTask.isPending}
+                        >
+                          从此阶段重试
+                        </Button>
+                      </div>
+                    )}
+                  </div>
                 ) : (
                   <Empty description="暂无产出" />
                 )}

@@ -52,7 +52,8 @@ export function useRetryTask() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (id: string) => retryTask(id),
-    onSuccess: () => {
+    onSuccess: (_data, id) => {
+      qc.invalidateQueries({ queryKey: ['task', id] });
       qc.invalidateQueries({ queryKey: ['tasks'] });
       qc.invalidateQueries({ queryKey: ['cockpit'] });
     },

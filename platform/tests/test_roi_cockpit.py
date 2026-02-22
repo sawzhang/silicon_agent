@@ -272,15 +272,17 @@ async def test_cockpit_task_item_structure(client, seed_tasks):
 
 @pytest.mark.asyncio
 async def test_retry_failed_task(client, seed_tasks):
-    """Retrying a failed task resets it to pending."""
+    """Retrying a failed task resets failed stages to pending and resumes."""
     resp = await client.post("/api/v1/tasks/cockpit-task-failed/retry")
     assert resp.status_code == 200
     data = resp.json()
     assert data["status"] == "pending"
     assert data["completed_at"] is None
-    assert data["total_tokens"] == 0
-    assert data["total_cost_rmb"] == 0.0
-    assert len(data["stages"]) == 0
+    # Stages are preserved — failed stage reset to pending
+    assert len(data["stages"]) == 1
+    assert data["stages"][0]["status"] == "pending"
+    assert data["stages"][0]["error_message"] is None
+    assert data["stages"][0]["tokens_used"] == 0
 
 
 @pytest.mark.asyncio

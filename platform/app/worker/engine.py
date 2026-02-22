@@ -212,6 +212,24 @@ async def _process_task(session: AsyncSession, task: TaskModel) -> None:
             logger.warning("Failed to init memory store for project %s", task.project_id, exc_info=True)
 
     for stage_index, stage in enumerate(sorted_stages):
+        # Skip already-completed stages (resume from failure)
+        if stage.status == "completed":
+            logger.info(
+                "Skipping completed stage %s for task %s (resuming)",
+                stage.stage_name, task.id,
+            )
+            prior_outputs.append({
+                "stage": stage.stage_name,
+                "output": stage.output_summary or "",
+            })
+            # Rebuild compression from completed stage output
+            try:
+                co = await compress_stage_output(stage.stage_name, stage.output_summary or "")
+                compression.add(co)
+            except Exception:
+                logger.warning("Compression failed for resumed stage %s, skipping", stage.stage_name, exc_info=True)
+            continue
+
         # Check cancellation before each stage
         if await _is_cancelled(session, task.id):
             logger.info("Task %s cancelled, stopping execution", task.id)
