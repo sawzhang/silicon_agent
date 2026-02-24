@@ -25,9 +25,17 @@ async def list_tasks(
     page: int = 1,
     page_size: int = 20,
     status: Optional[str] = None,
+    project_id: Optional[str] = None,
+    title: Optional[str] = None,
     service: TaskService = Depends(get_task_service),
 ):
-    return await service.list_tasks(page=page, page_size=page_size, status=status)
+    return await service.list_tasks(
+        page=page,
+        page_size=page_size,
+        status=status,
+        project_id=project_id,
+        title=title,
+    )
 
 
 @router.post("", response_model=TaskDetailResponse, status_code=201)

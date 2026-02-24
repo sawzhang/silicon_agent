@@ -16,6 +16,8 @@ export async function listTasks(params?: {
   page_size?: number;
   start_date?: string;
   end_date?: string;
+  project_id?: string;
+  title?: string;
 }): Promise<TaskListResponse> {
   const { data } = await api.get<{ items: Task[]; total: number; page: number; page_size: number }>('/tasks', { params });
   return { tasks: data.items, total: data.total, page: data.page, page_size: data.page_size };

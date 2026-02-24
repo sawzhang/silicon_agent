@@ -17,6 +17,7 @@ const CircuitBreaker = React.lazy(() => import('@/pages/CircuitBreaker/index'));
 const Projects = React.lazy(() => import('@/pages/Projects/index'));
 const ROI = React.lazy(() => import('@/pages/ROI/index'));
 const Cockpit = React.lazy(() => import('@/pages/Cockpit/index'));
+const TaskLogs = React.lazy(() => import('@/pages/TaskLogs/index'));
 
 const Loading = () => <Spin size="large" style={{ display: 'block', margin: '200px auto' }} />;
 
@@ -39,6 +40,7 @@ const App: React.FC = () => {
           <Route path="/kpi" element={<KPI />} />
           <Route path="/roi" element={<ROI />} />
           <Route path="/audit" element={<Audit />} />
+          <Route path="/task-logs" element={<TaskLogs />} />
           <Route path="/config" element={<Config />} />
           <Route path="/circuit-breaker" element={<CircuitBreaker />} />
         </Route>

@@ -12,7 +12,6 @@ from sqlalchemy.orm import selectinload
 from app.models.task import TaskModel, TaskStageModel
 from app.models.template import TaskTemplateModel
 from app.schemas.task import (
-    BatchTaskItem,
     TaskBatchCreateRequest,
     TaskBatchCreateResponse,
     TaskCreateRequest,
@@ -31,7 +30,12 @@ class TaskService:
         self.session = session
 
     async def list_tasks(
-        self, page: int = 1, page_size: int = 20, status: Optional[str] = None
+        self,
+        page: int = 1,
+        page_size: int = 20,
+        status: Optional[str] = None,
+        project_id: Optional[str] = None,
+        title: Optional[str] = None,
     ) -> TaskListResponse:
         query = select(TaskModel).options(
             selectinload(TaskModel.stages),
@@ -43,6 +47,17 @@ class TaskService:
         if status:
             query = query.where(TaskModel.status == status)
             count_query = count_query.where(TaskModel.status == status)
+
+        project_id_value = project_id.strip() if project_id else None
+        if project_id_value:
+            query = query.where(TaskModel.project_id == project_id_value)
+            count_query = count_query.where(TaskModel.project_id == project_id_value)
+
+        title_value = title.strip() if title else None
+        if title_value:
+            title_filter = func.lower(TaskModel.title).like(f"%{title_value.lower()}%")
+            query = query.where(title_filter)
+            count_query = count_query.where(title_filter)
 
         total_result = await self.session.execute(count_query)
         total = total_result.scalar() or 0
@@ -261,7 +276,6 @@ class TaskService:
 
         # Recalculate tokens/cost from completed stages only
         completed_tokens = 0
-        completed_cost = 0.0
         for stage in task.stages:
             if stage.status == "completed":
                 completed_tokens += stage.tokens_used or 0

@@ -1,10 +1,9 @@
 """Tests for the project memory store."""
-import asyncio
 from unittest.mock import patch
 
 import pytest
 
-from app.worker.memory import CATEGORIES, MemoryEntry, ProjectMemoryStore
+from app.worker.memory import MemoryEntry, ProjectMemoryStore
 
 
 @pytest.fixture

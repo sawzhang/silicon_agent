@@ -3,7 +3,6 @@ import pytest
 import pytest_asyncio
 from uuid import uuid4
 
-from sqlalchemy import select
 
 from app.db.session import async_session_factory
 from app.models.project import ProjectModel
@@ -134,6 +133,43 @@ async def test_list_projects(client):
     # Cleanup
     await _cleanup_project(id1)
     await _cleanup_project(id2)
+
+
+@pytest.mark.asyncio
+async def test_list_projects_name_filter(client):
+    """GET /api/v1/projects?name=keyword supports fuzzy search by name/display_name."""
+    base = _unique_name()
+    resp1 = await client.post('/api/v1/projects', json={
+        'name': f'{base}-focus-name',
+        'display_name': f'Display {base} A',
+    })
+    resp2 = await client.post('/api/v1/projects', json={
+        'name': f'{base}-other',
+        'display_name': f'Focus Display {base}',
+    })
+    resp3 = await client.post('/api/v1/projects', json={
+        'name': f'{base}-nomatch',
+        'display_name': f'Display {base} C',
+    })
+    assert resp1.status_code == 201
+    assert resp2.status_code == 201
+    assert resp3.status_code == 201
+
+    id1 = resp1.json()['id']
+    id2 = resp2.json()['id']
+    id3 = resp3.json()['id']
+
+    resp = await client.get('/api/v1/projects', params={'name': 'focus', 'page_size': 200})
+    assert resp.status_code == 200
+    data = resp.json()
+    ids_in_list = {p['id'] for p in data['items']}
+    assert id1 in ids_in_list
+    assert id2 in ids_in_list
+    assert id3 not in ids_in_list
+
+    await _cleanup_project(id1)
+    await _cleanup_project(id2)
+    await _cleanup_project(id3)
 
 
 # ── Update ──────────────────────────────────────────────

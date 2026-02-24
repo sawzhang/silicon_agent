@@ -22,9 +22,10 @@ async def list_projects(
     page: int = 1,
     page_size: int = 20,
     status: Optional[str] = None,
+    name: Optional[str] = None,
     service: ProjectService = Depends(get_project_service),
 ):
-    return await service.list_projects(page=page, page_size=page_size, status=status)
+    return await service.list_projects(page=page, page_size=page_size, status=status, name=name)
 
 
 @router.get("/{project_id}", response_model=ProjectResponse)

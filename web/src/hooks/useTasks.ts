@@ -8,6 +8,8 @@ export function useTaskList(params?: {
   page_size?: number;
   start_date?: string;
   end_date?: string;
+  project_id?: string;
+  title?: string;
 }) {
   return useQuery({
     queryKey: ['tasks', params],

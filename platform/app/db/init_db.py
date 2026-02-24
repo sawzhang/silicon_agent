@@ -14,6 +14,7 @@ import app.models.kpi  # noqa: F401
 import app.models.audit  # noqa: F401
 import app.models.template  # noqa: F401
 import app.models.project  # noqa: F401
+import app.models.task_log  # noqa: F401
 
 logger = logging.getLogger(__name__)
 

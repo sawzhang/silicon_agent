@@ -11,7 +11,6 @@ from app.config import settings
 from app.models.gate import HumanGateModel
 from app.models.kpi import KPIMetricModel
 from app.models.task import TaskModel, TaskStageModel
-from app.models.template import TaskTemplateModel
 from app.schemas.gate import GateDetailResponse
 from app.schemas.kpi import (
     AgentRoleEfficiency,

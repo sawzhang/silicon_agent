@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timezone
-from typing import List, Optional
+from typing import Optional
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.project import ProjectModel
@@ -24,7 +24,11 @@ class ProjectService:
         self.session = session
 
     async def list_projects(
-        self, page: int = 1, page_size: int = 20, status: Optional[str] = None
+        self,
+        page: int = 1,
+        page_size: int = 20,
+        status: Optional[str] = None,
+        name: Optional[str] = None,
     ) -> ProjectListResponse:
         query = select(ProjectModel)
         count_query = select(func.count()).select_from(ProjectModel)
@@ -32,6 +36,16 @@ class ProjectService:
         if status:
             query = query.where(ProjectModel.status == status)
             count_query = count_query.where(ProjectModel.status == status)
+
+        name_value = name.strip() if name else None
+        if name_value:
+            keyword = f"%{name_value.lower()}%"
+            name_filter = or_(
+                func.lower(ProjectModel.name).like(keyword),
+                func.lower(ProjectModel.display_name).like(keyword),
+            )
+            query = query.where(name_filter)
+            count_query = count_query.where(name_filter)
 
         total_result = await self.session.execute(count_query)
         total = total_result.scalar() or 0

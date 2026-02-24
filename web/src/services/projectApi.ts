@@ -5,6 +5,7 @@ export async function listProjects(params?: {
   page?: number;
   page_size?: number;
   status?: string;
+  name?: string;
 }): Promise<ProjectListResponse> {
   const { data } = await api.get<ProjectListResponse>('/projects', { params });
   return data;

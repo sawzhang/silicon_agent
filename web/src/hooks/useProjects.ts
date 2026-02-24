@@ -6,6 +6,7 @@ export function useProjectList(params?: {
   page?: number;
   page_size?: number;
   status?: string;
+  name?: string;
 }) {
   return useQuery({
     queryKey: ['projects', params],

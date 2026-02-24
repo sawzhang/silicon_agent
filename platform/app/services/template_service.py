@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import List, Optional
+from typing import Optional
 
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.template import TaskTemplateModel
