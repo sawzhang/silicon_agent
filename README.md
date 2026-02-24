@@ -21,7 +21,7 @@ silicon_agent/
 │   └── alembic/       # 数据库迁移
 ├── web/               # 前端 — React + TypeScript + Ant Design
 │   └── src/
-│       ├── pages/     # Dashboard, Cockpit, Tasks, Gates, Skills, KPI, ROI...
+│       ├── pages/     # Dashboard, Cockpit, Tasks, TaskLogs, Gates, Skills, KPI, ROI...
 │       ├── hooks/     # React Query hooks
 │       ├── services/  # API 调用层
 │       └── stores/    # Zustand 状态管理
@@ -39,6 +39,7 @@ silicon_agent/
 - **人工审批门控 (Gate)**：关键阶段插入 human-in-the-loop 审批，支持 approve/reject
 - **LLM 兼容性**：支持 OpenAI / MiniMax / 其他兼容 API，tool calling 失败自动降级纯文本模式
 - **实时状态推送**：WebSocket 推送 Agent 状态、任务进度、Gate 通知
+- **任务日志查询**：侧边栏“任务日志”页面，支持按 `task` 必填、`project`/`stage` 可选筛选，统一查看 LLM 与 tool call 日志
 - **KPI / ROI 监控**：Token 用量、成本分析、效率指标
 - **止损熔断**：单任务 Token/成本超限自动触发 Circuit Breaker
 - **项目记忆**：跨任务积累项目上下文，Agent 自动加载相关记忆
@@ -110,6 +111,7 @@ pytest tests/ -v
 | KPI | `/api/v1/kpi` | 指标汇总、趋势、对比 |
 | Agents | `/api/v1/agents` | Agent 状态、配置 |
 | Audit | `/api/v1/audit` | 审计日志查询 |
+| Task Logs | `/api/v1/task-logs` | 任务日志查询 |
 | Circuit Breaker | `/api/v1/circuit-breaker` | 熔断状态管理 |
 
 ## License
