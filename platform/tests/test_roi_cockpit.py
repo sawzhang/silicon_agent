@@ -4,7 +4,6 @@ import pytest_asyncio
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import async_session_factory
 from app.models.task import TaskModel, TaskStageModel

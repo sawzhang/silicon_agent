@@ -6,6 +6,7 @@ import pytest_asyncio
 from sqlalchemy import select
 
 from app.db.session import async_session_factory
+from app.models.project import ProjectModel
 from app.models.task import TaskModel, TaskStageModel
 from app.models.template import TaskTemplateModel
 
@@ -99,6 +100,42 @@ async def seed_task_with_stages():
             for obj in result.scalars().all():
                 if obj.id.startswith("tt-stag"):
                     await session.delete(obj)
+        await session.commit()
+
+
+@pytest_asyncio.fixture
+async def seed_tasks_for_query_filters():
+    async with async_session_factory() as session:
+        project_a = ProjectModel(id='tt-proj-a', name='tt-proj-a', display_name='TT Project A')
+        project_b = ProjectModel(id='tt-proj-b', name='tt-proj-b', display_name='TT Project B')
+        session.add(project_a)
+        session.add(project_b)
+        session.add_all(
+            [
+                TaskModel(id='tt-filter-1', title='Alpha Login Task', status='pending', project_id='tt-proj-a'),
+                TaskModel(id='tt-filter-2', title='Alpha Payment Task', status='pending', project_id='tt-proj-b'),
+                TaskModel(id='tt-filter-3', title='Beta Cache Task', status='pending', project_id='tt-proj-a'),
+            ]
+        )
+        await session.commit()
+
+    yield
+
+    async with async_session_factory() as session:
+        stage_result = await session.execute(
+            select(TaskStageModel).where(TaskStageModel.task_id.in_(['tt-filter-1', 'tt-filter-2', 'tt-filter-3']))
+        )
+        for stage in stage_result.scalars().all():
+            await session.delete(stage)
+
+        task_result = await session.execute(select(TaskModel).where(TaskModel.id.like('tt-filter-%')))
+        for task in task_result.scalars().all():
+            await session.delete(task)
+
+        project_result = await session.execute(select(ProjectModel).where(ProjectModel.id.in_(['tt-proj-a', 'tt-proj-b'])))
+        for project in project_result.scalars().all():
+            await session.delete(project)
+
         await session.commit()
 
 
@@ -216,6 +253,29 @@ async def test_list_tasks_status_filter(client, seed_multiple_tasks):
     for item in data["items"]:
         assert item["status"] == "pending"
     assert data["total"] >= 1
+
+
+@pytest.mark.asyncio
+async def test_list_tasks_title_filter(client, seed_tasks_for_query_filters):
+    resp = await client.get('/api/v1/tasks', params={'title': 'alpha', 'page_size': 200})
+    assert resp.status_code == 200
+    data = resp.json()
+
+    assert data['total'] >= 2
+    assert data['items']
+    for item in data['items']:
+        assert 'alpha' in item['title'].lower()
+
+
+@pytest.mark.asyncio
+async def test_list_tasks_project_filter(client, seed_tasks_for_query_filters):
+    resp = await client.get('/api/v1/tasks', params={'project_id': 'tt-proj-a', 'page_size': 200})
+    assert resp.status_code == 200
+    data = resp.json()
+
+    assert data['items']
+    for item in data['items']:
+        assert item['project_id'] == 'tt-proj-a'
 
 
 # ── Get Stages Tests ──────────────────────────────────────

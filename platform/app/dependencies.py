@@ -1,5 +1,3 @@
-from collections.abc import AsyncGenerator
-
 from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -12,6 +10,7 @@ from app.services.kpi_service import KPIService
 from app.services.project_service import ProjectService
 from app.services.skill_service import SkillService
 from app.services.task_service import TaskService
+from app.services.task_log_service import TaskLogService
 from app.services.template_service import TemplateService
 
 
@@ -67,3 +66,9 @@ async def get_project_service(
     session: AsyncSession = Depends(get_db),
 ) -> ProjectService:
     return ProjectService(session)
+
+
+async def get_task_log_service(
+    session: AsyncSession = Depends(get_db),
+) -> TaskLogService:
+    return TaskLogService(session)
