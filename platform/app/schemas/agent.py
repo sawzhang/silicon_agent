@@ -40,6 +40,10 @@ class AgentConfigUpdate(BaseModel):
     model: Optional[str] = None
     temperature: Optional[float] = None
     max_tokens: Optional[int] = None
+    max_turns: Optional[int] = None
+    thinking_level: Optional[str] = None
+    extra_skill_dirs: Optional[list[str]] = None
+    system_prompt_append: Optional[str] = None
     enabled: Optional[bool] = None
 
     def get_model_name(self) -> Optional[str]:
@@ -54,3 +58,9 @@ class AgentSessionResponse(BaseModel):
     uptime_seconds: Optional[float] = None
     token_usage: TokenUsage = TokenUsage()
     turns: int = 0
+
+
+class AgentConfigOptionsResponse(BaseModel):
+    available_models: list[str]
+    thinking_levels: list[str]
+    role_defaults: dict[str, str]

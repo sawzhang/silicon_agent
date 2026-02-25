@@ -80,6 +80,26 @@ class LLMClient:
             model=data.get("model", model),
         )
 
+    async def list_models(self) -> list[str]:
+        """Fetch model IDs from OpenAI-compatible /v1/models endpoint."""
+        url = f"{self._base_url}/v1/models"
+        response = await self._client.get(url)
+        response.raise_for_status()
+        data = response.json()
+        items = data.get("data", [])
+        if not isinstance(items, list):
+            return []
+
+        models: list[str] = []
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            model_id = item.get("id")
+            if isinstance(model_id, str) and model_id.strip():
+                models.append(model_id.strip())
+        # De-duplicate while preserving upstream order.
+        return list(dict.fromkeys(models))
+
     async def close(self) -> None:
         await self._client.aclose()
 

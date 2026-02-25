@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import logging
 import time
 import uuid
@@ -30,6 +31,60 @@ _TOOL_FAILURE_PREFIXES = (
     "Error writing file:",
     "Exit code:",
 )
+
+
+def _int_or_none(value: Any) -> Optional[int]:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return None
+    return parsed if parsed > 0 else None
+
+
+def _float_or_none(value: Any) -> Optional[float]:
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return None
+    return parsed
+
+
+def _build_runtime_overrides(
+    agent: AgentModel | None, stage_model: Optional[str]
+) -> dict[str, Any]:
+    config = dict(agent.config or {}) if agent and isinstance(agent.config, dict) else {}
+    extra_dirs_raw = config.get("extra_skill_dirs")
+    extra_skill_dirs = (
+        [str(item) for item in extra_dirs_raw if isinstance(item, str)]
+        if isinstance(extra_dirs_raw, list)
+        else None
+    )
+    return {
+        "model": stage_model or (agent.model_name if agent else None),
+        "max_turns": _int_or_none(config.get("max_turns")),
+        "extra_skill_dirs": extra_skill_dirs,
+        "system_prompt_append": config.get("system_prompt_append")
+        if isinstance(config.get("system_prompt_append"), str)
+        else None,
+        "temperature": _float_or_none(config.get("temperature")),
+        "max_tokens": _int_or_none(config.get("max_tokens")),
+    }
+
+
+def _chat_kwargs_for_runner(runner: Any, runtime_overrides: dict[str, Any]) -> dict[str, Any]:
+    kwargs: dict[str, Any] = {}
+    try:
+        sig = inspect.signature(runner.chat)
+    except (TypeError, ValueError):
+        return kwargs
+    if (
+        "temperature" in sig.parameters
+        and runtime_overrides.get("temperature") is not None
+    ):
+        kwargs["temperature"] = runtime_overrides["temperature"]
+    if "max_tokens" in sig.parameters and runtime_overrides.get("max_tokens") is not None:
+        kwargs["max_tokens"] = runtime_overrides["max_tokens"]
+    return kwargs
 
 
 def infer_tool_status(output: str) -> str:
@@ -192,8 +247,17 @@ async def execute_stage(
             except RuntimeError:
                 pass
 
-    # Create runner with per-stage model routing
-    runner = get_agent(stage.agent_role, str(task.id), model=stage_model)
+    runtime_overrides = _build_runtime_overrides(agent, stage_model)
+
+    # Create runner with runtime config routing
+    runner = get_agent(
+        stage.agent_role,
+        str(task.id),
+        model=runtime_overrides["model"],
+        max_turns=runtime_overrides["max_turns"],
+        extra_skill_dirs=runtime_overrides["extra_skill_dirs"],
+        system_prompt_append=runtime_overrides["system_prompt_append"],
+    )
     # Override working directory if worktree is provided (e.g. git worktree)
     if workdir_override and runner.default_cwd != workdir_override:
         runner.default_cwd = workdir_override
@@ -284,11 +348,14 @@ async def execute_stage(
                     "stage": stage.stage_name,
                     "agent_role": stage.agent_role,
                     "prompt": user_prompt,
+                    "temperature": runtime_overrides.get("temperature"),
+                    "max_tokens": runtime_overrides.get("max_tokens"),
                 },
             )
             try:
+                chat_kwargs = _chat_kwargs_for_runner(runner, runtime_overrides)
                 response = await asyncio.wait_for(
-                    runner.chat(user_prompt, reset=True),
+                    runner.chat(user_prompt, reset=True, **chat_kwargs),
                     timeout=settings.WORKER_STAGE_TIMEOUT,
                 )
                 _append_stage_log(
@@ -341,7 +408,12 @@ async def execute_stage(
                         stage.stage_name, e,
                     )
                     runner = get_agent_text_only(
-                        stage.agent_role, str(task.id), model=stage_model,
+                        stage.agent_role,
+                        str(task.id),
+                        model=runtime_overrides["model"],
+                        max_turns=runtime_overrides["max_turns"],
+                        extra_skill_dirs=runtime_overrides["extra_skill_dirs"],
+                        system_prompt_append=runtime_overrides["system_prompt_append"],
                     )
                     runner.reset_usage()
                     _register_runner_events(runner)
@@ -403,8 +475,13 @@ async def execute_stage(
             stage.stage_name, continuations, _MAX_CONTINUATIONS,
         )
         try:
+            continuation_kwargs = _chat_kwargs_for_runner(runner, runtime_overrides)
             cont_response = await asyncio.wait_for(
-                runner.chat("请继续完成上面的输出，从你停下的地方继续。", reset=False),
+                runner.chat(
+                    "请继续完成上面的输出，从你停下的地方继续。",
+                    reset=False,
+                    **continuation_kwargs,
+                ),
                 timeout=settings.WORKER_STAGE_TIMEOUT,
             )
             cont_text = cont_response.text_content or ""

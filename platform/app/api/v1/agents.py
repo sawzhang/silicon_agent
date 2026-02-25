@@ -4,7 +4,13 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from app.dependencies import get_agent_service
 from app.integration.skillkit_bridge import get_bridge
-from app.schemas.agent import AgentConfigUpdate, AgentListResponse, AgentSessionResponse, AgentStatusResponse
+from app.schemas.agent import (
+    AgentConfigOptionsResponse,
+    AgentConfigUpdate,
+    AgentListResponse,
+    AgentSessionResponse,
+    AgentStatusResponse,
+)
 from app.services.agent_service import AgentService
 from app.websocket.events import AGENT_STATUS_CHANGED
 from app.websocket.manager import ws_manager
@@ -16,6 +22,11 @@ router = APIRouter(prefix="/agents", tags=["agents"])
 async def list_agents(service: AgentService = Depends(get_agent_service)):
     agents = await service.list_agents()
     return AgentListResponse(agents=agents)
+
+
+@router.get("/config/options", response_model=AgentConfigOptionsResponse)
+async def get_agent_config_options(service: AgentService = Depends(get_agent_service)):
+    return AgentConfigOptionsResponse(**(await service.get_config_options()))
 
 
 @router.get("/{role}", response_model=AgentStatusResponse)
@@ -32,7 +43,10 @@ async def update_agent_config(
     update: AgentConfigUpdate,
     service: AgentService = Depends(get_agent_service),
 ):
-    agent = await service.update_config(role, update)
+    try:
+        agent = await service.update_config(role, update)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     if agent is None:
         raise HTTPException(status_code=404, detail=f"Agent '{role}' not found")
     return agent

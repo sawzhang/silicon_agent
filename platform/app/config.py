@@ -18,6 +18,9 @@ class Settings(BaseSettings):
     # Per-role model routing (JSON string: {"coding": "gpt-4o", "review": "claude-sonnet-4-20250514"})
     # Unspecified roles fall back to LLM_MODEL
     LLM_ROLE_MODEL_MAP: str = "{}"
+    # Comma-separated absolute path prefixes allowed in agent config `extra_skill_dirs`.
+    # Empty means only built-in platform/skills directory is allowed.
+    EXTRA_SKILL_DIR_WHITELIST: str = ""
 
     # Worker configuration
     WORKER_ENABLED: bool = True

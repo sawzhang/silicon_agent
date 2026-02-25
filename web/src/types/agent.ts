@@ -26,4 +26,29 @@ export interface AgentListResponse {
 export interface AgentConfigUpdate {
   model_name?: string;
   config?: Record<string, unknown>;
+  temperature?: number;
+  max_tokens?: number;
+  max_turns?: number;
+  thinking_level?: string;
+  extra_skill_dirs?: string[];
+  system_prompt_append?: string;
+  enabled?: boolean;
+}
+
+
+export interface AgentConfigOptions {
+  available_models: string[];
+  thinking_levels: string[];
+  role_defaults: Record<string, string>;
+}
+
+export interface AgentConfigFormValues {
+  model_name?: string;
+  temperature?: number;
+  max_tokens?: number;
+  max_turns?: number;
+  thinking_level?: string;
+  extra_skill_dirs?: string[];
+  system_prompt_append?: string;
+  enabled?: boolean;
 }

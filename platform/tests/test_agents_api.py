@@ -1,8 +1,11 @@
 """Tests for Agents API endpoints."""
+from pathlib import Path
+
 import pytest
 import pytest_asyncio
 from sqlalchemy import select
 
+from app.config import settings
 from app.db.session import async_session_factory
 from app.models.agent import AgentModel
 
@@ -67,15 +70,129 @@ async def test_get_agent_404(client):
 
 @pytest.mark.asyncio
 async def test_update_agent_config(client, seed_agent):
-    """PUT /api/v1/agents/{role}/config updates model_name."""
+    """PUT /api/v1/agents/{role}/config updates model and runtime config."""
+    builtin_skills_dir = str((Path(__file__).resolve().parents[1] / "skills").resolve())
     resp = await client.put(
         "/api/v1/agents/ag-test-coding/config",
-        json={"model_name": "gpt-4"},
+        json={
+            "model_name": "gpt-4",
+            "temperature": 0.3,
+            "max_tokens": 8192,
+            "max_turns": 18,
+            "thinking_level": "medium",
+            "extra_skill_dirs": [builtin_skills_dir],
+            "system_prompt_append": "Focus on robustness",
+        },
     )
     assert resp.status_code == 200
     data = resp.json()
     assert data["model_name"] == "gpt-4"
     assert data["role"] == "ag-test-coding"
+    assert data["config"]["temperature"] == 0.3
+    assert data["config"]["max_tokens"] == 8192
+    assert data["config"]["max_turns"] == 18
+    assert data["config"]["thinking_level"] == "medium"
+    assert data["config"]["extra_skill_dirs"] == [builtin_skills_dir]
+
+@pytest.mark.asyncio
+async def test_get_agent_config_options(client):
+    """GET /api/v1/agents/config/options returns configurable options."""
+    resp = await client.get("/api/v1/agents/config/options")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "available_models" in data
+    assert "thinking_levels" in data
+    assert "role_defaults" in data
+    assert "coding" in data["role_defaults"]
+
+
+@pytest.mark.asyncio
+async def test_get_agent_config_options_from_llm_gateway(client, monkeypatch):
+    """GET /api/v1/agents/config/options prefers models returned by LLM gateway."""
+
+    class FakeLLMClient:
+        async def list_models(self):
+            return ["gpt-5.1-codex-mini", "gpt-5.1-codex"]
+
+    monkeypatch.setattr(
+        "app.services.agent_service.get_llm_client", lambda: FakeLLMClient()
+    )
+    monkeypatch.setattr(settings, "LLM_API_KEY", "test-key")
+    monkeypatch.setattr(settings, "LLM_MODEL", "gpt-5.1-codex-mini")
+    monkeypatch.setattr(
+        settings,
+        "LLM_ROLE_MODEL_MAP",
+        '{"coding":"gpt-5.1-codex","review":"gpt-5.1-codex-mini"}',
+    )
+
+    resp = await client.get("/api/v1/agents/config/options")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["available_models"] == ["gpt-5.1-codex-mini", "gpt-5.1-codex"]
+    assert data["role_defaults"]["coding"] == "gpt-5.1-codex"
+    assert data["role_defaults"]["review"] == "gpt-5.1-codex-mini"
+
+
+@pytest.mark.asyncio
+async def test_get_agent_config_options_fallback_when_gateway_fails(client, monkeypatch):
+    """GET /api/v1/agents/config/options falls back to local model set on gateway failure."""
+
+    class _BrokenClient:
+        async def list_models(self):
+            raise RuntimeError("gateway unavailable")
+
+    monkeypatch.setattr("app.services.agent_service.get_llm_client", lambda: _BrokenClient())
+    monkeypatch.setattr(settings, "LLM_API_KEY", "test-key")
+    monkeypatch.setattr(settings, "LLM_MODEL", "gpt-5.1-codex-mini")
+    monkeypatch.setattr(settings, "LLM_ROLE_MODEL_MAP", '{"coding":"gpt-5.1-codex"}')
+
+    resp = await client.get("/api/v1/agents/config/options")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "gpt-5.1-codex-mini" in data["available_models"]
+    assert "gpt-5.1-codex" in data["available_models"]
+    assert data["role_defaults"]["coding"] in data["available_models"]
+
+
+@pytest.mark.asyncio
+async def test_update_agent_config_rejects_extra_skill_dirs_outside_whitelist(
+    client, seed_agent, tmp_path, monkeypatch
+):
+    """PUT /agents/{role}/config returns 400 for disallowed extra skill directories."""
+    allowed_root = tmp_path / "allowed"
+    allowed_root.mkdir(parents=True, exist_ok=True)
+    disallowed = tmp_path / "disallowed"
+    disallowed.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(settings, "EXTRA_SKILL_DIR_WHITELIST", str(allowed_root))
+
+    resp = await client.put(
+        "/api/v1/agents/ag-test-coding/config",
+        json={
+            "extra_skill_dirs": [str(disallowed)],
+        },
+    )
+    assert resp.status_code == 400
+    assert "whitelist" in resp.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_update_agent_config_accepts_extra_skill_dirs_within_whitelist(
+    client, seed_agent, tmp_path, monkeypatch
+):
+    """PUT /agents/{role}/config accepts whitelisted extra skill directories."""
+    allowed_root = tmp_path / "allowed"
+    allowed_nested = allowed_root / "nested"
+    allowed_nested.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(settings, "EXTRA_SKILL_DIR_WHITELIST", str(allowed_root))
+
+    resp = await client.put(
+        "/api/v1/agents/ag-test-coding/config",
+        json={
+            "extra_skill_dirs": [str(allowed_nested)],
+        },
+    )
+    assert resp.status_code == 200
+    assert resp.json()["config"]["extra_skill_dirs"] == [str(allowed_nested.resolve())]
 
 
 @pytest.mark.asyncio

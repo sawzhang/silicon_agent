@@ -58,15 +58,111 @@ _ROLE_SKILL_DIRS: dict[str, list[str]] = {
 }
 
 
-def _get_skill_dirs(role: str) -> list[Path]:
+def _get_skill_dirs(role: str, extra_skill_dirs: list[str] | None = None) -> list[Path]:
     """Return skill directories for a given role."""
     dir_names = _ROLE_SKILL_DIRS.get(role, ["shared"])
     dirs = []
     for name in dir_names:
         d = _SKILLS_ROOT / name
         if d.is_dir():
-            dirs.append(d)
-    return dirs
+            dirs.append(d.resolve())
+    for extra in extra_skill_dirs or []:
+        candidate = Path(extra).expanduser().resolve()
+        if candidate.is_dir():
+            dirs.append(candidate)
+        else:
+            logger.warning("Skip non-existing extra skill dir: %s", candidate)
+    deduped: list[Path] = []
+    seen: set[str] = set()
+    for item in dirs:
+        key = str(item)
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(item)
+    return deduped
+
+
+def _build_runtime_signature(
+    *,
+    model: str | None,
+    max_turns: int | None,
+    skill_dirs: list[Path],
+    system_prompt_append: str | None,
+) -> tuple:
+    return (
+        model or "",
+        max_turns,
+        tuple(str(p) for p in skill_dirs),
+        (system_prompt_append or "").strip(),
+    )
+
+
+def _resolve_max_turns(role: str, override: int | None) -> int:
+    if isinstance(override, int) and override > 0:
+        return override
+    return _MAX_TURNS.get(role, _DEFAULT_MAX_TURNS)
+
+
+def _normalize_prompt_append(value: str | None) -> str | None:
+    text = (value or "").strip()
+    return text or None
+
+
+def _runner_signature(runner: "SandboxedAgentRunner") -> tuple | None:
+    return getattr(runner, "_runtime_signature", None)
+
+
+def _assign_runner_signature(runner: "SandboxedAgentRunner", signature: tuple) -> None:
+    setattr(runner, "_runtime_signature", signature)
+
+
+def _needs_runner_refresh(runner: "SandboxedAgentRunner", signature: tuple) -> bool:
+    return _runner_signature(runner) != signature
+
+
+def _create_or_refresh_runner(
+    key: str,
+    *,
+    role: str,
+    task_id: str,
+    enable_tools: bool,
+    model: str | None,
+    max_turns: int | None,
+    extra_skill_dirs: list[str] | None,
+    system_prompt_append: str | None,
+) -> "SandboxedAgentRunner":
+    skill_dirs = _get_skill_dirs(role, extra_skill_dirs)
+    effective_max_turns = _resolve_max_turns(role, max_turns)
+    normalized_prompt_append = _normalize_prompt_append(system_prompt_append)
+    signature = _build_runtime_signature(
+        model=model,
+        max_turns=effective_max_turns,
+        skill_dirs=skill_dirs,
+        system_prompt_append=normalized_prompt_append,
+    )
+    existing = _agents.get(key)
+    if existing is not None and not _needs_runner_refresh(existing, signature):
+        return existing
+
+    if existing is not None:
+        logger.info(
+            "Refreshing cached runner for key=%s due to runtime config change",
+            key,
+        )
+
+    created = _create_runner(
+        role,
+        task_id,
+        enable_tools=enable_tools,
+        model=model,
+        max_turns=effective_max_turns,
+        skill_dirs=skill_dirs,
+        system_prompt_append=normalized_prompt_append,
+    )
+    _assign_runner_signature(created, signature)
+    _agents[key] = created
+    return created
 
 
 # Base class for SandboxedAgentRunner — use AgentRunner when available, object otherwise
@@ -169,6 +265,9 @@ def resolve_model_for_role(role: str, stage_model: str | None = None) -> str | N
 def _create_runner(
     role: str, task_id: str, *, enable_tools: bool = True,
     model: str | None = None,
+    max_turns: int | None = None,
+    skill_dirs: list[Path] | None = None,
+    system_prompt_append: str | None = None,
 ) -> "SandboxedAgentRunner":
     """Internal helper to create a SandboxedAgentRunner."""
     if not SKILLKIT_AVAILABLE:
@@ -183,15 +282,18 @@ def _create_runner(
     system_prompt = SYSTEM_PROMPTS.get(role, SYSTEM_PROMPTS["orchestrator"])
     system_prompt += f"\n\n你的工作目录是: {workdir}\n所有文件操作请在此目录下进行。"
 
-    max_turns = _MAX_TURNS.get(role, _DEFAULT_MAX_TURNS)
+    effective_max_turns = _resolve_max_turns(role, max_turns)
     allowed = ROLE_TOOLS.get(role, _ALL_TOOLS) if enable_tools else set()
 
-    skill_dirs = _get_skill_dirs(role)
+    effective_skill_dirs = skill_dirs or _get_skill_dirs(role)
+    normalized_prompt_append = _normalize_prompt_append(system_prompt_append)
+    if normalized_prompt_append:
+        system_prompt += f"\n\n{normalized_prompt_append}"
 
     create_kwargs: dict = dict(
-        skill_dirs=skill_dirs,
+        skill_dirs=effective_skill_dirs,
         system_prompt=system_prompt,
-        max_turns=max_turns,
+        max_turns=effective_max_turns,
         enable_tools=enable_tools,
         load_context_files=False,
     )
@@ -206,25 +308,46 @@ def _create_runner(
         allowed_tools=allowed,
     )
     logger.info(
-        "Created SandboxedAgentRunner for role=%s task=%s model=%s tools=%s enable_tools=%s cwd=%s",
-        role, task_id, model or "default", sorted(allowed), enable_tools, workdir,
+        "Created SandboxedAgentRunner for role=%s task=%s model=%s max_turns=%s "
+        "skill_dirs=%s tools=%s enable_tools=%s cwd=%s",
+        role,
+        task_id,
+        model or "default",
+        effective_max_turns,
+        [str(p) for p in effective_skill_dirs],
+        sorted(allowed),
+        enable_tools,
+        workdir,
     )
     return runner
 
 
 def get_agent(
     role: str, task_id: str, *, model: str | None = None,
+    max_turns: int | None = None,
+    extra_skill_dirs: list[str] | None = None,
+    system_prompt_append: str | None = None,
 ) -> "SandboxedAgentRunner":
     """Return (or create) a SandboxedAgentRunner for the given (role, task_id)."""
     key = f"{role}:{task_id}"
-    if key not in _agents:
-        resolved_model = resolve_model_for_role(role, model)
-        _agents[key] = _create_runner(role, task_id, enable_tools=True, model=resolved_model)
-    return _agents[key]
+    resolved_model = resolve_model_for_role(role, model)
+    return _create_or_refresh_runner(
+        key,
+        role=role,
+        task_id=task_id,
+        enable_tools=True,
+        model=resolved_model,
+        max_turns=max_turns,
+        extra_skill_dirs=extra_skill_dirs,
+        system_prompt_append=system_prompt_append,
+    )
 
 
 def get_agent_text_only(
     role: str, task_id: str, *, model: str | None = None,
+    max_turns: int | None = None,
+    extra_skill_dirs: list[str] | None = None,
+    system_prompt_append: str | None = None,
 ) -> "SandboxedAgentRunner":
     """Return a text-only AgentRunner (no tools) for fallback when tool calling fails.
 
@@ -232,10 +355,17 @@ def get_agent_text_only(
     Creates a separate cached instance with a ':textonly' suffix.
     """
     key = f"{role}:{task_id}:textonly"
-    if key not in _agents:
-        resolved_model = resolve_model_for_role(role, model)
-        _agents[key] = _create_runner(role, task_id, enable_tools=False, model=resolved_model)
-    return _agents[key]
+    resolved_model = resolve_model_for_role(role, model)
+    return _create_or_refresh_runner(
+        key,
+        role=role,
+        task_id=task_id,
+        enable_tools=False,
+        model=resolved_model,
+        max_turns=max_turns,
+        extra_skill_dirs=extra_skill_dirs,
+        system_prompt_append=system_prompt_append,
+    )
 
 
 def close_agents_for_task(task_id: str) -> None:
