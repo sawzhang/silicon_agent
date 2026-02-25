@@ -15,6 +15,10 @@ class Settings(BaseSettings):
     LLM_MODEL: str = "gpt-4o-mini"
     LLM_TIMEOUT: float = 120.0
 
+    # Per-role model routing (JSON string: {"coding": "gpt-4o", "review": "claude-sonnet-4-20250514"})
+    # Unspecified roles fall back to LLM_MODEL
+    LLM_ROLE_MODEL_MAP: str = "{}"
+
     # Worker configuration
     WORKER_ENABLED: bool = True
     WORKER_POLL_INTERVAL: float = 5.0
@@ -39,6 +43,10 @@ class Settings(BaseSettings):
     JIRA_WEBHOOK_SECRET: str = ""
     GITLAB_WEBHOOK_SECRET: str = ""
 
+    # External notification (webhook URL for task events)
+    NOTIFY_WEBHOOK_URL: str = ""
+    NOTIFY_EVENTS: str = "task_failed,task_completed,gate_created"
+
     # CORS
     CORS_ORIGINS: str = "http://localhost:3000,http://localhost:5173"
 
@@ -48,6 +56,12 @@ class Settings(BaseSettings):
     # ROI benchmark: estimated manual effort per task
     ESTIMATED_HOURS_PER_TASK: float = 8.0
     HOURLY_RATE_RMB: float = 150.0
+
+    # Git worktree isolation for coding agents
+    WORKTREE_ENABLED: bool = False
+    WORKTREE_BASE_DIR: str = "/tmp/silicon_agent/worktrees"
+    WORKTREE_AUTO_BRANCH: bool = True  # auto-create feature branches
+    WORKTREE_AUTO_PR: bool = False  # auto-create PR on task completion
 
     # Memory & compression configuration
     MEMORY_ENABLED: bool = True

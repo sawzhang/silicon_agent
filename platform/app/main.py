@@ -70,6 +70,8 @@ async def lifespan(app: FastAPI):
     # Shutdown
     logger.info("Platform shutting down")
     await stop_worker()
+    from app.integration.notifier import close_notifier
+    await close_notifier()
 
 
 app = FastAPI(

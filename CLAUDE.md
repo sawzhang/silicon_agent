@@ -44,9 +44,17 @@ The system processes tasks through a multi-stage pipeline driven by a background
 6. Stage output feeds into next stage as prior context (with compression via `worker/compressor.py`)
 7. Gates can pause execution between stages for human approval
 
-**Resume from failure**: When a task is retried, the engine skips completed stages (rebuilds prior_outputs from `output_summary`) and re-executes from the failed stage.
+**Resume from failure**: When a task is retried, the engine skips completed stages (rebuilds prior_outputs from `output_summary`) and re-executes from the failed stage. Failed stage error messages and prior output are injected as retry context (Ralph Loop V2 pattern) so the LLM can avoid repeating the same mistake.
 
 **Tool-call fallback**: If LLM returns invalid tool JSON (e.g. MiniMax), executor auto-retries with `enable_tools=False`.
+
+**Multi-model routing**: Each role/stage can use a different LLM model via `LLM_ROLE_MODEL_MAP` config or per-stage `model` field in template definitions.
+
+**Parallel stage execution**: Stages with the same `order` value in a template execute concurrently.
+
+**Git worktree isolation**: When `WORKTREE_ENABLED=true` and a project has `repo_local_path` set, coding/test agents work in isolated git worktrees. On task completion, changes are committed, pushed, and optionally a PR is created (`WORKTREE_AUTO_PR`).
+
+**External notifications**: When `NOTIFY_WEBHOOK_URL` is set, task lifecycle events (completed, failed, gate created) are POSTed to the webhook (compatible with Slack/飞书/钉钉).
 
 ### Agent Roles & Tools
 
@@ -110,10 +118,13 @@ async def test_example(client):  # client is httpx.AsyncClient against ASGI app
 
 All settings load from `.env` via Pydantic BaseSettings. Critical ones:
 - `LLM_API_KEY` / `LLM_BASE_URL` / `LLM_MODEL` — LLM provider config
+- `LLM_ROLE_MODEL_MAP` — JSON mapping roles to specific models (e.g. `{"coding": "gpt-4o", "review": "claude-sonnet-4-20250514"}`)
 - `WORKER_ENABLED` — enables background task processing
 - `WORKER_STAGE_TIMEOUT` (300s) / `WORKER_TASK_TIMEOUT` (1800s) — execution limits
 - `CB_MAX_TOKENS_PER_TASK` (200k) / `CB_MAX_COST_PER_TASK_RMB` (¥50) — circuit breaker
 - `MEMORY_ENABLED` — project-level memory across tasks
+- `WORKTREE_ENABLED` / `WORKTREE_AUTO_PR` — git worktree isolation for coding agents
+- `NOTIFY_WEBHOOK_URL` / `NOTIFY_EVENTS` — external webhook notifications
 
 ## Conventions
 

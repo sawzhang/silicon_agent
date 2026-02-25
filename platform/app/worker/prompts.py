@@ -138,6 +138,8 @@ class StageContext:
     compressed_outputs: Optional[List[Dict[str, str]]] = None  # sliding-window compressed
     project_memory: Optional[str] = None  # injected project memory text
     repo_context: Optional[str] = None  # injected repo context (tech stack + dir tree)
+    # Smart retry: failure context from previous attempt (Ralph Loop V2 pattern)
+    retry_context: Optional[Dict[str, str]] = None  # {"error": msg, "prior_output": text}
 
 
 def build_user_prompt(ctx: StageContext) -> str:
@@ -167,6 +169,21 @@ def build_user_prompt(ctx: StageContext) -> str:
         parts.append("\n## 前序阶段产出")
         for po in prior:
             parts.append(f"\n### {po['stage']} 阶段输出\n{po['output']}")
+
+    # Inject retry context if this is a resumed/retried execution
+    if ctx.retry_context:
+        error = ctx.retry_context.get("error", "")
+        prior_output = ctx.retry_context.get("prior_output", "")
+        parts.append("\n## ⚠ 重试上下文（上次执行失败）")
+        if error:
+            parts.append(f"**失败原因:** {error}")
+        if prior_output:
+            # Truncate to avoid bloating context
+            truncated = prior_output[:2000]
+            if len(prior_output) > 2000:
+                truncated += "\n...(已截断)"
+            parts.append(f"**上次部分输出:**\n{truncated}")
+        parts.append("请分析失败原因，避免重复同样的错误，重新完成任务。")
 
     parts.append(f"\n## 当前阶段: {ctx.stage_name}\n{stage_instruction}")
 

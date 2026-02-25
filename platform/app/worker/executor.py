@@ -39,8 +39,16 @@ async def execute_stage(
     compressed_outputs: Optional[List[Dict[str, str]]] = None,
     project_memory: Optional[str] = None,
     repo_context: Optional[str] = None,
+    retry_context: Optional[Dict[str, str]] = None,
+    stage_model: Optional[str] = None,
+    workdir_override: Optional[str] = None,
 ) -> str:
     """Execute a single stage: call AgentRunner and update DB/broadcast.
+
+    Args:
+        retry_context: Failure info from previous attempt for smart retry.
+        stage_model: Per-stage LLM model override.
+        workdir_override: If set, override the agent's default cwd (e.g. git worktree path).
 
     Returns the agent output text.
     """
@@ -85,6 +93,7 @@ async def execute_stage(
         compressed_outputs=compressed_outputs,
         project_memory=project_memory,
         repo_context=repo_context,
+        retry_context=retry_context,
     )
     user_prompt = build_user_prompt(ctx)
 
@@ -142,7 +151,11 @@ async def execute_stage(
             }
         )
 
-    runner = get_agent(stage.agent_role, str(task.id))
+    # Create runner with per-stage model routing
+    runner = get_agent(stage.agent_role, str(task.id), model=stage_model)
+    # Override working directory if worktree is provided (e.g. git worktree)
+    if workdir_override and runner.default_cwd != workdir_override:
+        runner.default_cwd = workdir_override
     runner.reset_usage()
 
     handler_source = f"stage-log:{task.id}:{stage.id}:{uuid.uuid4().hex}"
@@ -250,7 +263,8 @@ async def execute_stage(
                 break
             except asyncio.TimeoutError:
                 last_error = asyncio.TimeoutError(
-                    f"Stage {stage.stage_name} LLM call timed out after {settings.WORKER_STAGE_TIMEOUT}s"
+                    f"Stage {stage.stage_name} LLM call timed out "
+                    f"after {settings.WORKER_STAGE_TIMEOUT}s"
                 )
                 _append_stage_log(
                     event_type="llm_response_received",
@@ -285,7 +299,9 @@ async def execute_stage(
                         "Stage %s tool-call error detected, falling back to text-only mode: %s",
                         stage.stage_name, e,
                     )
-                    runner = get_agent_text_only(stage.agent_role, str(task.id))
+                    runner = get_agent_text_only(
+                        stage.agent_role, str(task.id), model=stage_model,
+                    )
                     runner.reset_usage()
                     _register_runner_events(runner)
                     used_text_only_fallback = True
@@ -359,7 +375,9 @@ async def execute_stage(
                 response_body={"continuation": continuations, "content": cont_text},
             )
             # Replace the sentinel with continuation output
-            output = output.replace(f"[{_TRUNCATION_SENTINEL}. Please continue the conversation.]", "").strip()
+            output = output.replace(
+                f"[{_TRUNCATION_SENTINEL}. Please continue the conversation.]", "",
+            ).strip()
             output = f"{output}\n\n{cont_text}".strip()
             total_tokens = runner.cumulative_usage.total_tokens
         except Exception as e:
@@ -370,7 +388,10 @@ async def execute_stage(
                 duration_ms=round((time.monotonic() - continuation_started) * 1000, 2),
                 response_body={"continuation": continuations, "error": str(e)},
             )
-            logger.warning("Continuation %d failed for stage %s: %s", continuations, stage.stage_name, e)
+            logger.warning(
+                "Continuation %d failed for stage %s: %s",
+                continuations, stage.stage_name, e,
+            )
             break
 
     # If output still contains the sentinel after all continuations, log a warning

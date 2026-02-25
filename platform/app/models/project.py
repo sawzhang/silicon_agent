@@ -19,6 +19,7 @@ class ProjectModel(Base):
     name: Mapped[str] = mapped_column(String(200), unique=True, nullable=False)
     display_name: Mapped[str] = mapped_column(String(200), nullable=False)
     repo_url: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    repo_local_path: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
     branch: Mapped[str] = mapped_column(String(100), nullable=False, default="main")
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="active")

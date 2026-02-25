@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+from collections import defaultdict
 from datetime import datetime, timezone
 from typing import Dict, List, Optional
 
@@ -14,6 +15,11 @@ from sqlalchemy.orm import selectinload
 from app.config import settings
 from app.db.session import async_session_factory
 from app.integration.event_collector import event_collector
+from app.integration.notifier import (
+    notify_gate_created,
+    notify_task_completed,
+    notify_task_failed,
+)
 from app.models.audit import CircuitBreakerModel
 from app.models.gate import HumanGateModel
 from app.models.task import TaskModel, TaskStageModel
@@ -21,6 +27,7 @@ from app.websocket.events import CB_TRIGGERED, GATE_CREATED, TASK_STATUS_CHANGED
 from app.websocket.manager import ws_manager
 from app.worker.compressor import CompressionResult, compress_stage_output
 from app.worker.executor import execute_stage, mark_stage_failed
+from app.worker.worktree import get_worktree_manager
 
 logger = logging.getLogger(__name__)
 
@@ -168,7 +175,7 @@ async def _pick_pending_task(session: AsyncSession) -> Optional[TaskModel]:
 
 
 async def _process_task(session: AsyncSession, task: TaskModel) -> None:
-    """Orchestrate all stages of a task in order."""
+    """Orchestrate all stages of a task in order, with parallel execution support."""
     # Transition from claimed → running
     task.status = "running"
     await session.commit()
@@ -184,10 +191,10 @@ async def _process_task(session: AsyncSession, task: TaskModel) -> None:
         detail={"task_id": task.id, "title": task.title},
     )
 
-    # Parse gate definitions from template
+    # Parse gate definitions and stage metadata from template
     gates = _parse_gates(task)
-    # Sort stages by template order
     sorted_stages = _sort_stages(task)
+    stage_defs = _parse_stage_defs(task)
 
     if not sorted_stages:
         logger.warning("Task %s has no stages, marking completed", task.id)
@@ -202,6 +209,29 @@ async def _process_task(session: AsyncSession, task: TaskModel) -> None:
     if task.project and task.project.repo_tree:
         repo_context = _build_repo_context(task.project)
 
+    # Setup git worktree for code-producing tasks
+    worktree_path: Optional[str] = None
+    worktree_mgr = None
+    if (
+        settings.WORKTREE_ENABLED
+        and task.project
+        and task.project.repo_local_path
+    ):
+        try:
+            worktree_mgr = get_worktree_manager(task.project.repo_local_path)
+            worktree_path = await worktree_mgr.create_worktree(
+                task_id=str(task.id),
+                task_title=task.title,
+                base_branch=task.project.branch or "main",
+            )
+            if worktree_path:
+                logger.info("Task %s using worktree: %s", task.id, worktree_path)
+        except Exception:
+            logger.warning(
+                "Failed to create worktree for task %s, falling back to tmpdir",
+                task.id, exc_info=True,
+            )
+
     # Load project memory for this task's project
     project_memory_store = None
     if settings.MEMORY_ENABLED and task.project_id:
@@ -211,124 +241,130 @@ async def _process_task(session: AsyncSession, task: TaskModel) -> None:
         except Exception:
             logger.warning("Failed to init memory store for project %s", task.project_id, exc_info=True)
 
-    for stage_index, stage in enumerate(sorted_stages):
-        # Skip already-completed stages (resume from failure)
-        if stage.status == "completed":
-            logger.info(
-                "Skipping completed stage %s for task %s (resuming)",
-                stage.stage_name, task.id,
-            )
-            prior_outputs.append({
-                "stage": stage.stage_name,
-                "output": stage.output_summary or "",
-            })
-            # Rebuild compression from completed stage output
-            try:
-                co = await compress_stage_output(stage.stage_name, stage.output_summary or "")
-                compression.add(co)
-            except Exception:
-                logger.warning("Compression failed for resumed stage %s, skipping", stage.stage_name, exc_info=True)
+    # Group stages by order for parallel execution
+    stage_groups = _group_stages_by_order(sorted_stages, task)
+    stage_index_base = 0
+
+    for group in stage_groups:
+        # Skip group if all stages are completed (resume from failure)
+        all_completed = all(s.status == "completed" for s in group)
+        if all_completed:
+            for stage in group:
+                logger.info(
+                    "Skipping completed stage %s for task %s (resuming)",
+                    stage.stage_name, task.id,
+                )
+                prior_outputs.append({
+                    "stage": stage.stage_name,
+                    "output": stage.output_summary or "",
+                })
+                try:
+                    co = await compress_stage_output(stage.stage_name, stage.output_summary or "")
+                    compression.add(co)
+                except Exception:
+                    logger.warning("Compression failed for resumed stage %s", stage.stage_name, exc_info=True)
+            stage_index_base += len(group)
             continue
 
-        # Check cancellation before each stage
+        # Check cancellation before each group
         if await _is_cancelled(session, task.id):
             logger.info("Task %s cancelled, stopping execution", task.id)
             await event_collector.record_audit(
                 session,
                 agent_role="orchestrator",
                 action_type="task_cancelled",
-                detail={"task_id": task.id, "at_stage": stage.stage_name},
+                detail={"task_id": task.id, "at_stage": group[0].stage_name},
             )
             return
 
-        # Build project memory for the current role
-        project_memory: Optional[str] = None
-        if project_memory_store:
-            try:
-                project_memory = project_memory_store.get_memory_for_role(stage.agent_role)
-            except Exception:
-                logger.warning("Failed to load memory for role %s", stage.agent_role, exc_info=True)
-
-        # Build compressed prior context via sliding window
-        compressed_prior = compression.build_prior_context(stage_index)
-
-        try:
-            output = await execute_stage(
-                session, task, stage, prior_outputs,
-                compressed_outputs=compressed_prior if compressed_prior else None,
-                project_memory=project_memory,
-                repo_context=repo_context,
+        # Execute stages in this group (parallel if multiple)
+        if len(group) == 1:
+            stage = group[0]
+            result = await _execute_single_stage(
+                session, task, stage, stage_index_base,
+                prior_outputs, compression, project_memory_store,
+                repo_context, stage_defs, worktree_path,
             )
-            prior_outputs.append({"stage": stage.stage_name, "output": output})
-
-            # Compress this stage's output for future stages
+            if result is None:
+                return  # stage failed or circuit breaker
+            prior_outputs.append({"stage": stage.stage_name, "output": result})
             try:
-                co = await compress_stage_output(stage.stage_name, output)
+                co = await compress_stage_output(stage.stage_name, result)
                 compression.add(co)
             except Exception:
-                logger.warning("Compression failed for stage %s, skipping", stage.stage_name, exc_info=True)
+                logger.warning("Compression failed for stage %s", stage.stage_name, exc_info=True)
 
-            await event_collector.record_audit(
-                session,
-                agent_role=stage.agent_role,
-                action_type=f"stage_{stage.stage_name}_completed",
-                detail={
-                    "task_id": task.id,
-                    "stage_id": stage.id,
-                    "tokens_used": stage.tokens_used,
-                    "duration_seconds": stage.duration_seconds,
-                },
-            )
-
-            # Circuit breaker check
-            if task.total_tokens > settings.CB_MAX_TOKENS_PER_TASK or \
-               task.total_cost_rmb > settings.CB_MAX_COST_PER_TASK_RMB:
-                reason = f"Circuit breaker: tokens={task.total_tokens}, cost=¥{task.total_cost_rmb:.2f}"
-                cb = CircuitBreakerModel(
-                    level=1,
-                    status="triggered",
-                    triggered_by=stage.agent_role,
-                    trigger_reason=reason,
-                    triggered_at=datetime.now(timezone.utc),
-                )
-                session.add(cb)
-                await session.commit()
-                await _safe_broadcast(CB_TRIGGERED, {
-                    "task_id": task.id,
-                    "reason": reason,
-                    "total_tokens": task.total_tokens,
-                    "total_cost_rmb": task.total_cost_rmb,
-                })
-                from app.worker.agents import close_agents_for_task
-                close_agents_for_task(str(task.id))
-                await _fail_task(session, task, reason)
+            await _record_stage_audit(session, stage)
+            if await _check_circuit_breaker(session, task, stage):
                 return
-        except Exception as e:
-            error_msg = str(e)
-            logger.exception("Stage %s failed for task %s", stage.stage_name, task.id)
-            await mark_stage_failed(session, task, stage, error_msg)
-            from app.worker.agents import close_agents_for_task
-            close_agents_for_task(str(task.id))
-            await _fail_task(session, task, f"Stage {stage.stage_name} failed: {error_msg}")
-            return
 
-        # Check if this stage has a gate after it
-        gate_type = gates.get(stage.stage_name)
-        if gate_type:
-            approved = await _handle_gate(
-                session, task, stage, gate_type, output
+            gate_type = gates.get(stage.stage_name)
+            if gate_type:
+                if not await _handle_gate(session, task, stage, gate_type, result):
+                    await _fail_task(session, task, f"Gate rejected after stage {stage.stage_name}")
+                    return
+        else:
+            # Parallel execution for same-order stages
+            logger.info(
+                "Executing %d stages in parallel: %s",
+                len(group), [s.stage_name for s in group],
             )
-            if not approved:
-                logger.info(
-                    "Gate rejected after stage %s, failing task %s",
-                    stage.stage_name,
-                    task.id,
+            tasks_map = {}
+            for stage in group:
+                if stage.status == "completed":
+                    prior_outputs.append({
+                        "stage": stage.stage_name,
+                        "output": stage.output_summary or "",
+                    })
+                    continue
+                coro = _execute_single_stage(
+                    session, task, stage, stage_index_base,
+                    prior_outputs, compression, project_memory_store,
+                    repo_context, stage_defs, worktree_path,
                 )
-                await _fail_task(
-                    session, task,
-                    f"Gate rejected after stage {stage.stage_name}",
-                )
+                tasks_map[stage.stage_name] = (stage, asyncio.create_task(coro))
+
+            # Await all parallel stages
+            for stage_name, (stage, atask) in tasks_map.items():
+                try:
+                    result = await atask
+                except Exception as e:
+                    logger.exception("Parallel stage %s failed", stage_name)
+                    await mark_stage_failed(session, task, stage, str(e))
+                    # Cancel remaining parallel tasks
+                    for _, (_, other_task) in tasks_map.items():
+                        if not other_task.done():
+                            other_task.cancel()
+                    from app.worker.agents import close_agents_for_task
+                    close_agents_for_task(str(task.id))
+                    await _fail_task(session, task, f"Stage {stage_name} failed: {e}")
+                    return
+
+                if result is None:
+                    return
+                prior_outputs.append({"stage": stage_name, "output": result})
+                try:
+                    co = await compress_stage_output(stage_name, result)
+                    compression.add(co)
+                except Exception:
+                    logger.warning("Compression failed for stage %s", stage_name, exc_info=True)
+                await _record_stage_audit(session, stage)
+
+            if await _check_circuit_breaker(session, task, group[0]):
                 return
+
+            # Gates for parallel stages (check each)
+            for stage in group:
+                gate_type = gates.get(stage.stage_name)
+                if gate_type:
+                    output = stage.output_summary or ""
+                    if not await _handle_gate(session, task, stage, gate_type, output):
+                        await _fail_task(
+                            session, task, f"Gate rejected after stage {stage.stage_name}",
+                        )
+                        return
+
+        stage_index_base += len(group)
 
     # All stages completed — extract memories from this task
     if settings.MEMORY_ENABLED and project_memory_store and prior_outputs:
@@ -343,10 +379,147 @@ async def _process_task(session: AsyncSession, task: TaskModel) -> None:
         except Exception:
             logger.warning("Memory extraction failed for task %s", task.id, exc_info=True)
 
+    # Worktree: commit, push, and optionally create PR
+    if worktree_mgr and worktree_path:
+        try:
+            branch = await worktree_mgr.commit_and_push(
+                task_id=str(task.id),
+                commit_message=f"feat: {task.title}\n\nTask-ID: {task.id}",
+            )
+            if branch and settings.WORKTREE_AUTO_PR:
+                pr_body = f"Automated PR for task: {task.title}\n\nTask ID: {task.id}"
+                pr_url = await worktree_mgr.create_pr(
+                    task_id=str(task.id),
+                    title=task.title,
+                    body=pr_body,
+                    base_branch=task.project.branch or "main",
+                )
+                if pr_url:
+                    logger.info("PR created for task %s: %s", task.id, pr_url)
+        except Exception:
+            logger.warning("Worktree commit/push failed for task %s", task.id, exc_info=True)
+
+        # Cleanup worktree
+        try:
+            await worktree_mgr.cleanup_worktree(str(task.id))
+        except Exception:
+            logger.warning("Worktree cleanup failed for task %s", task.id, exc_info=True)
+
     # Clean up per-task agents
     from app.worker.agents import close_agents_for_task
     close_agents_for_task(str(task.id))
     await _complete_task(session, task)
+
+
+async def _execute_single_stage(
+    session: AsyncSession,
+    task: TaskModel,
+    stage: TaskStageModel,
+    stage_index: int,
+    prior_outputs: List[Dict[str, str]],
+    compression: CompressionResult,
+    project_memory_store,
+    repo_context: Optional[str],
+    stage_defs: Dict[str, dict],
+    worktree_path: Optional[str] = None,
+) -> Optional[str]:
+    """Execute a single stage with model routing and retry context.
+
+    Returns output text on success, None on failure (task is already marked failed).
+    """
+    # Resolve per-stage model override from template
+    sdef = stage_defs.get(stage.stage_name, {})
+    stage_model = sdef.get("model")  # None if not specified
+
+    # Build project memory for the current role
+    project_memory: Optional[str] = None
+    if project_memory_store:
+        try:
+            project_memory = project_memory_store.get_memory_for_role(stage.agent_role)
+        except Exception:
+            logger.warning("Failed to load memory for role %s", stage.agent_role, exc_info=True)
+
+    # Build compressed prior context via sliding window
+    compressed_prior = compression.build_prior_context(stage_index)
+
+    # Build retry context if this stage previously failed (smart retry)
+    retry_context: Optional[Dict[str, str]] = None
+    if stage.error_message or stage.output_summary:
+        # Stage has prior failure info — inject it for smarter retry
+        if stage.error_message:
+            retry_context = {
+                "error": stage.error_message,
+                "prior_output": (stage.output_summary or "")[:2000],
+            }
+
+    # Determine working directory: worktree for code-producing roles, tmpdir otherwise
+    _CODE_ROLES = {"coding", "test"}
+    effective_workdir = worktree_path if (worktree_path and stage.agent_role in _CODE_ROLES) else None
+
+    try:
+        output = await execute_stage(
+            session, task, stage, prior_outputs,
+            compressed_outputs=compressed_prior if compressed_prior else None,
+            project_memory=project_memory,
+            repo_context=repo_context,
+            retry_context=retry_context,
+            stage_model=stage_model,
+            workdir_override=effective_workdir,
+        )
+        return output
+    except Exception as e:
+        error_msg = str(e)
+        logger.exception("Stage %s failed for task %s", stage.stage_name, task.id)
+        await mark_stage_failed(session, task, stage, error_msg)
+        from app.worker.agents import close_agents_for_task
+        close_agents_for_task(str(task.id))
+        await _fail_task(session, task, f"Stage {stage.stage_name} failed: {error_msg}")
+        return None
+
+
+async def _record_stage_audit(session: AsyncSession, stage: TaskStageModel) -> None:
+    """Record audit event for a completed stage."""
+    await event_collector.record_audit(
+        session,
+        agent_role=stage.agent_role,
+        action_type=f"stage_{stage.stage_name}_completed",
+        detail={
+            "task_id": stage.task_id,
+            "stage_id": stage.id,
+            "tokens_used": stage.tokens_used,
+            "duration_seconds": stage.duration_seconds,
+        },
+    )
+
+
+async def _check_circuit_breaker(
+    session: AsyncSession, task: TaskModel, stage: TaskStageModel,
+) -> bool:
+    """Check circuit breaker limits. Returns True if breaker tripped (task failed)."""
+    if task.total_tokens <= settings.CB_MAX_TOKENS_PER_TASK and \
+       task.total_cost_rmb <= settings.CB_MAX_COST_PER_TASK_RMB:
+        return False
+
+    reason = f"Circuit breaker: tokens={task.total_tokens}, cost=¥{task.total_cost_rmb:.2f}"
+    cb = CircuitBreakerModel(
+        level=1,
+        status="triggered",
+        triggered_by=stage.agent_role,
+        trigger_reason=reason,
+        triggered_at=datetime.now(timezone.utc),
+    )
+    session.add(cb)
+    await session.commit()
+    await _safe_broadcast(CB_TRIGGERED, {
+        "task_id": task.id,
+        "reason": reason,
+        "total_tokens": task.total_tokens,
+        "total_cost_rmb": task.total_cost_rmb,
+    })
+    from app.worker.agents import close_agents_for_task
+    close_agents_for_task(str(task.id))
+    await _fail_task(session, task, reason)
+    return True
 
 
 async def _handle_gate(
@@ -380,6 +553,9 @@ async def _handle_gate(
         "gate_type": gate_type,
         "stage_name": stage.stage_name,
     })
+
+    # External notification for gate approval
+    await notify_gate_created(gate.id, task.id, stage.stage_name, gate_type)
 
     logger.info(
         "Gate created after stage %s (gate_id=%s), waiting for approval",
@@ -471,8 +647,48 @@ def _sort_stages(task: TaskModel) -> List[TaskStageModel]:
     return sorted(task.stages, key=lambda s: order_map.get(s.stage_name, 999))
 
 
+def _parse_stage_defs(task: TaskModel) -> Dict[str, dict]:
+    """Parse template stage definitions into a dict keyed by stage name.
+
+    Returns {stage_name: {"name": ..., "agent_role": ..., "order": ..., "model": ..., ...}}.
+    """
+    if not task.template:
+        return {}
+    try:
+        stage_defs = json.loads(task.template.stages) if task.template.stages else []
+    except (json.JSONDecodeError, TypeError):
+        return {}
+    return {sd["name"]: sd for sd in stage_defs}
+
+
+def _group_stages_by_order(
+    stages: List[TaskStageModel], task: TaskModel,
+) -> List[List[TaskStageModel]]:
+    """Group stages by their template order for parallel execution.
+
+    Stages with the same order value form a parallel group.
+    Returns a list of groups, each group is a list of stages to execute concurrently.
+    """
+    if not task.template:
+        return [[s] for s in stages]
+
+    try:
+        stage_defs = json.loads(task.template.stages) if task.template.stages else []
+    except (json.JSONDecodeError, TypeError):
+        return [[s] for s in stages]
+
+    order_map = {sd["name"]: sd.get("order", i) for i, sd in enumerate(stage_defs)}
+
+    groups: Dict[int, List[TaskStageModel]] = defaultdict(list)
+    for stage in stages:
+        order = order_map.get(stage.stage_name, 999)
+        groups[order].append(stage)
+
+    return [groups[k] for k in sorted(groups.keys())]
+
+
 async def _complete_task(session: AsyncSession, task: TaskModel) -> None:
-    """Mark task as completed and broadcast."""
+    """Mark task as completed, broadcast, and send external notification."""
     task.status = "completed"
     task.completed_at = datetime.now(timezone.utc)
     await session.commit()
@@ -493,6 +709,9 @@ async def _complete_task(session: AsyncSession, task: TaskModel) -> None:
         },
     )
 
+    # External notification
+    await notify_task_completed(task.id, task.title, task.total_tokens)
+
     logger.info("Task %s completed (tokens=%d)", task.id, task.total_tokens)
 
 
@@ -510,7 +729,7 @@ def _build_repo_context(project) -> str:
 
 
 async def _fail_task(session: AsyncSession, task: TaskModel, reason: str) -> None:
-    """Mark task as failed and broadcast."""
+    """Mark task as failed, broadcast, and send external notification."""
     task.status = "failed"
     task.completed_at = datetime.now(timezone.utc)
     await session.commit()
@@ -528,5 +747,8 @@ async def _fail_task(session: AsyncSession, task: TaskModel, reason: str) -> Non
         detail={"task_id": task.id, "reason": reason},
         risk_level="high",
     )
+
+    # External notification
+    await notify_task_failed(task.id, task.title, reason)
 
     logger.error("Task %s failed: %s", task.id, reason)

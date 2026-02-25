@@ -6,6 +6,7 @@ import logging
 import tempfile
 from pathlib import Path
 
+from app.config import settings
 from app.worker.prompts import SYSTEM_PROMPTS
 
 try:
@@ -100,8 +101,24 @@ class SandboxedAgentRunner(_BaseRunner):  # type: ignore[misc]
         return await super()._execute_tool(tool_call, on_output)
 
 
+def resolve_model_for_role(role: str, stage_model: str | None = None) -> str | None:
+    """Resolve which LLM model to use for a given role.
+
+    Priority: stage-level override > role-model map > global LLM_MODEL (None = use default).
+    Returns None when the global default should be used (avoids passing redundant config).
+    """
+    if stage_model:
+        return stage_model
+    try:
+        role_map = json.loads(settings.LLM_ROLE_MODEL_MAP)
+    except (json.JSONDecodeError, TypeError):
+        return None
+    return role_map.get(role)
+
+
 def _create_runner(
     role: str, task_id: str, *, enable_tools: bool = True,
+    model: str | None = None,
 ) -> "SandboxedAgentRunner":
     """Internal helper to create a SandboxedAgentRunner."""
     if not SKILLKIT_AVAILABLE:
@@ -120,13 +137,18 @@ def _create_runner(
     allowed = ROLE_TOOLS.get(role, _ALL_TOOLS) if enable_tools else set()
 
     skill_dirs = _get_skill_dirs(role)
-    base = AgentRunner.create(
+
+    create_kwargs: dict = dict(
         skill_dirs=skill_dirs,
         system_prompt=system_prompt,
         max_turns=max_turns,
         enable_tools=enable_tools,
         load_context_files=False,
     )
+    if model:
+        create_kwargs["model"] = model
+
+    base = AgentRunner.create(**create_kwargs)
     runner = SandboxedAgentRunner(
         engine=base.engine,
         config=base.config,
@@ -134,21 +156,26 @@ def _create_runner(
         allowed_tools=allowed,
     )
     logger.info(
-        "Created SandboxedAgentRunner for role=%s task=%s tools=%s enable_tools=%s cwd=%s",
-        role, task_id, sorted(allowed), enable_tools, workdir,
+        "Created SandboxedAgentRunner for role=%s task=%s model=%s tools=%s enable_tools=%s cwd=%s",
+        role, task_id, model or "default", sorted(allowed), enable_tools, workdir,
     )
     return runner
 
 
-def get_agent(role: str, task_id: str) -> "SandboxedAgentRunner":
+def get_agent(
+    role: str, task_id: str, *, model: str | None = None,
+) -> "SandboxedAgentRunner":
     """Return (or create) a SandboxedAgentRunner for the given (role, task_id)."""
     key = f"{role}:{task_id}"
     if key not in _agents:
-        _agents[key] = _create_runner(role, task_id, enable_tools=True)
+        resolved_model = resolve_model_for_role(role, model)
+        _agents[key] = _create_runner(role, task_id, enable_tools=True, model=resolved_model)
     return _agents[key]
 
 
-def get_agent_text_only(role: str, task_id: str) -> "SandboxedAgentRunner":
+def get_agent_text_only(
+    role: str, task_id: str, *, model: str | None = None,
+) -> "SandboxedAgentRunner":
     """Return a text-only AgentRunner (no tools) for fallback when tool calling fails.
 
     Used when the LLM model (e.g. MiniMax) doesn't support reliable tool calling.
@@ -156,7 +183,8 @@ def get_agent_text_only(role: str, task_id: str) -> "SandboxedAgentRunner":
     """
     key = f"{role}:{task_id}:textonly"
     if key not in _agents:
-        _agents[key] = _create_runner(role, task_id, enable_tools=False)
+        resolved_model = resolve_model_for_role(role, model)
+        _agents[key] = _create_runner(role, task_id, enable_tools=False, model=resolved_model)
     return _agents[key]
 
 
