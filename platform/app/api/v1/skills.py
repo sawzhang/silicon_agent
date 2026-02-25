@@ -17,11 +17,22 @@ router = APIRouter(prefix="/skills", tags=["skills"])
 async def list_skills(
     page: int = 1,
     page_size: int = 20,
+    name: Optional[str] = None,
     layer: Optional[str] = None,
+    tag: Optional[str] = None,
     role: Optional[str] = None,
+    status: Optional[str] = None,
     service: SkillService = Depends(get_skill_service),
 ):
-    return await service.list_skills(page=page, page_size=page_size, layer=layer, role=role)
+    return await service.list_skills(
+        page=page,
+        page_size=page_size,
+        name=name,
+        layer=layer,
+        tag=tag,
+        role=role,
+        status=status,
+    )
 
 
 @router.post("", response_model=SkillDetailResponse, status_code=201)

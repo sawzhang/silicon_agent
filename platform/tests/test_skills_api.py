@@ -164,6 +164,57 @@ async def test_list_skills_filter_layer(client, skill_factory):
     assert all(s["layer"] == "L2" for s in data_l2["items"])
 
 
+@pytest.mark.asyncio
+async def test_list_skills_filter_tag(client, skill_factory):
+    """GET /api/v1/skills?tag=... filters by tag token."""
+    tagged = await skill_factory(tags=["domain", "redemption"])
+    await skill_factory(tags=["security"])
+
+    resp = await client.get("/api/v1/skills", params={"tag": "redemption"})
+    assert resp.status_code == 200
+    items = resp.json()["items"]
+    names = [s["name"] for s in items]
+    assert tagged["name"] in names
+    assert all("redemption" in (s["tags"] or []) for s in items)
+
+
+@pytest.mark.asyncio
+async def test_list_skills_filter_role(client, skill_factory):
+    """GET /api/v1/skills?role=... filters by applicable role."""
+    role_match = await skill_factory(applicable_roles=["coding", "review"])
+    await skill_factory(applicable_roles=["doc"])
+
+    resp = await client.get("/api/v1/skills", params={"role": "review"})
+    assert resp.status_code == 200
+    items = resp.json()["items"]
+    names = [s["name"] for s in items]
+    assert role_match["name"] in names
+    assert all("review" in (s["applicable_roles"] or []) for s in items)
+
+
+@pytest.mark.asyncio
+async def test_list_skills_filter_status(client, skill_factory):
+    """GET /api/v1/skills?status=... includes requested status."""
+    active = await skill_factory()
+    archived = await skill_factory()
+
+    # Archive one skill through API to match real behavior.
+    archive_resp = await client.delete(f"/api/v1/skills/{archived['name']}")
+    assert archive_resp.status_code == 200
+
+    archived_resp = await client.get("/api/v1/skills", params={"status": "archived"})
+    assert archived_resp.status_code == 200
+    archived_names = [s["name"] for s in archived_resp.json()["items"]]
+    assert archived["name"] in archived_names
+    assert active["name"] not in archived_names
+
+    all_resp = await client.get("/api/v1/skills", params={"status": "all"})
+    assert all_resp.status_code == 200
+    all_names = [s["name"] for s in all_resp.json()["items"]]
+    assert archived["name"] in all_names
+    assert active["name"] in all_names
+
+
 # ── Update (version snapshot) ─────────────────────────
 
 
@@ -208,10 +259,15 @@ async def test_archive_skill(client, skill_factory):
     assert data["status"] == "archived"
     assert data["name"] == name
 
-    # Archived skills should not appear in the default list
+    # Default list now includes all statuses (status filter is explicit).
     list_resp = await client.get("/api/v1/skills")
     list_names = [s["name"] for s in list_resp.json()["items"]]
-    assert name not in list_names
+    assert name in list_names
+
+    # Active-only query should exclude archived skills.
+    active_resp = await client.get("/api/v1/skills", params={"status": "active"})
+    active_names = [s["name"] for s in active_resp.json()["items"]]
+    assert name not in active_names
 
 
 # ── Versions ──────────────────────────────────────────

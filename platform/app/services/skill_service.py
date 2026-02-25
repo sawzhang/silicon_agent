@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Dict, List, Optional
 
-from sqlalchemy import func, select
+from sqlalchemy import String, cast, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.skill import SkillModel, SkillVersionModel
@@ -23,15 +23,42 @@ class SkillService:
         self,
         page: int = 1,
         page_size: int = 20,
+        name: Optional[str] = None,
         layer: Optional[str] = None,
+        tag: Optional[str] = None,
         role: Optional[str] = None,
+        status: Optional[str] = None,
     ) -> SkillListResponse:
-        query = select(SkillModel).where(SkillModel.status != "archived")
-        count_query = select(func.count()).select_from(SkillModel).where(SkillModel.status != "archived")
+        query = select(SkillModel)
+        count_query = select(func.count()).select_from(SkillModel)
+
+        if status:
+            if status != "all":
+                query = query.where(SkillModel.status == status)
+                count_query = count_query.where(SkillModel.status == status)
+
+        if name and name.strip():
+            pattern = f"%{name.strip()}%"
+            name_filter = (SkillModel.name.ilike(pattern) | SkillModel.display_name.ilike(pattern))
+            query = query.where(name_filter)
+            count_query = count_query.where(name_filter)
 
         if layer:
             query = query.where(SkillModel.layer == layer)
             count_query = count_query.where(SkillModel.layer == layer)
+
+        if tag and tag.strip():
+            # Tags are stored as JSON array; match token string conservatively.
+            pattern = f'%"{tag.strip()}"%'
+            tag_filter = cast(SkillModel.tags, String).ilike(pattern)
+            query = query.where(tag_filter)
+            count_query = count_query.where(tag_filter)
+
+        if role and role.strip():
+            pattern = f'%"{role.strip()}"%'
+            role_filter = cast(SkillModel.applicable_roles, String).ilike(pattern)
+            query = query.where(role_filter)
+            count_query = count_query.where(role_filter)
 
         total_result = await self.session.execute(count_query)
         total = total_result.scalar() or 0
