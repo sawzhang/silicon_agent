@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 import re
 from typing import Any, Optional
 
@@ -83,7 +83,7 @@ class TaskLogService:
             item["result"] = self._mask_sensitive_value(item.get("result"))
             # Ensure newly written logs have microsecond precision for deterministic ordering.
             if item.get("created_at") is None:
-                item["created_at"] = datetime.utcnow()
+                item["created_at"] = datetime.now(timezone.utc).replace(tzinfo=None)
             self.session.add(TaskStageLogModel(**item))
 
     async def list_logs(

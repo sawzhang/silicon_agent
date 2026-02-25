@@ -23,6 +23,19 @@ from app.worker.prompts import StageContext, build_user_prompt
 logger = logging.getLogger(__name__)
 
 
+_TOOL_FAILURE_PREFIXES = (
+    "Error:",
+    "Error (exit",
+    "Error reading file:",
+    "Error writing file:",
+    "Exit code:",
+)
+
+
+def infer_tool_status(output: str) -> str:
+    return "failed" if output.startswith(_TOOL_FAILURE_PREFIXES) else "success"
+
+
 async def _safe_broadcast(event: str, data: dict) -> None:
     """Broadcast a WebSocket event, swallowing any errors."""
     try:
@@ -130,6 +143,7 @@ async def execute_stage(
         duration_ms: Optional[float] = None,
         result: Optional[str] = None,
         missing_fields: Optional[list[str]] = None,
+        created_at: Optional[datetime] = None,
     ) -> None:
         stage_logs.append(
             {
@@ -148,6 +162,8 @@ async def execute_stage(
                 "duration_ms": duration_ms,
                 "result": result,
                 "missing_fields": missing_fields or [],
+                # Record event occurrence time, instead of stage-end flush time.
+                "created_at": created_at or datetime.now(timezone.utc).replace(tzinfo=None),
             }
         )
 
@@ -190,7 +206,7 @@ async def execute_stage(
             )
             command = _summarize_tool_command(tool_name, args)
             workspace = args.get("cwd") or fallback_workspace
-            status = "failed" if output.startswith(("Error:", "Exit code:")) else "success"
+            status = infer_tool_status(output)
             missing_fields: list[str] = []
             if not workspace:
                 missing_fields.append("workspace")
