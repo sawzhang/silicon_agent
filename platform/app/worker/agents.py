@@ -5,6 +5,7 @@ import json
 import logging
 import tempfile
 from pathlib import Path
+from typing import Any
 
 from app.config import settings
 from app.worker.prompts import SYSTEM_PROMPTS
@@ -81,6 +82,35 @@ class SandboxedAgentRunner(_BaseRunner):  # type: ignore[misc]
         self.default_cwd = default_cwd
         self.allowed_tools = allowed_tools or _ALL_TOOLS
 
+    def _resolve_workspace_path(self, path: str) -> tuple[str, str | None]:
+        """Resolve a possibly-relative path into task workspace safely."""
+        if not self.default_cwd or not path:
+            return path, None
+
+        raw = Path(path)
+        if raw.is_absolute():
+            return str(raw), None
+
+        workspace = Path(self.default_cwd).resolve()
+        candidate = (workspace / raw).resolve()
+        try:
+            candidate.relative_to(workspace)
+        except ValueError:
+            return path, f"Error: Path escapes workspace: {path}"
+        return str(candidate), None
+
+    def _format_directory_listing(self, path: Path, original: str) -> str:
+        """Return deterministic listing so model can probe workspace via read."""
+        entries = sorted(path.iterdir(), key=lambda p: p.name)
+        max_items = 200
+        lines = [f"Directory listing for {original}:"]
+        for item in entries[:max_items]:
+            suffix = "/" if item.is_dir() else ""
+            lines.append(f"- {item.name}{suffix}")
+        if len(entries) > max_items:
+            lines.append(f"... ({len(entries) - max_items} more entries)")
+        return "\n".join(lines)
+
     def get_tools(self):
         tools = super().get_tools()
         tools = [t for t in tools
@@ -89,12 +119,32 @@ class SandboxedAgentRunner(_BaseRunner):  # type: ignore[misc]
 
     async def _execute_tool(self, tool_call, on_output=None):
         name = tool_call.get("name", "")
+        args: dict[str, Any] = {}
+        if self.default_cwd and name in ("execute", "execute_script", "read", "write"):
+            args = json.loads(tool_call.get("arguments", "{}"))
+
         # Inject default cwd for execution tools
         if self.default_cwd and name in ("execute", "execute_script"):
-            args = json.loads(tool_call.get("arguments", "{}"))
             if not args.get("cwd"):
                 args["cwd"] = self.default_cwd
                 tool_call = {**tool_call, "arguments": json.dumps(args)}
+
+        # Resolve read/write relative paths into task workspace.
+        if self.default_cwd and name in ("read", "write"):
+            path = str(args.get("path") or "")
+            resolved_path, error = self._resolve_workspace_path(path)
+            if error:
+                return error
+            if resolved_path != path:
+                args["path"] = resolved_path
+                tool_call = {**tool_call, "arguments": json.dumps(args)}
+
+            # Doc role has no `execute`; support directory probing via `read`.
+            if name == "read":
+                target = Path(resolved_path)
+                if target.exists() and target.is_dir():
+                    return self._format_directory_listing(target, path or resolved_path)
+
         # Block tools not in whitelist (belt-and-suspenders)
         if name not in self.allowed_tools:
             return f"Error: {name} is not allowed for this role"
