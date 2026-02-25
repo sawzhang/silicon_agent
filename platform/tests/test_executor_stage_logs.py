@@ -55,7 +55,11 @@ async def test_execute_stage_logs_use_event_timestamps(monkeypatch):
     monkeypatch.setattr(executor, "_get_agent", AsyncMock(return_value=None))
     monkeypatch.setattr(executor, "_safe_broadcast", AsyncMock())
     monkeypatch.setattr(executor, "build_user_prompt", lambda _ctx: "prompt")
-    monkeypatch.setattr(executor, "get_agent", lambda _role, _task_id: _FakeRunner())
+    monkeypatch.setattr(
+        executor,
+        "get_agent",
+        lambda _role, _task_id, model=None: _FakeRunner(),
+    )
 
     captured_logs: list[dict] = []
 
@@ -80,4 +84,3 @@ async def test_execute_stage_logs_use_event_timestamps(monkeypatch):
     assert isinstance(llm_request["created_at"], datetime)
     assert isinstance(llm_response["created_at"], datetime)
     assert llm_request["created_at"] <= llm_response["created_at"]
-
