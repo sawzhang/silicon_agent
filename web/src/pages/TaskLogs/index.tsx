@@ -261,6 +261,12 @@ const TaskLogsPage: React.FC = () => {
         render: (_, record) => formatTimestamp(record.created_at),
       },
       {
+        title: '阶段',
+        dataIndex: 'stage_name',
+        width: 160,
+        render: (_, record) => record.stage_name || '-',
+      },
+      {
         title: '来源',
         dataIndex: 'event_source',
         width: 110,
