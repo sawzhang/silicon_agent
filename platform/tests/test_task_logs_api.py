@@ -79,6 +79,7 @@ async def seed_task_stage_logs():
                         'cwd': '/tmp/silicon_agent/tasks/tt-log-task',
                     },
                     workspace='/tmp/silicon_agent/tasks/tt-log-task',
+                    execution_mode='in_process',
                     duration_ms=123.45,
                     result='ok',
                     output_summary='ok',
@@ -158,6 +159,7 @@ async def test_list_task_logs_returns_expected_fields(client, seed_task_stage_lo
 
     assert tool_call['command'] == 'npm test'
     assert tool_call['workspace'] == '/tmp/silicon_agent/tasks/tt-log-task'
+    assert tool_call['execution_mode'] == 'in_process'
     assert tool_call['duration_ms'] == 123.45
     assert tool_call['result'] == 'ok'
     assert tool_call['output_summary'] == 'ok'

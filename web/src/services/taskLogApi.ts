@@ -16,6 +16,7 @@ export interface TaskLogEvent {
   command: string | null;
   command_args: Record<string, unknown> | null;
   workspace: string | null;
+  execution_mode: 'sandbox' | 'in_process' | null;
   duration_ms: number | null;
   result: string | null;
   output_summary: string | null;
