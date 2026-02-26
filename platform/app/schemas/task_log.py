@@ -24,6 +24,7 @@ class TaskLogResponse(BaseModel):
     command: Optional[str] = None
     command_args: Optional[dict[str, Any]] = None
     workspace: Optional[str] = None
+    execution_mode: Optional[str] = None
     duration_ms: Optional[float] = None
     result: Optional[str] = None
     output_summary: Optional[str] = None

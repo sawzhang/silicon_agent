@@ -359,6 +359,7 @@ async def test_execute_stage_tool_single_record_lifecycle(monkeypatch):
     assert tool_create['status'] == 'running'
     assert tool_create['command'] == 'echo hi'
     assert tool_create['workspace'] == '/tmp/test-workspace'
+    assert tool_create['execution_mode'] == 'in_process'
 
     tool_update = next(
         item for item in fake_pipeline.updated if item['log_id'] == tool_create['log_id']
@@ -524,6 +525,7 @@ async def test_execute_stage_sandboxed_emits_standardized_pipeline_events(monkey
     assert tool_event['status'] == 'success'
     assert tool_event['command'] == 'echo sandbox'
     assert tool_event['workspace'] == '/workspace'
+    assert tool_event['execution_mode'] == 'sandbox'
     assert tool_event['duration_ms'] == 12.5
     assert tool_event['result'] == 'ok'
 

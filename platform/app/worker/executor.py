@@ -363,6 +363,7 @@ class StageEventTracker:
                 command=_summarize_tool_command(tool_name, args),
                 command_args={"tool_name": tool_name, **args},
                 workspace=workspace,
+                execution_mode="in_process",
                 missing_fields=missing_fields,
                 priority="high",
             )
@@ -453,6 +454,7 @@ class StageEventTracker:
                 command=_summarize_tool_command(tool_name, args),
                 command_args={"tool_name": tool_name, **args},
                 workspace=workspace,
+                execution_mode="in_process",
                 duration_ms=duration_ms,
                 result=output,
                 output_summary=output,
@@ -1165,6 +1167,7 @@ async def execute_stage_sandboxed(
             "prompt": user_prompt,
         },
         workspace="/workspace",
+        execution_mode="sandbox",
         priority="high",
     )
 
@@ -1197,6 +1200,7 @@ async def execute_stage_sandboxed(
             correlation_id=chat_correlation,
             response_body={"error": sandbox_result.error},
             workspace="/workspace",
+            execution_mode="sandbox",
             duration_ms=round(elapsed * 1000, 2),
             priority="high",
         )
@@ -1230,6 +1234,7 @@ async def execute_stage_sandboxed(
             command=_summarize_tool_command(tool_name, args),
             command_args={"tool_name": tool_name, **args},
             workspace=workspace,
+            execution_mode="sandbox",
             duration_ms=_float_or_none(tc.get("duration_ms")),
             result=result_preview,
             output_summary=result_preview,
@@ -1252,6 +1257,7 @@ async def execute_stage_sandboxed(
             "tool_calls_count": len(sandbox_result.tool_calls),
         },
         workspace="/workspace",
+        execution_mode="sandbox",
         duration_ms=round(elapsed * 1000, 2),
         priority="high",
     )

@@ -17,6 +17,7 @@ import logging
 import shlex
 import time
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Dict, Optional
 
 import httpx
@@ -65,6 +66,17 @@ class SandboxInfo:
 
 
 @dataclass
+class SandboxCreateResult:
+    """Result for sandbox container create operation."""
+
+    info: Optional[SandboxInfo] = None
+    workspace: str = ""
+    workspace_source: str = "fallback"
+    error_code: Optional[str] = None
+    error_message: Optional[str] = None
+
+
+@dataclass
 class SandboxResult:
     """Result from executing a stage inside a sandbox container."""
     text_content: str = ""
@@ -93,15 +105,32 @@ class SandboxManager:
         self,
         task_id: str,
         *,
-        worktree_path: Optional[str] = None,
-        tmpdir: Optional[str] = None,
+        workspace: str,
+        workspace_source: str = "fallback",
         image: Optional[str] = None,
-    ) -> Optional[SandboxInfo]:
+    ) -> SandboxCreateResult:
         """Create a sandbox container for a task.
 
-        Mounts worktree (or tmpdir) at /workspace inside the container.
+        Mounts workspace at /workspace inside the container.
         The container runs agent_server.py which listens on port 9090.
         """
+        def _failed(
+            *,
+            error_code: str,
+            error_message: str,
+            release_sem: bool = True,
+        ) -> SandboxCreateResult:
+            if release_sem:
+                sem.release()
+            logger.error("Sandbox create failed (%s): %s", error_code, error_message)
+            return SandboxCreateResult(
+                info=None,
+                workspace=workspace,
+                workspace_source=workspace_source,
+                error_code=error_code,
+                error_message=error_message,
+            )
+
         sem = _get_semaphore()
         acquired = sem._value > 0  # Check without blocking
         if not acquired:
@@ -113,7 +142,12 @@ class SandboxManager:
 
         container_name = f"sa-sandbox-{task_id[:12]}"
         resolved_image = image or settings.SANDBOX_IMAGE
-        workspace = worktree_path or tmpdir or "/tmp"
+        workspace_path = Path(workspace)
+        if not workspace_path.exists() or not workspace_path.is_dir():
+            return _failed(
+                error_code="workspace_not_found",
+                error_message=f"Sandbox workspace path does not exist or is not a directory: {workspace}",
+            )
 
         # Build docker run command
         docker_cmd = self._build_docker_run_cmd(
@@ -126,9 +160,10 @@ class SandboxManager:
         rc, out, err = await _run(docker_cmd, timeout=120)
 
         if rc != 0:
-            sem.release()
-            logger.error("Failed to create sandbox container: %s", err)
-            return None
+            return _failed(
+                error_code="docker_run_failed",
+                error_message=err or "docker run failed",
+            )
 
         container_id = out.strip()
 
@@ -137,7 +172,13 @@ class SandboxManager:
         if not host:
             sem.release()
             await self._force_remove(container_name)
-            return None
+            return SandboxCreateResult(
+                info=None,
+                workspace=workspace,
+                workspace_source=workspace_source,
+                error_code="container_host_unresolved",
+                error_message=f"Could not resolve container host for {container_name}",
+            )
 
         port = settings.SANDBOX_AGENT_PORT
         info = SandboxInfo(
@@ -152,14 +193,24 @@ class SandboxManager:
             sem.release()
             logger.error("Sandbox container %s failed health check", container_name)
             await self._force_remove(container_name)
-            return None
+            return SandboxCreateResult(
+                info=None,
+                workspace=workspace,
+                workspace_source=workspace_source,
+                error_code="container_unhealthy",
+                error_message=f"Sandbox container {container_name} failed health check",
+            )
 
         self._containers[task_id] = info
         logger.info(
             "Sandbox container ready: %s (%s:%d)",
             container_name, host, port,
         )
-        return info
+        return SandboxCreateResult(
+            info=info,
+            workspace=workspace,
+            workspace_source=workspace_source,
+        )
 
     async def execute_stage(
         self,

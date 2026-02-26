@@ -40,6 +40,7 @@ async def test_update_log_preserves_fields_not_in_partial_payload():
                 status='running',
                 command='npm test',
                 workspace='/tmp/ws',
+                execution_mode='in_process',
                 result='pending',
             )
         )
@@ -64,6 +65,7 @@ async def test_update_log_preserves_fields_not_in_partial_payload():
         assert refreshed.result == 'ok'
         assert refreshed.command == 'npm test'
         assert refreshed.workspace == '/tmp/ws'
+        assert refreshed.execution_mode == 'in_process'
 
         logs = await session.execute(select(TaskStageLogModel).where(TaskStageLogModel.id == log_id))
         for item in logs.scalars().all():

@@ -36,6 +36,7 @@ class TaskStageLogModel(Base):
     command: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     command_args: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
     workspace: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    execution_mode: Mapped[Optional[str]] = mapped_column(String(20), nullable=True, index=True)
     duration_ms: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     result: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     output_summary: Mapped[Optional[str]] = mapped_column(Text, nullable=True)

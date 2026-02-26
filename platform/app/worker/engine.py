@@ -8,6 +8,7 @@ import time
 import uuid
 from collections import defaultdict
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from sqlalchemy import select, update
@@ -95,6 +96,17 @@ async def _close_started_system_log(
         },
         priority="high",
     )
+
+
+def _resolve_sandbox_fallback_mode() -> str:
+    raw = (settings.SANDBOX_FALLBACK_MODE or "graceful").strip().lower()
+    return raw if raw in {"graceful", "strict"} else "graceful"
+
+
+def _resolve_sandbox_workspace(task_id: str, worktree_path: Optional[str]) -> tuple[str, str]:
+    if worktree_path:
+        return worktree_path, "worktree"
+    return str(Path(settings.SANDBOX_WORKSPACE_BASE_DIR) / task_id), "fallback"
 
 
 async def start_worker() -> None:
@@ -318,38 +330,186 @@ async def _setup_worktree(task: TaskModel) -> tuple[Optional[str], Any]:
 
 async def _setup_sandbox(
     task: TaskModel, worktree_path: Optional[str],
-) -> tuple[Any, Any]:
-    """Create sandbox container if enabled. Returns (sandbox_info, sandbox_mgr)."""
-    if not settings.SANDBOX_ENABLED:
-        return None, None
+) -> tuple[Any, Any, Optional[str]]:
+    """Create sandbox container if enabled.
 
-    from app.worker.sandbox import get_sandbox_manager
+    Returns (sandbox_info, sandbox_mgr, sandbox_required_error).
+    """
+    if not settings.SANDBOX_ENABLED:
+        return None, None, None
+
+    from app.worker.sandbox import SandboxCreateResult, get_sandbox_manager
+
     sandbox_mgr = get_sandbox_manager()
     sandbox_image = None
     if task.project and task.project.sandbox_image:
         sandbox_image = task.project.sandbox_image
-    sandbox_info = None
-    try:
-        sandbox_info = await sandbox_mgr.create(
-            str(task.id),
-            worktree_path=worktree_path,
-            tmpdir=str(
-                __import__("pathlib").Path(__import__("tempfile").gettempdir())
-                / "silicon_agent" / "tasks" / str(task.id)
-            ),
-            image=sandbox_image,
-        )
-        if sandbox_info:
-            logger.info("Task %s using sandbox container: %s", task.id, sandbox_info.container_name)
-        else:
-            logger.warning("Sandbox creation failed for task %s, falling back to in-process", task.id)
-    except Exception:
-        logger.warning(
-            "Failed to create sandbox for task %s, falling back to in-process",
-            task.id, exc_info=True,
+    fallback_mode = _resolve_sandbox_fallback_mode()
+    resolved_workspace, workspace_source = _resolve_sandbox_workspace(str(task.id), worktree_path)
+
+    workspace_prepare_error_code: Optional[str] = None
+    workspace_prepare_error: Optional[str] = None
+    workspace_path = Path(resolved_workspace)
+    if workspace_source == "fallback":
+        try:
+            workspace_path.mkdir(parents=True, exist_ok=True)
+        except Exception as exc:
+            workspace_prepare_error_code = "workspace_prepare_failed"
+            workspace_prepare_error = str(exc)
+    elif not workspace_path.exists() or not workspace_path.is_dir():
+        workspace_prepare_error_code = "worktree_workspace_not_found"
+        workspace_prepare_error = (
+            f"Worktree path does not exist or is not directory: {resolved_workspace}"
         )
 
-    return sandbox_info, sandbox_mgr
+    sandbox_corr = f"sandbox-create-{uuid.uuid4().hex}"
+    sandbox_started_at = time.monotonic()
+    sandbox_started_log_id = await _emit_system_log(
+        task,
+        event_type="sandbox_create_started",
+        status="running",
+        correlation_id=sandbox_corr,
+        response_body={
+            "workspace": resolved_workspace,
+            "workspace_source": workspace_source,
+            "fallback_mode": fallback_mode,
+            "image": sandbox_image or settings.SANDBOX_IMAGE,
+        },
+    )
+
+    sandbox_info = None
+    sandbox_required_error: Optional[str] = None
+    try:
+        if workspace_prepare_error_code:
+            create_result = SandboxCreateResult(
+                info=None,
+                workspace=resolved_workspace,
+                workspace_source=workspace_source,
+                error_code=workspace_prepare_error_code,
+                error_message=workspace_prepare_error,
+            )
+        else:
+            create_result = await sandbox_mgr.create(
+                str(task.id),
+                workspace=resolved_workspace,
+                workspace_source=workspace_source,
+                image=sandbox_image,
+            )
+
+        sandbox_info = create_result.info
+        duration_ms = round((time.monotonic() - sandbox_started_at) * 1000, 2)
+        if sandbox_info:
+            logger.info("Task %s using sandbox container: %s", task.id, sandbox_info.container_name)
+            await _emit_system_log(
+                task,
+                event_type="sandbox_create_finished",
+                status="success",
+                correlation_id=sandbox_corr,
+                duration_ms=duration_ms,
+                response_body={
+                    "workspace": create_result.workspace,
+                    "workspace_source": create_result.workspace_source,
+                    "container_name": sandbox_info.container_name,
+                },
+            )
+            await _close_started_system_log(
+                started_log_id=sandbox_started_log_id,
+                started_at_monotonic=sandbox_started_at,
+                status="success",
+            )
+        else:
+            error_code = create_result.error_code or "sandbox_create_failed"
+            error_message = create_result.error_message or "sandbox_create_failed"
+            sandbox_required_error = f"{error_code}: {error_message}"
+            await _emit_system_log(
+                task,
+                event_type="sandbox_create_finished",
+                status="failed",
+                correlation_id=sandbox_corr,
+                duration_ms=duration_ms,
+                result=sandbox_required_error,
+                response_body={
+                    "workspace": create_result.workspace,
+                    "workspace_source": create_result.workspace_source,
+                    "error_code": error_code,
+                    "error": error_message,
+                },
+            )
+            await _close_started_system_log(
+                started_log_id=sandbox_started_log_id,
+                started_at_monotonic=sandbox_started_at,
+                status="failed",
+                result=sandbox_required_error,
+            )
+            if fallback_mode == "graceful":
+                await _emit_system_log(
+                    task,
+                    event_type="sandbox_fallback",
+                    status="success",
+                    correlation_id=sandbox_corr,
+                    response_body={
+                        "fallback_mode": fallback_mode,
+                        "execution_mode": "in_process",
+                        "workspace": create_result.workspace,
+                        "error_code": error_code,
+                        "error": error_message,
+                    },
+                )
+                logger.warning(
+                    "Sandbox creation failed for task %s (%s), falling back to in-process",
+                    task.id,
+                    sandbox_required_error,
+                )
+            else:
+                logger.error(
+                    "Sandbox creation failed for task %s in strict mode: %s",
+                    task.id,
+                    sandbox_required_error,
+                )
+    except Exception:
+        if fallback_mode == "graceful":
+            logger.warning(
+                "Failed to create sandbox for task %s, falling back to in-process",
+                task.id,
+                exc_info=True,
+            )
+        else:
+            logger.error(
+                "Failed to create sandbox for task %s in strict mode",
+                task.id,
+                exc_info=True,
+            )
+        duration_ms = round((time.monotonic() - sandbox_started_at) * 1000, 2)
+        sandbox_required_error = "sandbox_create_exception"
+        await _emit_system_log(
+            task,
+            event_type="sandbox_create_finished",
+            status="failed",
+            correlation_id=sandbox_corr,
+            duration_ms=duration_ms,
+            result=sandbox_required_error,
+            response_body={"error_code": "sandbox_create_exception"},
+        )
+        await _close_started_system_log(
+            started_log_id=sandbox_started_log_id,
+            started_at_monotonic=sandbox_started_at,
+            status="failed",
+            result=sandbox_required_error,
+        )
+        if fallback_mode == "graceful":
+            await _emit_system_log(
+                task,
+                event_type="sandbox_fallback",
+                status="success",
+                correlation_id=sandbox_corr,
+                response_body={
+                    "fallback_mode": "graceful",
+                    "execution_mode": "in_process",
+                    "error_code": "sandbox_create_exception",
+                },
+            )
+
+    return sandbox_info, sandbox_mgr, sandbox_required_error
 
 
 async def _finalize_task_resources(
@@ -598,7 +758,7 @@ async def _process_task(session: AsyncSession, task: TaskModel) -> None:
 
     # Setup git worktree and sandbox
     worktree_path, worktree_mgr = await _setup_worktree(task)
-    sandbox_info, sandbox_mgr = await _setup_sandbox(task, worktree_path)
+    sandbox_info, sandbox_mgr, sandbox_required_error = await _setup_sandbox(task, worktree_path)
 
     # Load project memory for this task's project
     project_memory_store = None
@@ -614,7 +774,7 @@ async def _process_task(session: AsyncSession, task: TaskModel) -> None:
         await _process_task_graph(
             session, task, sorted_stages, stage_defs, gates,
             prior_outputs, compression, structured_outputs,
-            project_memory_store, repo_context, worktree_path, sandbox_info,
+            project_memory_store, repo_context, worktree_path, sandbox_info, sandbox_required_error,
         )
         # Finalize and return
         await _finalize_task_resources(
@@ -681,6 +841,7 @@ async def _process_task(session: AsyncSession, task: TaskModel) -> None:
                 session, task, stage, stage_index_base,
                 prior_outputs, compression, project_memory_store,
                 repo_context, stage_defs, worktree_path, sandbox_info,
+                sandbox_required_error=sandbox_required_error,
             )
             if result is None:
                 return  # stage failed or circuit breaker
@@ -709,7 +870,7 @@ async def _process_task(session: AsyncSession, task: TaskModel) -> None:
                     session, task, stage, gate_def,
                     result, stage_index_base, prior_outputs, compression,
                     project_memory_store, repo_context, stage_defs,
-                    worktree_path, sandbox_info,
+                    worktree_path, sandbox_info, sandbox_required_error,
                 )
                 if gate_result is None:
                     return  # task failed or gate rejected without retries
@@ -749,6 +910,7 @@ async def _process_task(session: AsyncSession, task: TaskModel) -> None:
                     session, task, stage, stage_index_base,
                     prior_outputs, compression, project_memory_store,
                     repo_context, stage_defs, worktree_path, sandbox_info,
+                    sandbox_required_error=sandbox_required_error,
                 )
                 tasks_map[stage.stage_name] = (stage, asyncio.create_task(coro))
 
@@ -793,7 +955,7 @@ async def _process_task(session: AsyncSession, task: TaskModel) -> None:
                         session, task, stage, gate_def,
                         output, stage_index_base, prior_outputs, compression,
                         project_memory_store, repo_context, stage_defs,
-                        worktree_path, sandbox_info,
+                        worktree_path, sandbox_info, sandbox_required_error,
                     )
                     if gate_result is None:
                         return
@@ -825,6 +987,7 @@ async def _process_task_graph(
     repo_context: Optional[str],
     worktree_path: Optional[str] = None,
     sandbox_info=None,
+    sandbox_required_error: Optional[str] = None,
 ) -> None:
     """Phase 3.1: Graph-driven stage execution loop.
 
@@ -922,6 +1085,7 @@ async def _process_task_graph(
                 session, task, stage, stage_index,
                 prior_outputs, compression, project_memory_store,
                 repo_context, stage_defs, worktree_path, sandbox_info,
+                sandbox_required_error=sandbox_required_error,
             )
             if result is None:
                 failed.add(node.name)
@@ -959,7 +1123,7 @@ async def _process_task_graph(
                     session, task, stage, gate_def,
                     result, stage_index, prior_outputs, compression,
                     project_memory_store, repo_context, stage_defs,
-                    worktree_path, sandbox_info,
+                    worktree_path, sandbox_info, sandbox_required_error,
                 )
                 if gate_result is None:
                     return
@@ -985,6 +1149,7 @@ async def _process_task_graph(
                     session, task, stage, stage_index,
                     prior_outputs, compression, project_memory_store,
                     repo_context, stage_defs, worktree_path, sandbox_info,
+                    sandbox_required_error=sandbox_required_error,
                 )
                 tasks_async[node.name] = (stage, asyncio.create_task(coro))
 
@@ -1029,6 +1194,7 @@ async def _execute_single_stage(
     worktree_path: Optional[str] = None,
     sandbox_info=None,
     gate_rejection_context: Optional[Dict[str, str]] = None,
+    sandbox_required_error: Optional[str] = None,
 ) -> Optional[str]:
     """Execute a single stage with model routing and retry context.
 
@@ -1053,9 +1219,13 @@ async def _execute_single_stage(
     # Phase 1.5: Cross-stage context recall — override compression for specified stages
     context_from = sdef.get("context_from")
     full_context_stages = set(context_from) if context_from else None
-    compressed_prior = compression.build_prior_context(
-        stage_index, full_context_stages=full_context_stages,
-    )
+    try:
+        compressed_prior = compression.build_prior_context(
+            stage_index, full_context_stages=full_context_stages,
+        )
+    except TypeError:
+        # Backward-compatible for stubs/legacy implementations without full_context_stages.
+        compressed_prior = compression.build_prior_context(stage_index)
 
     # Build retry context if this stage previously failed (smart retry)
     retry_context: Optional[Dict[str, str]] = None
@@ -1115,9 +1285,31 @@ async def _execute_single_stage(
     # Determine working directory: worktree for code-producing roles, tmpdir otherwise
     _CODE_ROLES = {"coding", "test"}
     effective_workdir = worktree_path if (worktree_path and stage.agent_role in _CODE_ROLES) else None
+    fallback_mode = _resolve_sandbox_fallback_mode()
 
     # Route to sandbox container or in-process execution
     use_sandbox = sandbox_info is not None and stage.agent_role in _CODE_ROLES
+
+    if (
+        settings.SANDBOX_ENABLED
+        and stage.agent_role in _CODE_ROLES
+        and not use_sandbox
+        and fallback_mode == "strict"
+    ):
+        reason = sandbox_required_error or "sandbox_unavailable"
+        error_msg = f"Sandbox unavailable in strict mode: {reason}"
+        logger.error(
+            "Strict sandbox mode blocked stage %s for task %s: %s",
+            stage.stage_name,
+            task.id,
+            error_msg,
+        )
+        await mark_stage_failed(session, task, stage, error_msg)
+        from app.worker.agents import close_agents_for_task
+
+        close_agents_for_task(str(task.id))
+        await _fail_task(session, task, f"Stage {stage.stage_name} failed: {error_msg}")
+        return None
 
     try:
         if use_sandbox:
@@ -1569,6 +1761,7 @@ async def _handle_gate_with_retry(
     stage_defs: Dict[str, dict],
     worktree_path: Optional[str] = None,
     sandbox_info=None,
+    sandbox_required_error: Optional[str] = None,
 ) -> Optional[str]:
     """Handle gate with retry loop for rejected gates (Phase 1.3).
 
@@ -1606,6 +1799,7 @@ async def _handle_gate_with_retry(
                 prior_outputs, compression, project_memory_store,
                 repo_context, stage_defs, worktree_path, sandbox_info,
                 gate_rejection_context=gate_rejection_ctx,
+                sandbox_required_error=sandbox_required_error,
             )
             if new_output is None:
                 return None
@@ -1639,6 +1833,7 @@ async def _handle_gate_with_retry(
                     prior_outputs, compression, project_memory_store,
                     repo_context, stage_defs, worktree_path, sandbox_info,
                     gate_rejection_context=gate_rejection_ctx,
+                    sandbox_required_error=sandbox_required_error,
                 )
                 if new_output is None:
                     return None

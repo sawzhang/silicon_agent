@@ -141,6 +141,7 @@ class TaskLogService:
             "command",
             "command_args",
             "workspace",
+            "execution_mode",
             "duration_ms",
             "result",
             "output_summary",

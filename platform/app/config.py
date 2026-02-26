@@ -80,6 +80,8 @@ class Settings(BaseSettings):
     SANDBOX_AGENT_PORT: int = 9090
     SANDBOX_READONLY_ROOT: bool = True
     SANDBOX_MAX_CONCURRENT: int = 4
+    SANDBOX_WORKSPACE_BASE_DIR: str = "/tmp/silicon_agent/tasks"
+    SANDBOX_FALLBACK_MODE: str = "graceful"
 
     # Memory & compression configuration
     MEMORY_ENABLED: bool = True
