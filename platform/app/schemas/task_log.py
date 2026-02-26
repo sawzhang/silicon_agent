@@ -12,6 +12,8 @@ class TaskLogResponse(BaseModel):
     stage_id: Optional[str] = None
     stage_name: str
     agent_role: Optional[str] = None
+    correlation_id: Optional[str] = None
+    event_seq: int
 
     event_type: str
     event_source: str
@@ -24,6 +26,8 @@ class TaskLogResponse(BaseModel):
     workspace: Optional[str] = None
     duration_ms: Optional[float] = None
     result: Optional[str] = None
+    output_summary: Optional[str] = None
+    output_truncated: bool = False
     missing_fields: List[str] = Field(default_factory=list)
 
     created_at: datetime

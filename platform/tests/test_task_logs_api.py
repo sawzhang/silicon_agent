@@ -41,9 +41,11 @@ async def seed_task_stage_logs():
                     stage_id='tt-log-stage',
                     stage_name='coding',
                     agent_role='coding',
-                    event_type='llm_request_sent',
+                    correlation_id='chat-1',
+                    event_seq=1,
+                    event_type='agent_runner_chat_sent',
                     event_source='llm',
-                    status='sent',
+                    status='running',
                     request_body={'prompt': 'write code', 'model': 'gpt-test'},
                 ),
                 TaskStageLogModel(
@@ -52,7 +54,9 @@ async def seed_task_stage_logs():
                     stage_id='tt-log-stage',
                     stage_name='coding',
                     agent_role='coding',
-                    event_type='llm_response_received',
+                    correlation_id='chat-1',
+                    event_seq=2,
+                    event_type='agent_runner_chat_received',
                     event_source='llm',
                     status='success',
                     response_body={'content': 'done'},
@@ -63,6 +67,8 @@ async def seed_task_stage_logs():
                     stage_id='tt-log-stage',
                     stage_name='coding',
                     agent_role='coding',
+                    correlation_id='tool-1',
+                    event_seq=3,
                     event_type='tool_call_executed',
                     event_source='tool',
                     status='success',
@@ -75,6 +81,7 @@ async def seed_task_stage_logs():
                     workspace='/tmp/silicon_agent/tasks/tt-log-task',
                     duration_ms=123.45,
                     result='ok',
+                    output_summary='ok',
                 ),
                 TaskStageLogModel(
                     id='tt-log-4',
@@ -82,10 +89,24 @@ async def seed_task_stage_logs():
                     stage_id='tt-log-stage-parse',
                     stage_name='parse',
                     agent_role='orchestrator',
-                    event_type='llm_request_sent',
+                    event_seq=1,
+                    event_type='agent_runner_chat_sent',
                     event_source='llm',
-                    status='sent',
+                    status='running',
                     request_body={'prompt': 'parse this'},
+                ),
+                TaskStageLogModel(
+                    id='tt-log-5',
+                    task_id='tt-log-task',
+                    stage_id='tt-log-stage',
+                    stage_name='coding',
+                    agent_role='coding',
+                    correlation_id='gate-1',
+                    event_seq=4,
+                    event_type='gate_wait_started',
+                    event_source='system',
+                    status='running',
+                    response_body={'gate_type': 'human_approve'},
                 ),
             ]
         )
@@ -124,18 +145,24 @@ async def test_list_task_logs_returns_expected_fields(client, seed_task_stage_lo
     assert data['total'] >= 3
     assert len(data['items']) >= 3
 
-    llm_request = next(item for item in data['items'] if item['event_type'] == 'llm_request_sent')
-    llm_response = next(item for item in data['items'] if item['event_type'] == 'llm_response_received')
+    llm_request = next(item for item in data['items'] if item['event_type'] == 'agent_runner_chat_sent')
+    llm_response = next(item for item in data['items'] if item['event_type'] == 'agent_runner_chat_received')
     tool_call = next(item for item in data['items'] if item['event_type'] == 'tool_call_executed')
+    system_event = next(item for item in data['items'] if item['event_source'] == 'system')
 
     assert 'prompt' in llm_request['request_body']
     assert 'content' in llm_response['response_body']
+    assert llm_request['status'] == 'running'
+    assert llm_request['correlation_id'] == llm_response['correlation_id']
+    assert llm_request['event_seq'] < llm_response['event_seq']
 
     assert tool_call['command'] == 'npm test'
     assert tool_call['workspace'] == '/tmp/silicon_agent/tasks/tt-log-task'
     assert tool_call['duration_ms'] == 123.45
     assert tool_call['result'] == 'ok'
+    assert tool_call['output_summary'] == 'ok'
     assert tool_call['command_args']['command'] == 'npm test'
+    assert system_event['event_type'] == 'gate_wait_started'
 
 
 @pytest.mark.asyncio
@@ -183,7 +210,7 @@ async def test_list_task_logs_stage_is_optional(client, seed_task_stage_logs):
 
 
 @pytest.mark.asyncio
-async def test_list_task_logs_keeps_insertion_order_with_same_second_timestamp(client):
+async def test_list_task_logs_orders_by_event_seq_for_same_timestamp(client):
     same_created_at = datetime(2026, 2, 24, 13, 30, 0)
     async with async_session_factory() as session:
         task = TaskModel(id='tt-log-order-task', title='Order Test', status='running')
@@ -204,9 +231,10 @@ async def test_list_task_logs_keeps_insertion_order_with_same_second_timestamp(c
                     stage_id='tt-log-order-stage',
                     stage_name='parse',
                     agent_role='orchestrator',
-                    event_type='llm_request_sent',
+                    event_seq=2,
+                    event_type='agent_runner_chat_sent',
                     event_source='llm',
-                    status='sent',
+                    status='running',
                     created_at=same_created_at,
                 ),
                 TaskStageLogModel(
@@ -215,6 +243,7 @@ async def test_list_task_logs_keeps_insertion_order_with_same_second_timestamp(c
                     stage_id='tt-log-order-stage',
                     stage_name='parse',
                     agent_role='orchestrator',
+                    event_seq=1,
                     event_type='tool_call_executed',
                     event_source='tool',
                     status='success',
@@ -227,7 +256,8 @@ async def test_list_task_logs_keeps_insertion_order_with_same_second_timestamp(c
                     stage_id='tt-log-order-stage',
                     stage_name='parse',
                     agent_role='orchestrator',
-                    event_type='llm_response_received',
+                    event_seq=3,
+                    event_type='agent_runner_chat_received',
                     event_source='llm',
                     status='success',
                     created_at=same_created_at,
@@ -244,9 +274,9 @@ async def test_list_task_logs_keeps_insertion_order_with_same_second_timestamp(c
         assert resp.status_code == 200
         data = resp.json()
         assert [item['event_type'] for item in data['items']] == [
-            'llm_request_sent',
             'tool_call_executed',
-            'llm_response_received',
+            'agent_runner_chat_sent',
+            'agent_runner_chat_received',
         ]
     finally:
         async with async_session_factory() as session:

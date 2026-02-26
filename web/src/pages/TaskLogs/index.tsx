@@ -1,9 +1,10 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Alert, Button, Card, Form, Select, Space, Table, Tag, Typography } from 'antd';
+import { Alert, Button, Card, Drawer, Form, Select, Space, Table, Tag, Typography } from 'antd';
 import type { ColumnsType, TablePaginationConfig } from 'antd/es/table';
 import { listTaskLogs, type TaskLogEvent } from '@/services/taskLogApi';
 import { getTaskStages, listTasks } from '@/services/taskApi';
 import { listProjects } from '@/services/projectApi';
+import { useTaskLogStreamStore } from '@/stores/taskLogStreamStore';
 import { formatTimestamp } from '@/utils/formatters';
 
 const { Text } = Typography;
@@ -24,13 +25,24 @@ const EVENT_SOURCE_OPTIONS = [
   { label: '全部', value: '' },
   { label: 'LLM', value: 'llm' },
   { label: 'Tool', value: 'tool' },
+  { label: '系统', value: 'system' },
 ];
 
 const STATUS_COLOR: Record<string, string> = {
   sent: 'processing',
+  running: 'processing',
   success: 'green',
   failed: 'red',
+  cancelled: 'orange',
 };
+
+const SOURCE_COLOR: Record<string, string> = {
+  llm: 'blue',
+  tool: 'purple',
+  system: 'gold',
+};
+
+const TERMINAL_STREAM_STATUS = new Set(['success', 'failed', 'cancelled']);
 
 const TaskLogsPage: React.FC = () => {
   const [form] = Form.useForm<QueryState>();
@@ -47,8 +59,15 @@ const TaskLogsPage: React.FC = () => {
   const [taskLoading, setTaskLoading] = useState(false);
   const [stageOptions, setStageOptions] = useState<SelectOption[]>([]);
   const [stageLoading, setStageLoading] = useState(false);
+  const [streamingLog, setStreamingLog] = useState<TaskLogEvent | null>(null);
   const taskValue = Form.useWatch('task', form);
   const projectValue = Form.useWatch('project', form);
+  const linesByLog = useTaskLogStreamStore((s) => s.linesByLog);
+  const statusByLog = useTaskLogStreamStore((s) => s.statusByLog);
+  const subscribeStream = useTaskLogStreamStore((s) => s.subscribe);
+  const unsubscribeStream = useTaskLogStreamStore((s) => s.unsubscribe);
+  const clearStream = useTaskLogStreamStore((s) => s.clear);
+  const setStreamStatus = useTaskLogStreamStore((s) => s.setStatus);
 
   const fetchLogs = useCallback(async (q: QueryState, nextPage: number, nextPageSize: number) => {
     setLoading(true);
@@ -172,8 +191,69 @@ const TaskLogsPage: React.FC = () => {
     };
   }, [form, taskValue]);
 
+  useEffect(() => {
+    if (!streamingLog) return;
+    return () => {
+      unsubscribeStream(streamingLog.id);
+    };
+  }, [streamingLog, unsubscribeStream]);
+
+  const streamLines = streamingLog ? linesByLog[streamingLog.id] || [] : [];
+  const streamStatus = streamingLog
+    ? statusByLog[streamingLog.id] || streamingLog.status
+    : undefined;
+
+  useEffect(() => {
+    if (!streamingLog || !streamStatus || !query) return;
+    if (!TERMINAL_STREAM_STATUS.has(streamStatus)) return;
+    void fetchLogs(query, page, pageSize);
+  }, [fetchLogs, page, pageSize, query, streamStatus, streamingLog]);
+
+  useEffect(() => {
+    if (!streamingLog) return;
+    const matched = rows.find((item) => item.id === streamingLog.id);
+    if (!matched || !matched.status) return;
+    setStreamStatus(streamingLog.id, matched.status);
+  }, [rows, setStreamStatus, streamingLog]);
+
+  useEffect(() => {
+    if (!streamingLog || !query) return;
+    if (TERMINAL_STREAM_STATUS.has(streamStatus || '')) return;
+    const timer = window.setInterval(() => {
+      void fetchLogs(query, page, pageSize);
+    }, 3000);
+    return () => {
+      window.clearInterval(timer);
+    };
+  }, [fetchLogs, page, pageSize, query, streamStatus, streamingLog]);
+
+  const openStream = useCallback(
+    (record: TaskLogEvent) => {
+      if (streamingLog && streamingLog.id !== record.id) {
+        unsubscribeStream(streamingLog.id);
+      }
+      clearStream(record.id);
+      subscribeStream(record.id);
+      setStreamingLog(record);
+    },
+    [clearStream, streamingLog, subscribeStream, unsubscribeStream],
+  );
+
+  const closeStream = useCallback(() => {
+    if (streamingLog) {
+      unsubscribeStream(streamingLog.id);
+    }
+    setStreamingLog(null);
+  }, [streamingLog, unsubscribeStream]);
+
   const columns: ColumnsType<TaskLogEvent> = useMemo(
     () => [
+      {
+        title: '序号',
+        dataIndex: 'event_seq',
+        width: 90,
+        align: 'right',
+      },
       {
         title: '时间',
         dataIndex: 'created_at',
@@ -183,8 +263,12 @@ const TaskLogsPage: React.FC = () => {
       {
         title: '来源',
         dataIndex: 'event_source',
-        width: 90,
-        render: (_, record) => <Tag>{record.event_source.toUpperCase()}</Tag>,
+        width: 110,
+        render: (_, record) => (
+          <Tag color={SOURCE_COLOR[record.event_source] || 'default'}>
+            {record.event_source.toUpperCase()}
+          </Tag>
+        ),
       },
       {
         title: '类型',
@@ -195,7 +279,9 @@ const TaskLogsPage: React.FC = () => {
         title: '状态',
         dataIndex: 'status',
         width: 100,
-        render: (_, record) => <Tag color={STATUS_COLOR[record.status] || 'default'}>{record.status}</Tag>,
+        render: (_, record) => (
+          <Tag color={STATUS_COLOR[record.status] || 'default'}>{record.status}</Tag>
+        ),
       },
       {
         title: '命令',
@@ -214,8 +300,26 @@ const TaskLogsPage: React.FC = () => {
         align: 'right',
         render: (_, record) => (typeof record.duration_ms === 'number' ? record.duration_ms.toFixed(2) : '-'),
       },
+      {
+        title: '实时输出',
+        width: 120,
+        render: (_, record) => {
+          if (record.event_source !== 'tool') {
+            return '-';
+          }
+          return (
+            <Button
+              size="small"
+              disabled={record.status !== 'running'}
+              onClick={() => openStream(record)}
+            >
+              查看流
+            </Button>
+          );
+        },
+      },
     ],
-    [],
+    [openStream],
   );
 
   const onSearch = async () => {
@@ -357,6 +461,18 @@ const TaskLogsPage: React.FC = () => {
                     </pre>
                   </div>
                 ) : null}
+                {record.output_summary ? (
+                  <div>
+                    <Text strong>输出摘要</Text>
+                    <pre style={{ margin: 0, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                      {record.output_summary}
+                    </pre>
+                    {record.output_truncated ? <Text type="warning">输出已截断（50KB）</Text> : null}
+                  </div>
+                ) : null}
+                {record.correlation_id ? (
+                  <Text type="secondary">关联ID: {record.correlation_id}</Text>
+                ) : null}
                 {record.missing_fields?.length ? (
                   <Text type="warning">缺失字段: {record.missing_fields.join(', ')}</Text>
                 ) : null}
@@ -365,6 +481,49 @@ const TaskLogsPage: React.FC = () => {
           }}
         />
       </Card>
+
+      <Drawer
+        title={streamingLog ? `实时输出 - ${streamingLog.command || streamingLog.event_type}` : '实时输出'}
+        width={720}
+        open={Boolean(streamingLog)}
+        onClose={closeStream}
+      >
+        {streamingLog ? (
+          <Space direction="vertical" size={12} style={{ width: '100%' }}>
+            <Space>
+              <Text strong>日志ID</Text>
+              <Text code>{streamingLog.id}</Text>
+            </Space>
+            <Space>
+              <Text strong>状态</Text>
+              <Tag color={STATUS_COLOR[streamStatus || streamingLog.status] || 'default'}>
+                {streamStatus || streamingLog.status}
+              </Tag>
+            </Space>
+            <pre
+              style={{
+                margin: 0,
+                minHeight: 320,
+                maxHeight: '65vh',
+                overflow: 'auto',
+                whiteSpace: 'pre-wrap',
+                wordBreak: 'break-word',
+                background: '#fafafa',
+                border: '1px solid #f0f0f0',
+                borderRadius: 6,
+                padding: 12,
+              }}
+            >
+              {streamLines.length > 0 ? streamLines.join('') : '等待运行中输出...'}
+            </pre>
+            {TERMINAL_STREAM_STATUS.has(streamStatus || '') ? (
+              <Text type="secondary">执行已结束，列表会显示最终状态和摘要。</Text>
+            ) : (
+              <Text type="secondary">仅显示你打开该面板后的新增输出，不回放历史内容。</Text>
+            )}
+          </Space>
+        ) : null}
+      </Drawer>
     </Space>
   );
 };

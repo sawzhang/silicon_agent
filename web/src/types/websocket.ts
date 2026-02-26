@@ -5,7 +5,7 @@ export type WSMessageType =
   | 'stage_log'
   | 'gate_created'
   | 'gate_resolved'
-  | 'tool_executing'
+  | 'task_log_stream'
   | 'pong';
 
 export interface WSMessage {
@@ -54,4 +54,15 @@ export interface WSStageLogPayload {
   duration_ms?: number;
   result_preview?: string;
   timestamp: string;
+}
+
+export interface WSTaskLogStreamPayload {
+  task_id: string;
+  stage_id: string;
+  stage_name: string;
+  log_id: string;
+  tool_call_id: string;
+  chunk: string;
+  finished: boolean;
+  status?: string;
 }

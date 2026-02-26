@@ -6,6 +6,8 @@ export interface TaskLogEvent {
   stage_id: string | null;
   stage_name: string;
   agent_role: string | null;
+  correlation_id: string | null;
+  event_seq: number;
   event_type: string;
   event_source: 'llm' | 'tool' | string;
   status: string;
@@ -16,6 +18,8 @@ export interface TaskLogEvent {
   workspace: string | null;
   duration_ms: number | null;
   result: string | null;
+  output_summary: string | null;
+  output_truncated: boolean;
   missing_fields: string[];
   created_at: string;
 }

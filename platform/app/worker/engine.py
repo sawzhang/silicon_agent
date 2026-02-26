@@ -4,9 +4,11 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import time
+import uuid
 from collections import defaultdict
 from datetime import datetime, timezone
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -25,6 +27,7 @@ from app.models.gate import HumanGateModel
 from app.models.task import TaskModel, TaskStageModel
 from app.websocket.events import CB_TRIGGERED, GATE_CREATED, TASK_STATUS_CHANGED
 from app.websocket.manager import ws_manager
+from app.services.task_log_pipeline import get_task_log_pipeline
 from app.worker.compressor import CompressionResult, compress_stage_output
 from app.worker.executor import execute_stage, execute_stage_sandboxed, mark_stage_failed
 from app.worker.worktree import get_worktree_manager
@@ -41,6 +44,57 @@ async def _safe_broadcast(event: str, data: dict) -> None:
         await ws_manager.broadcast(event, data)
     except Exception:
         logger.warning("WS broadcast failed for event %s, ignoring", event, exc_info=True)
+
+
+async def _emit_system_log(
+    task: TaskModel,
+    *,
+    stage: TaskStageModel | None = None,
+    event_type: str,
+    status: str = "success",
+    response_body: Optional[dict] = None,
+    duration_ms: Optional[float] = None,
+    result: Optional[str] = None,
+    correlation_id: Optional[str] = None,
+    priority: str = "normal",
+) -> str:
+    pipeline = get_task_log_pipeline()
+    return await pipeline.emit_create(
+        task_id=str(task.id),
+        stage_id=str(stage.id) if stage else None,
+        stage_name=stage.stage_name if stage else "task_orchestrator",
+        agent_role=stage.agent_role if stage else "orchestrator",
+        event_type=event_type,
+        event_source="system",
+        status=status,
+        response_body=response_body,
+        duration_ms=duration_ms,
+        result=result,
+        correlation_id=correlation_id,
+        priority=priority,  # type: ignore[arg-type]
+    )
+
+
+async def _close_started_system_log(
+    *,
+    started_log_id: Optional[str],
+    started_at_monotonic: float,
+    status: str,
+    result: Optional[str] = None,
+) -> None:
+    if not started_log_id:
+        return
+    duration_ms = round((time.monotonic() - started_at_monotonic) * 1000, 2)
+    pipeline = get_task_log_pipeline()
+    await pipeline.emit_update(
+        log_id=started_log_id,
+        updates={
+            "status": status,
+            "duration_ms": duration_ms,
+            "result": result,
+        },
+        priority="high",
+    )
 
 
 async def start_worker() -> None:
@@ -243,6 +297,15 @@ async def _process_task(session: AsyncSession, task: TaskModel) -> None:
         and task.project
         and task.project.repo_local_path
     ):
+        worktree_corr = f"worktree-create-{uuid.uuid4().hex}"
+        worktree_started_at = time.monotonic()
+        worktree_started_log_id = await _emit_system_log(
+            task,
+            event_type="worktree_create_started",
+            status="running",
+            correlation_id=worktree_corr,
+            response_body={"repo_local_path": task.project.repo_local_path},
+        )
         try:
             worktree_mgr = get_worktree_manager(task.project.repo_local_path)
             worktree_path = await worktree_mgr.create_worktree(
@@ -252,10 +315,39 @@ async def _process_task(session: AsyncSession, task: TaskModel) -> None:
             )
             if worktree_path:
                 logger.info("Task %s using worktree: %s", task.id, worktree_path)
+            duration_ms = round((time.monotonic() - worktree_started_at) * 1000, 2)
+            await _emit_system_log(
+                task,
+                event_type="worktree_create_finished",
+                status="success",
+                correlation_id=worktree_corr,
+                response_body={"worktree_path": worktree_path},
+                duration_ms=duration_ms,
+            )
+            await _close_started_system_log(
+                started_log_id=worktree_started_log_id,
+                started_at_monotonic=worktree_started_at,
+                status="success",
+            )
         except Exception:
             logger.warning(
                 "Failed to create worktree for task %s, falling back to tmpdir",
                 task.id, exc_info=True,
+            )
+            duration_ms = round((time.monotonic() - worktree_started_at) * 1000, 2)
+            await _emit_system_log(
+                task,
+                event_type="worktree_create_finished",
+                status="failed",
+                correlation_id=worktree_corr,
+                response_body={"error": "create_worktree_failed"},
+                duration_ms=duration_ms,
+            )
+            await _close_started_system_log(
+                started_log_id=worktree_started_log_id,
+                started_at_monotonic=worktree_started_at,
+                status="failed",
+                result="create_worktree_failed",
             )
 
     # Setup container sandbox (方式1: 整体容器化)
@@ -313,11 +405,11 @@ async def _process_task(session: AsyncSession, task: TaskModel) -> None:
                     "stage": stage.stage_name,
                     "output": stage.output_summary or "",
                 })
-                try:
-                    co = await compress_stage_output(stage.stage_name, stage.output_summary or "")
-                    compression.add(co)
-                except Exception:
-                    logger.warning("Compression failed for resumed stage %s", stage.stage_name, exc_info=True)
+                compressed = await _compress_with_log(task, stage, stage.output_summary or "")
+                if compressed is not None:
+                    compression.add(compressed)
+                else:
+                    logger.warning("Compression failed for resumed stage %s", stage.stage_name)
             stage_index_base += len(group)
             continue
 
@@ -343,11 +435,11 @@ async def _process_task(session: AsyncSession, task: TaskModel) -> None:
             if result is None:
                 return  # stage failed or circuit breaker
             prior_outputs.append({"stage": stage.stage_name, "output": result})
-            try:
-                co = await compress_stage_output(stage.stage_name, result)
-                compression.add(co)
-            except Exception:
-                logger.warning("Compression failed for stage %s", stage.stage_name, exc_info=True)
+            compressed = await _compress_with_log(task, stage, result)
+            if compressed is not None:
+                compression.add(compressed)
+            else:
+                logger.warning("Compression failed for stage %s", stage.stage_name)
 
             await _record_stage_audit(session, stage)
             if await _check_circuit_breaker(session, task, stage):
@@ -398,11 +490,11 @@ async def _process_task(session: AsyncSession, task: TaskModel) -> None:
                 if result is None:
                     return
                 prior_outputs.append({"stage": stage_name, "output": result})
-                try:
-                    co = await compress_stage_output(stage_name, result)
-                    compression.add(co)
-                except Exception:
-                    logger.warning("Compression failed for stage %s", stage_name, exc_info=True)
+                compressed = await _compress_with_log(task, stage, result)
+                if compressed is not None:
+                    compression.add(compressed)
+                else:
+                    logger.warning("Compression failed for stage %s", stage_name)
                 await _record_stage_audit(session, stage)
 
             if await _check_circuit_breaker(session, task, group[0]):
@@ -423,6 +515,15 @@ async def _process_task(session: AsyncSession, task: TaskModel) -> None:
 
     # All stages completed — extract memories from this task
     if settings.MEMORY_ENABLED and project_memory_store and prior_outputs:
+        memory_corr = f"memory-extract-{uuid.uuid4().hex}"
+        memory_started_at = time.monotonic()
+        memory_started_log_id = await _emit_system_log(
+            task,
+            event_type="memory_extract_started",
+            status="running",
+            correlation_id=memory_corr,
+            response_body={"stage_output_count": len(prior_outputs)},
+        )
         try:
             from app.worker.memory_extractor import extract_and_store_memories
             await extract_and_store_memories(
@@ -431,20 +532,80 @@ async def _process_task(session: AsyncSession, task: TaskModel) -> None:
                 task_title=task.title,
                 stage_outputs=prior_outputs,
             )
+            duration_ms = round((time.monotonic() - memory_started_at) * 1000, 2)
+            await _emit_system_log(
+                task,
+                event_type="memory_extract_finished",
+                status="success",
+                correlation_id=memory_corr,
+                duration_ms=duration_ms,
+            )
+            await _close_started_system_log(
+                started_log_id=memory_started_log_id,
+                started_at_monotonic=memory_started_at,
+                status="success",
+            )
         except Exception:
             logger.warning("Memory extraction failed for task %s", task.id, exc_info=True)
+            duration_ms = round((time.monotonic() - memory_started_at) * 1000, 2)
+            await _emit_system_log(
+                task,
+                event_type="memory_extract_finished",
+                status="failed",
+                correlation_id=memory_corr,
+                duration_ms=duration_ms,
+                response_body={"error": "memory_extract_failed"},
+            )
+            await _close_started_system_log(
+                started_log_id=memory_started_log_id,
+                started_at_monotonic=memory_started_at,
+                status="failed",
+                result="memory_extract_failed",
+            )
 
     # Worktree: commit, push, and optionally create PR
     if worktree_mgr and worktree_path:
+        worktree_commit_corr = f"worktree-commit-{uuid.uuid4().hex}"
+        worktree_commit_started_at = time.monotonic()
+        worktree_commit_started_log_id = await _emit_system_log(
+            task,
+            event_type="worktree_commit_push_started",
+            status="running",
+            correlation_id=worktree_commit_corr,
+            response_body={"worktree_path": worktree_path},
+        )
         try:
             branch = await worktree_mgr.commit_and_push(
                 task_id=str(task.id),
                 commit_message=f"feat: {task.title}\n\nTask-ID: {task.id}",
             )
+            duration_ms = round((time.monotonic() - worktree_commit_started_at) * 1000, 2)
+            await _emit_system_log(
+                task,
+                event_type="worktree_commit_push_finished",
+                status="success",
+                correlation_id=worktree_commit_corr,
+                response_body={"branch": branch},
+                duration_ms=duration_ms,
+            )
+            await _close_started_system_log(
+                started_log_id=worktree_commit_started_log_id,
+                started_at_monotonic=worktree_commit_started_at,
+                status="success",
+            )
             if branch:
                 task.branch_name = branch
                 await session.commit()
             if branch and settings.WORKTREE_AUTO_PR:
+                pr_corr = f"worktree-pr-{uuid.uuid4().hex}"
+                pr_started_at = time.monotonic()
+                pr_started_log_id = await _emit_system_log(
+                    task,
+                    event_type="worktree_pr_started",
+                    status="running",
+                    correlation_id=pr_corr,
+                    response_body={"branch": branch},
+                )
                 pr_body = f"Automated PR for task: {task.title}\n\nTask ID: {task.id}"
                 pr_url = await worktree_mgr.create_pr(
                     task_id=str(task.id),
@@ -456,14 +617,79 @@ async def _process_task(session: AsyncSession, task: TaskModel) -> None:
                     task.pr_url = pr_url
                     await session.commit()
                     logger.info("PR created for task %s: %s", task.id, pr_url)
+                pr_duration_ms = round((time.monotonic() - pr_started_at) * 1000, 2)
+                await _emit_system_log(
+                    task,
+                    event_type="worktree_pr_finished",
+                    status="success",
+                    correlation_id=pr_corr,
+                    response_body={"pr_url": pr_url},
+                    duration_ms=pr_duration_ms,
+                )
+                await _close_started_system_log(
+                    started_log_id=pr_started_log_id,
+                    started_at_monotonic=pr_started_at,
+                    status="success",
+                )
         except Exception:
             logger.warning("Worktree commit/push failed for task %s", task.id, exc_info=True)
+            duration_ms = round((time.monotonic() - worktree_commit_started_at) * 1000, 2)
+            await _emit_system_log(
+                task,
+                event_type="worktree_commit_push_finished",
+                status="failed",
+                correlation_id=worktree_commit_corr,
+                response_body={"error": "worktree_commit_push_failed"},
+                duration_ms=duration_ms,
+            )
+            await _close_started_system_log(
+                started_log_id=worktree_commit_started_log_id,
+                started_at_monotonic=worktree_commit_started_at,
+                status="failed",
+                result="worktree_commit_push_failed",
+            )
 
         # Cleanup worktree
+        cleanup_corr = f"worktree-cleanup-{uuid.uuid4().hex}"
+        cleanup_started_at = time.monotonic()
+        cleanup_started_log_id = await _emit_system_log(
+            task,
+            event_type="worktree_cleanup_started",
+            status="running",
+            correlation_id=cleanup_corr,
+        )
         try:
             await worktree_mgr.cleanup_worktree(str(task.id))
+            cleanup_duration_ms = round((time.monotonic() - cleanup_started_at) * 1000, 2)
+            await _emit_system_log(
+                task,
+                event_type="worktree_cleanup_finished",
+                status="success",
+                correlation_id=cleanup_corr,
+                duration_ms=cleanup_duration_ms,
+            )
+            await _close_started_system_log(
+                started_log_id=cleanup_started_log_id,
+                started_at_monotonic=cleanup_started_at,
+                status="success",
+            )
         except Exception:
             logger.warning("Worktree cleanup failed for task %s", task.id, exc_info=True)
+            cleanup_duration_ms = round((time.monotonic() - cleanup_started_at) * 1000, 2)
+            await _emit_system_log(
+                task,
+                event_type="worktree_cleanup_finished",
+                status="failed",
+                correlation_id=cleanup_corr,
+                response_body={"error": "worktree_cleanup_failed"},
+                duration_ms=cleanup_duration_ms,
+            )
+            await _close_started_system_log(
+                started_log_id=cleanup_started_log_id,
+                started_at_monotonic=cleanup_started_at,
+                status="failed",
+                result="worktree_cleanup_failed",
+            )
 
     # Clean up sandbox container
     if sandbox_mgr and sandbox_info:
@@ -559,6 +785,64 @@ async def _execute_single_stage(
         return None
 
 
+async def _compress_with_log(
+    task: TaskModel,
+    stage: TaskStageModel,
+    output: str,
+) -> Any | None:
+    correlation_id = f"compression-{uuid.uuid4().hex}"
+    compression_started_at = time.monotonic()
+    compression_started_log_id = await _emit_system_log(
+        task,
+        stage=stage,
+        event_type="compression_started",
+        status="running",
+        correlation_id=correlation_id,
+        response_body={"output_length": len(output or "")},
+    )
+    try:
+        compressed = await compress_stage_output(stage.stage_name, output)
+    except Exception as exc:
+        duration_ms = round((time.monotonic() - compression_started_at) * 1000, 2)
+        await _emit_system_log(
+            task,
+            stage=stage,
+            event_type="compression_finished",
+            status="failed",
+            correlation_id=correlation_id,
+            duration_ms=duration_ms,
+            response_body={"error": str(exc)},
+        )
+        await _close_started_system_log(
+            started_log_id=compression_started_log_id,
+            started_at_monotonic=compression_started_at,
+            status="failed",
+            result=str(exc),
+        )
+        return None
+
+    duration_ms = round((time.monotonic() - compression_started_at) * 1000, 2)
+    await _emit_system_log(
+        task,
+        stage=stage,
+        event_type="compression_finished",
+        status="success",
+        correlation_id=correlation_id,
+        duration_ms=duration_ms,
+        response_body={
+            "l0_length": len(compressed.l0 or ""),
+            "l1_length": len(compressed.l1 or ""),
+            "l2_length": len(compressed.l2 or ""),
+        },
+    )
+    await _close_started_system_log(
+        started_log_id=compression_started_log_id,
+        started_at_monotonic=compression_started_at,
+        status="success",
+    )
+    return compressed
+
+
 async def _record_stage_audit(session: AsyncSession, stage: TaskStageModel) -> None:
     """Record audit event for a completed stage."""
     await event_collector.record_audit(
@@ -615,6 +899,17 @@ async def _handle_gate(
 
     Returns True if approved, False if rejected.
     """
+    gate_corr = f"gate-wait-{uuid.uuid4().hex}"
+    gate_started_at = time.monotonic()
+    gate_started_log_id = await _emit_system_log(
+        task,
+        stage=stage,
+        event_type="gate_wait_started",
+        status="running",
+        correlation_id=gate_corr,
+        response_body={"gate_type": gate_type},
+    )
+
     gate = HumanGateModel(
         gate_type=gate_type,
         task_id=task.id,
@@ -658,6 +953,22 @@ async def _handle_gate(
                 "Gate %s timed out after %ds (max=%ds)",
                 gate.id, elapsed, settings.WORKER_GATE_MAX_WAIT_SECONDS,
             )
+            duration_ms = round((time.monotonic() - gate_started_at) * 1000, 2)
+            await _emit_system_log(
+                task,
+                stage=stage,
+                event_type="gate_wait_timeout",
+                status="cancelled",
+                correlation_id=gate_corr,
+                duration_ms=duration_ms,
+                response_body={"gate_id": gate.id, "elapsed_seconds": elapsed},
+            )
+            await _close_started_system_log(
+                started_log_id=gate_started_log_id,
+                started_at_monotonic=gate_started_at,
+                status="cancelled",
+                result="gate_wait_timeout",
+            )
             return False
 
         # Re-read gate status from DB (with error handling)
@@ -669,17 +980,80 @@ async def _handle_gate(
 
         if gate.status == "approved":
             logger.info("Gate %s approved", gate.id)
+            duration_ms = round((time.monotonic() - gate_started_at) * 1000, 2)
+            await _emit_system_log(
+                task,
+                stage=stage,
+                event_type="gate_wait_approved",
+                status="success",
+                correlation_id=gate_corr,
+                duration_ms=duration_ms,
+                response_body={"gate_id": gate.id},
+            )
+            await _close_started_system_log(
+                started_log_id=gate_started_log_id,
+                started_at_monotonic=gate_started_at,
+                status="success",
+            )
             return True
         elif gate.status == "rejected":
             logger.info("Gate %s rejected", gate.id)
+            duration_ms = round((time.monotonic() - gate_started_at) * 1000, 2)
+            await _emit_system_log(
+                task,
+                stage=stage,
+                event_type="gate_wait_rejected",
+                status="failed",
+                correlation_id=gate_corr,
+                duration_ms=duration_ms,
+                response_body={"gate_id": gate.id},
+            )
+            await _close_started_system_log(
+                started_log_id=gate_started_log_id,
+                started_at_monotonic=gate_started_at,
+                status="failed",
+                result="gate_rejected",
+            )
             return False
 
         # Also check for task cancellation during gate wait
         if await _is_cancelled(session, task.id):
             logger.info("Task %s cancelled while waiting for gate", task.id)
+            duration_ms = round((time.monotonic() - gate_started_at) * 1000, 2)
+            await _emit_system_log(
+                task,
+                stage=stage,
+                event_type="gate_wait_cancelled",
+                status="cancelled",
+                correlation_id=gate_corr,
+                duration_ms=duration_ms,
+                response_body={"gate_id": gate.id},
+            )
+            await _close_started_system_log(
+                started_log_id=gate_started_log_id,
+                started_at_monotonic=gate_started_at,
+                status="cancelled",
+                result="task_cancelled",
+            )
             return False
 
     # Worker shutting down
+    duration_ms = round((time.monotonic() - gate_started_at) * 1000, 2)
+    await _emit_system_log(
+        task,
+        stage=stage,
+        event_type="gate_wait_cancelled",
+        status="cancelled",
+        correlation_id=gate_corr,
+        duration_ms=duration_ms,
+        response_body={"gate_id": gate.id, "reason": "worker_stopped"},
+    )
+    await _close_started_system_log(
+        started_log_id=gate_started_log_id,
+        started_at_monotonic=gate_started_at,
+        status="cancelled",
+        result="worker_stopped",
+    )
     return False
 
 

@@ -83,6 +83,11 @@ class Settings(BaseSettings):
     MEMORY_MAX_ENTRIES_PER_CATEGORY: int = 50
     MEMORY_MAX_CONTEXT_TOKENS: int = 2000
 
+    # Task log pipeline
+    TASK_LOG_PIPELINE_QUEUE_SIZE: int = 4000
+    TASK_LOG_PIPELINE_FLUSH_INTERVAL_SECONDS: float = 1.0
+    TASK_LOG_PIPELINE_BATCH_SIZE: int = 200
+
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8", "extra": "ignore"}
 
 

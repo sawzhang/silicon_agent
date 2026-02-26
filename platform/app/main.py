@@ -16,6 +16,7 @@ from app.middleware.auth import JWTAuthMiddleware
 from app.middleware.error_handler import ErrorHandlerMiddleware
 from app.middleware.request_logging import RequestLoggingMiddleware
 from app.services.agent_service import AgentService
+from app.services.task_log_pipeline import start_task_log_pipeline, stop_task_log_pipeline
 from app.services.seed_service import seed_demo_data
 from app.services.skill_sync_service import sync_skills_from_filesystem
 from app.services.template_service import TemplateService
@@ -56,6 +57,9 @@ async def lifespan(app: FastAPI):
     logger.info("Initializing WebSocket manager Redis connection...")
     await ws_manager.init_redis(settings.REDIS_URL)
 
+    logger.info("Starting task log pipeline...")
+    await start_task_log_pipeline()
+
     if settings.WORKER_ENABLED:
         if not settings.LLM_API_KEY:
             logger.warning(
@@ -70,6 +74,7 @@ async def lifespan(app: FastAPI):
     # Shutdown
     logger.info("Platform shutting down")
     await stop_worker()
+    await stop_task_log_pipeline()
     from app.integration.notifier import close_notifier
     await close_notifier()
     if settings.SANDBOX_ENABLED:

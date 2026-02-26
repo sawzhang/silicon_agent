@@ -15,6 +15,7 @@ _EVENT_TYPE_MAP = {
     "task:status_changed": "task_update",
     "task:stage_update": "task_update",
     "task:stage_log": "stage_log",
+    "task:log_stream_update": "task_log_stream",
     "gate:created": "gate_created",
     "gate:approved": "gate_resolved",
     "gate:rejected": "gate_resolved",

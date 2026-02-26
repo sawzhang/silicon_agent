@@ -4,7 +4,15 @@ import { useAgentStore } from '@/stores/agentStore';
 import { useActivityStore } from '@/stores/activityStore';
 import { useNotificationStore } from '@/stores/notificationStore';
 import { useStageLogStore } from '@/stores/stageLogStore';
-import type { WSMessage, WSAgentStatusPayload, WSActivityPayload, WSGatePayload, WSStageLogPayload } from '@/types/websocket';
+import { useTaskLogStreamStore } from '@/stores/taskLogStreamStore';
+import type {
+  WSMessage,
+  WSAgentStatusPayload,
+  WSActivityPayload,
+  WSGatePayload,
+  WSStageLogPayload,
+  WSTaskLogStreamPayload,
+} from '@/types/websocket';
 
 export function useWebSocket() {
   const wsRef = useRef<WebSocket | null>(null);
@@ -15,6 +23,7 @@ export function useWebSocket() {
   const updateAgent = useAgentStore((s) => s.updateAgent);
   const addActivity = useActivityStore((s) => s.addActivity);
   const addNotification = useNotificationStore((s) => s.addNotification);
+  const appendStream = useTaskLogStreamStore((s) => s.append);
 
   useEffect(() => {
     function connect() {
@@ -116,6 +125,11 @@ export function useWebSocket() {
         }
         case 'pong':
           break;
+        case 'task_log_stream': {
+          const p = msg.payload as WSTaskLogStreamPayload;
+          appendStream(p, msg.timestamp);
+          break;
+        }
         default:
           break;
       }
@@ -128,5 +142,5 @@ export function useWebSocket() {
       if (heartbeatTimerRef.current) clearInterval(heartbeatTimerRef.current);
       wsRef.current?.close();
     };
-  }, [updateAgent, addActivity, addNotification, queryClient]);
+  }, [updateAgent, addActivity, addNotification, appendStream, queryClient]);
 }

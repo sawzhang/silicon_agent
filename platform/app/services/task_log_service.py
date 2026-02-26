@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 import re
 from typing import Any, Optional
 
-from sqlalchemy import func, literal_column, select
+from sqlalchemy import func, literal_column, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.task_log import TaskStageLogModel
@@ -18,7 +18,7 @@ _SENSITIVE_KEYWORDS = {
     "secret",
     "token",
 }
-_MAX_TEXT_LEN = 20_000
+_MAX_TEXT_LEN = 50_000
 _MAX_PAGE_SIZE = 200
 _TOKEN_RE = re.compile(r"(?i)(bearer\s+[a-z0-9_\-\.]+)")
 
@@ -52,39 +52,130 @@ class TaskLogService:
         return None
 
     @staticmethod
-    def _mask_sensitive_value(value: Any) -> Any:
+    def _sanitize_value(value: Any) -> tuple[Any, bool]:
         if isinstance(value, dict):
             sanitized: dict[str, Any] = {}
+            truncated = False
             for key, item in value.items():
                 key_lower = key.lower()
                 if any(k in key_lower for k in _SENSITIVE_KEYWORDS):
                     sanitized[key] = "***"
-                else:
-                    sanitized[key] = TaskLogService._mask_sensitive_value(item)
-            return sanitized
+                    continue
+                sanitized_item, item_truncated = TaskLogService._sanitize_value(item)
+                truncated = truncated or item_truncated
+                sanitized[key] = sanitized_item
+            return sanitized, truncated
 
         if isinstance(value, list):
-            return [TaskLogService._mask_sensitive_value(item) for item in value]
+            items: list[Any] = []
+            truncated = False
+            for item in value:
+                sanitized_item, item_truncated = TaskLogService._sanitize_value(item)
+                truncated = truncated or item_truncated
+                items.append(sanitized_item)
+            return items, truncated
 
         if isinstance(value, str):
             masked = _TOKEN_RE.sub("***", value)
             if len(masked) > _MAX_TEXT_LEN:
-                return masked[:_MAX_TEXT_LEN] + "\n...[truncated]"
-            return masked
+                return masked[:_MAX_TEXT_LEN] + "\n...[truncated]", True
+            return masked, False
 
-        return value
+        return value, False
 
-    async def append_logs(self, logs: list[dict[str, Any]]) -> None:
+    @classmethod
+    def normalize_log_item(cls, raw: dict[str, Any]) -> dict[str, Any]:
+        item = dict(raw)
+
+        request_body, request_truncated = cls._sanitize_value(item.get("request_body"))
+        response_body, response_truncated = cls._sanitize_value(item.get("response_body"))
+        command_args, command_args_truncated = cls._sanitize_value(item.get("command_args"))
+        result, result_truncated = cls._sanitize_value(item.get("result"))
+        output_summary, summary_truncated = cls._sanitize_value(item.get("output_summary"))
+
+        item["request_body"] = request_body
+        item["response_body"] = response_body
+        item["command_args"] = command_args
+        item["result"] = result
+        item["output_summary"] = output_summary
+
+        item["output_truncated"] = bool(
+            item.get("output_truncated")
+            or request_truncated
+            or response_truncated
+            or command_args_truncated
+            or result_truncated
+            or summary_truncated
+        )
+
+        if item.get("created_at") is None:
+            item["created_at"] = datetime.now(timezone.utc).replace(tzinfo=None)
+
+        if item.get("event_seq") is None:
+            item["event_seq"] = 0
+
+        if item.get("missing_fields") is None:
+            item["missing_fields"] = []
+
+        return item
+
+    async def create_log(self, raw: dict[str, Any]) -> None:
+        item = self.normalize_log_item(raw)
+        self.session.add(TaskStageLogModel(**item))
+
+    async def create_logs(self, logs: list[dict[str, Any]]) -> None:
         for raw in logs:
-            item = dict(raw)
-            item["request_body"] = self._mask_sensitive_value(item.get("request_body"))
-            item["response_body"] = self._mask_sensitive_value(item.get("response_body"))
-            item["command_args"] = self._mask_sensitive_value(item.get("command_args"))
-            item["result"] = self._mask_sensitive_value(item.get("result"))
-            # Ensure newly written logs have microsecond precision for deterministic ordering.
-            if item.get("created_at") is None:
-                item["created_at"] = datetime.now(timezone.utc).replace(tzinfo=None)
-            self.session.add(TaskStageLogModel(**item))
+            await self.create_log(raw)
+
+    async def update_log(self, log_id: str, updates: dict[str, Any]) -> bool:
+        allowed_fields = {
+            "event_type",
+            "event_source",
+            "status",
+            "request_body",
+            "response_body",
+            "command",
+            "command_args",
+            "workspace",
+            "duration_ms",
+            "result",
+            "output_summary",
+            "output_truncated",
+            "missing_fields",
+            "correlation_id",
+        }
+        payload: dict[str, Any] = {}
+        truncated = False
+        for key, value in updates.items():
+            if key not in allowed_fields:
+                continue
+            sanitized_value, value_truncated = self._sanitize_value(value)
+            truncated = truncated or value_truncated
+            payload[key] = sanitized_value
+
+        if "missing_fields" in payload:
+            payload["missing_fields"] = list(payload["missing_fields"] or [])
+        if "output_truncated" in payload:
+            payload["output_truncated"] = bool(payload["output_truncated"])
+        elif truncated:
+            payload["output_truncated"] = True
+        if not payload:
+            return False
+
+        result = await self.session.execute(
+            update(TaskStageLogModel)
+            .where(TaskStageLogModel.id == log_id)
+            .values(**payload)
+        )
+        return (result.rowcount or 0) > 0
+
+    async def get_max_event_seq(self, task_id: str, stage_id: Optional[str] = None) -> int:
+        query = select(func.max(TaskStageLogModel.event_seq)).where(TaskStageLogModel.task_id == task_id)
+        if stage_id is not None:
+            query = query.where(TaskStageLogModel.stage_id == stage_id)
+        result = await self.session.execute(query)
+        value = result.scalar_one_or_none()
+        return int(value or 0)
 
     async def list_logs(
         self,
@@ -107,23 +198,27 @@ class TaskLogService:
             query = query.where(TaskStageLogModel.stage_name == stage_value)
             count_query = count_query.where(TaskStageLogModel.stage_name == stage_value)
 
-        if event_source:
-            query = query.where(TaskStageLogModel.event_source == event_source)
-            count_query = count_query.where(TaskStageLogModel.event_source == event_source)
+        source_value = event_source.strip() if event_source else None
+        if source_value:
+            query = query.where(TaskStageLogModel.event_source == source_value)
+            count_query = count_query.where(TaskStageLogModel.event_source == source_value)
 
         total_result = await self.session.execute(count_query)
         total = total_result.scalar() or 0
 
         bind = self.session.get_bind()
         if bind is not None and bind.dialect.name == "sqlite":
-            # SQLite CURRENT_TIMESTAMP is second precision, so rowid keeps insertion order
-            # for records created in the same second.
             query = query.order_by(
+                TaskStageLogModel.event_seq.asc(),
                 TaskStageLogModel.created_at.asc(),
                 literal_column(f"{TaskStageLogModel.__tablename__}.rowid").asc(),
             )
         else:
-            query = query.order_by(TaskStageLogModel.created_at.asc(), TaskStageLogModel.id.asc())
+            query = query.order_by(
+                TaskStageLogModel.event_seq.asc(),
+                TaskStageLogModel.created_at.asc(),
+                TaskStageLogModel.id.asc(),
+            )
         query = query.offset((page - 1) * page_size).limit(page_size)
 
         result = await self.session.execute(query)
