@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import shlex
 import time
 from dataclasses import dataclass, field
 from typing import Any, Dict, Optional
@@ -21,6 +22,7 @@ from typing import Any, Dict, Optional
 import httpx
 
 from app.config import settings
+from app.integration.skillkit_env import build_sandbox_llm_env
 
 logger = logging.getLogger(__name__)
 
@@ -265,11 +267,15 @@ class SandboxManager:
         # Network — use custom sandbox network if it exists, else host
         parts.append(f"--network={settings.SANDBOX_NETWORK}")
 
-        # LLM environment (passed to container for agent server to use)
-        parts.append(f"-e LLM_API_KEY={settings.LLM_API_KEY}")
-        parts.append(f"-e LLM_BASE_URL={settings.LLM_BASE_URL}")
-        parts.append(f"-e LLM_MODEL={settings.LLM_MODEL}")
-        parts.append(f"-e AGENT_PORT={settings.SANDBOX_AGENT_PORT}")
+        # LLM environment (platform-native + SkillKit compatibility env keys)
+        llm_env = build_sandbox_llm_env(
+            llm_api_key=settings.LLM_API_KEY,
+            llm_base_url=settings.LLM_BASE_URL,
+            llm_model=settings.LLM_MODEL,
+            agent_port=settings.SANDBOX_AGENT_PORT,
+        )
+        for key, value in llm_env.items():
+            parts.append(f"-e {key}={shlex.quote(value)}")
 
         parts.append(image)
 

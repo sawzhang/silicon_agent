@@ -1,5 +1,6 @@
 import json
 import logging
+import os
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
@@ -11,6 +12,7 @@ from app.config import settings
 from app.db.init_db import init_db
 from app.db.session import async_session_factory, engine
 from app.integration.skillkit_bridge import init_bridge
+from app.integration.skillkit_env import hydrate_skillkit_env
 from app.logging_config import setup_logging
 from app.middleware.auth import JWTAuthMiddleware
 from app.middleware.error_handler import ErrorHandlerMiddleware
@@ -32,6 +34,18 @@ async def lifespan(app: FastAPI):
     # Startup
     logger.info("Initializing database tables...")
     await init_db(engine)
+
+    applied_env = hydrate_skillkit_env(
+        os.environ,
+        llm_api_key=settings.LLM_API_KEY,
+        llm_base_url=settings.LLM_BASE_URL,
+        llm_model=settings.LLM_MODEL,
+    )
+    if applied_env:
+        logger.info(
+            "Hydrated SkillKit compatibility env from LLM settings: %s",
+            sorted(applied_env.keys()),
+        )
 
     # Seed default agents and templates
     async with async_session_factory() as session:

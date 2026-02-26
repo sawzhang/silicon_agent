@@ -39,6 +39,41 @@ except ImportError:
 _ALL_TOOLS = {"read", "write", "execute", "execute_script", "skill"}
 
 
+def _normalize_openai_base_url(base_url: str | None) -> str:
+    value = (base_url or "").strip()
+    if not value:
+        return ""
+    value = value.rstrip("/")
+    if value.endswith("/v1"):
+        return value
+    return f"{value}/v1"
+
+
+def _hydrate_skillkit_env_from_llm_env() -> list[str]:
+    """Fallback compatibility for mixed platform/container versions.
+
+    SkillKit reads OPENAI_* / MINIMAX_MODEL, while platform config is LLM_*.
+    """
+    applied: list[str] = []
+    llm_api_key = os.environ.get("LLM_API_KEY")
+    llm_base_url = os.environ.get("LLM_BASE_URL")
+    llm_model = os.environ.get("LLM_MODEL")
+
+    if not os.environ.get("OPENAI_API_KEY") and llm_api_key:
+        os.environ["OPENAI_API_KEY"] = llm_api_key
+        applied.append("OPENAI_API_KEY")
+
+    if not os.environ.get("OPENAI_BASE_URL") and llm_base_url:
+        os.environ["OPENAI_BASE_URL"] = _normalize_openai_base_url(llm_base_url)
+        applied.append("OPENAI_BASE_URL")
+
+    if not os.environ.get("MINIMAX_MODEL") and llm_model:
+        os.environ["MINIMAX_MODEL"] = llm_model
+        applied.append("MINIMAX_MODEL")
+
+    return applied
+
+
 class ContainerAgentRunner(AgentRunner):
     """AgentRunner with tool filtering and cwd injection, running inside the container."""
 
@@ -228,6 +263,9 @@ async def handle_health(request: web.Request) -> web.Response:
 
 
 def create_app() -> web.Application:
+    hydrated = _hydrate_skillkit_env_from_llm_env()
+    if hydrated:
+        logger.info("Hydrated SkillKit env from LLM_* fallback keys: %s", hydrated)
     app = web.Application()
     app.router.add_post("/execute", handle_execute)
     app.router.add_get("/health", handle_health)
