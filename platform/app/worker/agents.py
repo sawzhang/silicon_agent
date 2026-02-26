@@ -297,22 +297,27 @@ def _create_runner(
         enable_tools=enable_tools,
         load_context_files=False,
     )
-    if model:
-        create_kwargs["model"] = model
 
     base = AgentRunner.create(**create_kwargs)
+    if model:
+        # SkillKit's AgentConfig.from_env already sets model internally.
+        # Override after creation to avoid duplicate keyword collisions.
+        base.config.model = model
     runner = SandboxedAgentRunner(
         engine=base.engine,
         config=base.config,
         default_cwd=str(workdir),
         allowed_tools=allowed,
     )
+    configured_model = getattr(runner.config, "model", None)
     logger.info(
-        "Created SandboxedAgentRunner for role=%s task=%s model=%s max_turns=%s "
+        "Created SandboxedAgentRunner for role=%s task=%s requested_model=%s "
+        "effective_model=%s max_turns=%s "
         "skill_dirs=%s tools=%s enable_tools=%s cwd=%s",
         role,
         task_id,
         model or "default",
+        configured_model or "default",
         effective_max_turns,
         [str(p) for p in effective_skill_dirs],
         sorted(allowed),

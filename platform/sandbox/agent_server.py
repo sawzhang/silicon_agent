@@ -141,11 +141,13 @@ async def handle_execute(request: web.Request) -> web.Response:
         enable_tools=enable_tools,
         load_context_files=False,
     )
-    if model:
-        create_kwargs["model"] = model
 
     try:
         base = AgentRunner.create(**create_kwargs)
+        if model:
+            # SkillKit's AgentConfig.from_env already sets model internally.
+            # Override after creation to avoid duplicate keyword collisions.
+            base.config.model = model
         runner = ContainerAgentRunner(
             engine=base.engine,
             config=base.config,

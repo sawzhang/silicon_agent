@@ -1,4 +1,7 @@
 """Tests for the agent role tool whitelist configuration."""
+from types import SimpleNamespace
+
+from app.worker import agents as agents_mod
 from app.worker.agents import ROLE_TOOLS, _ALL_TOOLS
 
 
@@ -43,3 +46,59 @@ def test_orchestrator_no_write():
     tools = ROLE_TOOLS["orchestrator"]
     assert "write" not in tools
     assert "execute_script" not in tools
+
+
+def test_create_runner_does_not_pass_model_to_agentrunner(monkeypatch, tmp_path):
+    captured: dict[str, object] = {}
+
+    class _FakeAgentRunner:
+        @staticmethod
+        def create(**kwargs):
+            captured["kwargs"] = kwargs
+            return SimpleNamespace(
+                engine=object(),
+                config=SimpleNamespace(model="env-default", load_context_files=False),
+            )
+
+    monkeypatch.setattr(agents_mod, "AgentRunner", _FakeAgentRunner)
+    monkeypatch.setattr(agents_mod, "SKILLKIT_AVAILABLE", True)
+
+    runner = agents_mod._create_runner(
+        "doc",
+        "tt-task-model-override",
+        model="gpt-5.1-codex-mini",
+        skill_dirs=[tmp_path],
+    )
+
+    kwargs = captured["kwargs"]
+    assert isinstance(kwargs, dict)
+    assert "model" not in kwargs
+    assert runner.config.model == "gpt-5.1-codex-mini"
+
+
+def test_create_runner_keeps_env_model_when_override_missing(monkeypatch, tmp_path):
+    captured: dict[str, object] = {}
+
+    class _FakeAgentRunner:
+        @staticmethod
+        def create(**kwargs):
+            captured["kwargs"] = kwargs
+            return SimpleNamespace(
+                engine=object(),
+                config=SimpleNamespace(model="env-default", load_context_files=False),
+            )
+
+    monkeypatch.setattr(agents_mod, "AgentRunner", _FakeAgentRunner)
+    monkeypatch.setattr(agents_mod, "SKILLKIT_AVAILABLE", True)
+
+    runner = agents_mod._create_runner(
+        "doc",
+        "tt-task-model-default",
+        model=None,
+        skill_dirs=[tmp_path],
+    )
+
+    kwargs = captured["kwargs"]
+    assert isinstance(kwargs, dict)
+    assert "model" not in kwargs
+    assert runner.config.model == "env-default"
