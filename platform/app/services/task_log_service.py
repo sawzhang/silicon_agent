@@ -127,6 +127,10 @@ class TaskLogService:
         for raw in logs:
             await self.create_log(raw)
 
+    async def append_logs(self, logs: list[dict[str, Any]]) -> None:
+        """Backward-compatible alias used by sandbox executor paths."""
+        await self.create_logs(logs)
+
     async def update_log(self, log_id: str, updates: dict[str, Any]) -> bool:
         allowed_fields = {
             "event_type",

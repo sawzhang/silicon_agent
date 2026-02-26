@@ -16,7 +16,6 @@ from app.config import settings
 from app.models.agent import AgentModel
 from app.models.task import TaskModel, TaskStageModel
 from app.services.task_log_pipeline import get_task_log_pipeline
-from app.services.task_log_service import TaskLogService
 from app.websocket.events import AGENT_STATUS_CHANGED, TASK_LOG_STREAM_UPDATE, TASK_STAGE_UPDATE
 from app.websocket.manager import ws_manager
 from app.worker.agents import get_agent, get_agent_text_only
@@ -937,33 +936,30 @@ async def execute_stage_sandboxed(
     max_turns_map = {"spec": 20, "coding": 20, "doc": 20, "test": 20}
     max_turns = max_turns_map.get(stage.agent_role, 10)
 
-    # 5. Log the request
-    log_service = TaskLogService(session)
-    stage_logs: list[dict[str, Any]] = []
-
-    stage_logs.append({
-        "task_id": str(task.id),
-        "stage_id": str(stage.id),
-        "stage_name": stage.stage_name,
-        "agent_role": stage.agent_role,
-        "event_type": "llm_request_sent",
-        "event_source": "sandbox",
-        "status": "sent",
-        "request_body": {
+    # 5. Log the request via shared pipeline contract
+    pipeline = get_task_log_pipeline()
+    task_id = str(task.id)
+    stage_id = str(stage.id)
+    chat_correlation = f"chat-{uuid.uuid4().hex}"
+    await pipeline.emit_create(
+        task_id=task_id,
+        stage_id=stage_id,
+        stage_name=stage.stage_name,
+        agent_role=stage.agent_role,
+        event_type="agent_runner_chat_sent",
+        event_source="llm",
+        status="running",
+        correlation_id=chat_correlation,
+        request_body={
             "sandbox": sandbox_info.container_name,
             "model": resolved_model,
             "stage": stage.stage_name,
             "agent_role": stage.agent_role,
             "prompt": user_prompt,
         },
-        "response_body": None,
-        "command": None,
-        "command_args": None,
-        "workspace": "/workspace",
-        "duration_ms": None,
-        "result": None,
-        "missing_fields": [],
-    })
+        workspace="/workspace",
+        priority="high",
+    )
 
     # 6. Send to sandbox container
     sandbox_mgr = get_sandbox_manager()
@@ -983,72 +979,75 @@ async def execute_stage_sandboxed(
     elapsed = time.monotonic() - start_time
 
     if sandbox_result.error:
-        stage_logs.append({
-            "task_id": str(task.id),
-            "stage_id": str(stage.id),
-            "stage_name": stage.stage_name,
-            "agent_role": stage.agent_role,
-            "event_type": "llm_response_received",
-            "event_source": "sandbox",
-            "status": "failed",
-            "request_body": None,
-            "response_body": {"error": sandbox_result.error},
-            "command": None,
-            "command_args": None,
-            "workspace": "/workspace",
-            "duration_ms": round(elapsed * 1000, 2),
-            "result": None,
-            "missing_fields": [],
-        })
-        await log_service.append_logs(stage_logs)
-        await session.commit()
+        await pipeline.emit_create(
+            task_id=task_id,
+            stage_id=stage_id,
+            stage_name=stage.stage_name,
+            agent_role=stage.agent_role,
+            event_type="agent_runner_chat_received",
+            event_source="llm",
+            status="failed",
+            correlation_id=chat_correlation,
+            response_body={"error": sandbox_result.error},
+            workspace="/workspace",
+            duration_ms=round(elapsed * 1000, 2),
+            priority="high",
+        )
         raise RuntimeError(f"Sandbox execution failed: {sandbox_result.error}")
 
     output = sandbox_result.text_content
     total_tokens = sandbox_result.total_tokens
 
     # Log tool calls from sandbox
-    for tc in sandbox_result.tool_calls:
-        stage_logs.append({
-            "task_id": str(task.id),
-            "stage_id": str(stage.id),
-            "stage_name": stage.stage_name,
-            "agent_role": stage.agent_role,
-            "event_type": "tool_call_executed",
-            "event_source": "sandbox_tool",
-            "status": tc.get("status", "success"),
-            "request_body": None,
-            "response_body": None,
-            "command": tc.get("tool_name", ""),
-            "command_args": tc.get("args", {}),
-            "workspace": tc.get("args", {}).get("cwd", "/workspace"),
-            "duration_ms": tc.get("duration_ms"),
-            "result": tc.get("result_preview", ""),
-            "missing_fields": [],
-        })
+    for index, tc in enumerate(sandbox_result.tool_calls):
+        tool_name = str(tc.get("tool_name") or "")
+        args = tc.get("args") if isinstance(tc.get("args"), dict) else {}
+        workspace = str(args.get("cwd") or "/workspace").strip() or "/workspace"
+        result_preview = str(tc.get("result_preview") or "")
+        raw_status = str(tc.get("status") or "").strip().lower()
+        status = raw_status if raw_status in {"success", "failed", "cancelled"} else infer_tool_status(
+            result_preview,
+        )
+        correlation_id = str(tc.get("tool_call_id") or "").strip() or (
+            f"{chat_correlation}:tool:{index + 1}"
+        )
+        await pipeline.emit_create(
+            task_id=task_id,
+            stage_id=stage_id,
+            stage_name=stage.stage_name,
+            agent_role=stage.agent_role,
+            event_type="tool_call_executed",
+            event_source="tool",
+            status=status,
+            correlation_id=correlation_id,
+            command=_summarize_tool_command(tool_name, args),
+            command_args={"tool_name": tool_name, **args},
+            workspace=workspace,
+            duration_ms=_float_or_none(tc.get("duration_ms")),
+            result=result_preview,
+            output_summary=result_preview,
+            priority="high",
+        )
 
     # Log success response
-    stage_logs.append({
-        "task_id": str(task.id),
-        "stage_id": str(stage.id),
-        "stage_name": stage.stage_name,
-        "agent_role": stage.agent_role,
-        "event_type": "llm_response_received",
-        "event_source": "sandbox",
-        "status": "success",
-        "request_body": None,
-        "response_body": {
+    await pipeline.emit_create(
+        task_id=task_id,
+        stage_id=stage_id,
+        stage_name=stage.stage_name,
+        agent_role=stage.agent_role,
+        event_type="agent_runner_chat_received",
+        event_source="llm",
+        status="success",
+        correlation_id=chat_correlation,
+        response_body={
             "content": output[:2000] if output else "",
             "total_tokens": total_tokens,
             "tool_calls_count": len(sandbox_result.tool_calls),
         },
-        "command": None,
-        "command_args": None,
-        "workspace": "/workspace",
-        "duration_ms": round(elapsed * 1000, 2),
-        "result": None,
-        "missing_fields": [],
-    })
+        workspace="/workspace",
+        duration_ms=round(elapsed * 1000, 2),
+        priority="high",
+    )
 
     # 7. Update stage as completed
     stage.status = "completed"
@@ -1056,7 +1055,6 @@ async def execute_stage_sandboxed(
     stage.duration_seconds = round(elapsed, 2)
     stage.tokens_used = total_tokens
     stage.output_summary = output
-    await log_service.append_logs(stage_logs)
     await session.commit()
 
     # 8. Update task total tokens and cost

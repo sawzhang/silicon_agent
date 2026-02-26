@@ -131,3 +131,58 @@ async def test_create_log_truncates_large_result_fields():
         if task:
             await session.delete(task)
         await session.commit()
+
+
+@pytest.mark.asyncio
+async def test_append_logs_backwards_compatible_alias():
+    task_id = 'tt-log-service-task-3'
+    stage_id = 'tt-log-service-stage-3'
+    log_id = 'tt-log-service-log-3'
+
+    async with async_session_factory() as session:
+        session.add(TaskModel(id=task_id, title='Task Log Alias', status='running'))
+        session.add(
+            TaskStageModel(
+                id=stage_id,
+                task_id=task_id,
+                stage_name='coding',
+                agent_role='coding',
+                status='running',
+            )
+        )
+        await session.commit()
+
+        service = TaskLogService(session)
+        await service.append_logs(
+            [
+                {
+                    'id': log_id,
+                    'task_id': task_id,
+                    'stage_id': stage_id,
+                    'stage_name': 'coding',
+                    'agent_role': 'coding',
+                    'event_seq': 1,
+                    'event_type': 'tool_call_executed',
+                    'event_source': 'tool',
+                    'status': 'success',
+                    'result': 'ok',
+                }
+            ]
+        )
+        await session.commit()
+
+        created = await session.get(TaskStageLogModel, log_id)
+        assert created is not None
+        assert created.status == 'success'
+        assert created.result == 'ok'
+
+        logs = await session.execute(select(TaskStageLogModel).where(TaskStageLogModel.id == log_id))
+        for item in logs.scalars().all():
+            await session.delete(item)
+        stage = await session.get(TaskStageModel, stage_id)
+        if stage:
+            await session.delete(stage)
+        task = await session.get(TaskModel, task_id)
+        if task:
+            await session.delete(task)
+        await session.commit()
