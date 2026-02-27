@@ -1218,7 +1218,8 @@ async def execute_stage_sandboxed(
     system_prompt = SYSTEM_PROMPTS.get(stage.agent_role, SYSTEM_PROMPTS["orchestrator"])
     system_prompt += "\n\n你的工作目录是: /workspace\n所有文件操作请在此目录下进行。"
 
-    resolved_model = resolve_model_for_role(stage.agent_role, stage_model)
+    runtime_overrides = _build_runtime_overrides(agent, stage_model)
+    resolved_model = resolve_model_for_role(stage.agent_role, runtime_overrides["model"])
     allowed_tools = list(ROLE_TOOLS.get(stage.agent_role, set()))
 
     # Resolve skill directories for the role

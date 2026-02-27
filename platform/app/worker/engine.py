@@ -523,7 +523,7 @@ async def _finalize_task_resources(
     sandbox_mgr: Any,
     sandbox_info: Any,
 ) -> None:
-    """Post-completion: extract memories, commit/push worktree, cleanup resources."""
+    """Post-completion: extract memories, commit/push worktree, and cleanup resources."""
     # Extract memories from this task
     if settings.MEMORY_ENABLED and project_memory_store and prior_outputs:
         memory_corr = f"memory-extract-{uuid.uuid4().hex}"
@@ -671,7 +671,19 @@ async def _finalize_task_resources(
                 result="worktree_commit_push_failed",
             )
 
-        # Cleanup worktree
+    await _cleanup_runtime_resources(task, worktree_mgr, worktree_path, sandbox_mgr, sandbox_info)
+
+
+async def _cleanup_runtime_resources(
+    task: TaskModel,
+    worktree_mgr: Any,
+    worktree_path: Optional[str],
+    sandbox_mgr: Any,
+    sandbox_info: Any,
+) -> None:
+    """Always cleanup runtime resources regardless of success/failure paths."""
+    # Cleanup worktree
+    if worktree_mgr and worktree_path:
         cleanup_corr = f"worktree-cleanup-{uuid.uuid4().hex}"
         cleanup_started_at = time.monotonic()
         cleanup_started_log_id = await _emit_system_log(
@@ -752,168 +764,102 @@ async def _process_task(session: AsyncSession, task: TaskModel) -> None:
     compression = CompressionResult()
     # Phase 2.1: Track structured outputs for condition evaluation
     structured_outputs: Dict[str, dict] = {}
+    worktree_path: Optional[str] = None
+    worktree_mgr: Any = None
+    sandbox_info: Any = None
+    sandbox_mgr: Any = None
+    resources_finalized = False
 
-    # Load repo context from project
-    repo_context: Optional[str] = None
-    if task.project and task.project.repo_tree:
-        repo_context = _build_repo_context(task.project)
+    try:
+        # Load repo context from project
+        repo_context: Optional[str] = None
+        if task.project and task.project.repo_tree:
+            repo_context = _build_repo_context(task.project)
 
-    # Setup git worktree and sandbox
-    worktree_path, worktree_mgr = await _setup_worktree(task)
-    sandbox_info, sandbox_mgr, sandbox_required_error = await _setup_sandbox(task, worktree_path)
+        # Setup git worktree and sandbox
+        worktree_path, worktree_mgr = await _setup_worktree(task)
+        sandbox_info, sandbox_mgr, sandbox_required_error = await _setup_sandbox(task, worktree_path)
 
-    # Load project memory for this task's project
-    project_memory_store = None
-    if settings.MEMORY_ENABLED and task.project_id:
-        try:
-            from app.worker.memory import ProjectMemoryStore
-            project_memory_store = ProjectMemoryStore(str(task.project_id))
-        except Exception:
-            logger.warning("Failed to init memory store for project %s", task.project_id, exc_info=True)
+        # Load project memory for this task's project
+        project_memory_store = None
+        if settings.MEMORY_ENABLED and task.project_id:
+            try:
+                from app.worker.memory import ProjectMemoryStore
+                project_memory_store = ProjectMemoryStore(str(task.project_id))
+            except Exception:
+                logger.warning("Failed to init memory store for project %s", task.project_id, exc_info=True)
 
-    # Phase 3.1: Graph-based execution when enabled
-    if settings.GRAPH_EXECUTION_ENABLED and task.template:
-        await _process_task_graph(
-            session, task, sorted_stages, stage_defs, gates,
-            prior_outputs, compression, structured_outputs,
-            project_memory_store, repo_context, worktree_path, sandbox_info, sandbox_required_error,
-        )
-        # Finalize and return
-        await _finalize_task_resources(
-            session, task, prior_outputs, project_memory_store,
-            worktree_mgr, worktree_path, sandbox_mgr, sandbox_info,
-        )
-        from app.worker.agents import close_agents_for_task
-        close_agents_for_task(str(task.id))
-        await _complete_task(session, task)
-        return
-
-    # Group stages by order for parallel execution (legacy linear mode)
-    stage_groups = _group_stages_by_order(sorted_stages, task)
-    stage_index_base = 0
-
-    for group in stage_groups:
-        # Skip group if all stages are completed (resume from failure)
-        all_completed = all(s.status == "completed" for s in group)
-        if all_completed:
-            for stage in group:
-                logger.info(
-                    "Skipping completed stage %s for task %s (resuming)",
-                    stage.stage_name, task.id,
-                )
-                prior_outputs.append({
-                    "stage": stage.stage_name,
-                    "output": stage.output_summary or "",
-                })
-                compressed = await _compress_with_log(task, stage, stage.output_summary or "")
-                if compressed is not None:
-                    compression.add(compressed)
-                else:
-                    logger.warning("Compression failed for resumed stage %s", stage.stage_name)
-                    
-            # Check gates for resumed stages
-            for stage in group:
-                gate_def = gates.get(stage.stage_name)
-                if gate_def:
-                    gate_result = await _handle_gate_with_retry(
-                        session, task, stage, gate_def,
-                        stage.output_summary or "", stage_index_base, prior_outputs, compression,
-                        project_memory_store, repo_context, stage_defs,
-                        worktree_path, sandbox_info,
-                    )
-                    if gate_result is None:
-                        return
-                    
-            stage_index_base += len(group)
-            continue
-
-        # Check cancellation before each group
-        if await _is_cancelled(session, task.id):
-            logger.info("Task %s cancelled, stopping execution", task.id)
-            await event_collector.record_audit(
-                session,
-                agent_role="orchestrator",
-                action_type="task_cancelled",
-                detail={"task_id": task.id, "at_stage": group[0].stage_name},
+        # Phase 3.1: Graph-based execution when enabled
+        if settings.GRAPH_EXECUTION_ENABLED and task.template:
+            await _process_task_graph(
+                session, task, sorted_stages, stage_defs, gates,
+                prior_outputs, compression, structured_outputs,
+                project_memory_store, repo_context, worktree_path, sandbox_info, sandbox_required_error,
             )
+            # Finalize and return
+            await _finalize_task_resources(
+                session, task, prior_outputs, project_memory_store,
+                worktree_mgr, worktree_path, sandbox_mgr, sandbox_info,
+            )
+            resources_finalized = True
+            from app.worker.agents import close_agents_for_task
+            close_agents_for_task(str(task.id))
+            await _complete_task(session, task)
             return
 
-        # Execute stages in this group (parallel if multiple)
-        if len(group) == 1:
-            stage = group[0]
+        # Group stages by order for parallel execution (legacy linear mode)
+        stage_groups = _group_stages_by_order(sorted_stages, task)
+        stage_index_base = 0
 
-            # Phase 2.1: Check condition before executing
-            if _should_skip_stage(stage, stage_defs, structured_outputs):
-                stage.status = "skipped"
-                await session.commit()
-                await _safe_broadcast(TASK_STAGE_UPDATE, {
-                    "task_id": task.id, "stage_id": stage.id,
-                    "stage_name": stage.stage_name, "status": "skipped",
-                })
-                stage_index_base += len(group)
-                continue
-
-            result = await _execute_single_stage(
-                session, task, stage, stage_index_base,
-                prior_outputs, compression, project_memory_store,
-                repo_context, stage_defs, worktree_path, sandbox_info,
-                sandbox_required_error=sandbox_required_error,
-            )
-            if result is None:
-                return  # stage failed or circuit breaker
-            prior_outputs.append({"stage": stage.stage_name, "output": result})
-            compressed = await _compress_with_log(task, stage, result)
-            if compressed is not None:
-                compression.add(compressed)
-            else:
-                logger.warning("Compression failed for stage %s", stage.stage_name)
-
-            # Phase 1.1/2.1: Collect structured output for conditions
-            if stage.output_structured:
-                structured_outputs[stage.stage_name] = stage.output_structured
-
-            await _record_stage_audit(session, stage)
-            if await _check_circuit_breaker(session, task, stage):
-                return
-
-            # Phase 2.3: Dynamic gate insertion for low confidence
-            if await _maybe_insert_dynamic_gate(session, task, stage, result):
-                pass  # Gate handled, continue
-
-            gate_def = gates.get(stage.stage_name)
-            if gate_def:
-                gate_result = await _handle_gate_with_retry(
-                    session, task, stage, gate_def,
-                    result, stage_index_base, prior_outputs, compression,
-                    project_memory_store, repo_context, stage_defs,
-                    worktree_path, sandbox_info, sandbox_required_error,
-                )
-                if gate_result is None:
-                    return  # task failed or gate rejected without retries
-                # Update result to the latest output after possible retries
-                result = gate_result
-
-            # Phase 3.2: Interactive planning — pause after parse stage
-            if await _check_interactive_planning(session, task, stage, result):
-                return  # Task paused for plan review
-
-        else:
-            # Parallel execution for same-order stages
-            logger.info(
-                "Executing %d stages in parallel: %s",
-                len(group), [s.stage_name for s in group],
-            )
-            tasks_map = {}
-            for stage in group:
-                if stage.status == "completed":
+        for group in stage_groups:
+            # Skip group if all stages are completed (resume from failure)
+            all_completed = all(s.status == "completed" for s in group)
+            if all_completed:
+                for stage in group:
+                    logger.info(
+                        "Skipping completed stage %s for task %s (resuming)",
+                        stage.stage_name, task.id,
+                    )
                     prior_outputs.append({
                         "stage": stage.stage_name,
                         "output": stage.output_summary or "",
                     })
-                    if stage.output_structured:
-                        structured_outputs[stage.stage_name] = stage.output_structured
-                    continue
-                # Phase 2.1: Check condition for parallel stages too
+                    compressed = await _compress_with_log(task, stage, stage.output_summary or "")
+                    if compressed is not None:
+                        compression.add(compressed)
+                    else:
+                        logger.warning("Compression failed for resumed stage %s", stage.stage_name)
+                # Check gates for resumed stages
+                for stage in group:
+                    gate_def = gates.get(stage.stage_name)
+                    if gate_def:
+                        gate_result = await _handle_gate_with_retry(
+                            session, task, stage, gate_def,
+                            stage.output_summary or "", stage_index_base, prior_outputs, compression,
+                            project_memory_store, repo_context, stage_defs,
+                            worktree_path, sandbox_info, sandbox_required_error,
+                        )
+                        if gate_result is None:
+                            return
+                stage_index_base += len(group)
+                continue
+
+            # Check cancellation before each group
+            if await _is_cancelled(session, task.id):
+                logger.info("Task %s cancelled, stopping execution", task.id)
+                await event_collector.record_audit(
+                    session,
+                    agent_role="orchestrator",
+                    action_type="task_cancelled",
+                    detail={"task_id": task.id, "at_stage": group[0].stage_name},
+                )
+                return
+
+            # Execute stages in this group (parallel if multiple)
+            if len(group) == 1:
+                stage = group[0]
+
+                # Phase 2.1: Check condition before executing
                 if _should_skip_stage(stage, stage_defs, structured_outputs):
                     stage.status = "skipped"
                     await session.commit()
@@ -921,73 +867,154 @@ async def _process_task(session: AsyncSession, task: TaskModel) -> None:
                         "task_id": task.id, "stage_id": stage.id,
                         "stage_name": stage.stage_name, "status": "skipped",
                     })
+                    stage_index_base += len(group)
                     continue
-                coro = _execute_single_stage(
+
+                result = await _execute_single_stage(
                     session, task, stage, stage_index_base,
                     prior_outputs, compression, project_memory_store,
                     repo_context, stage_defs, worktree_path, sandbox_info,
                     sandbox_required_error=sandbox_required_error,
                 )
-                tasks_map[stage.stage_name] = (stage, asyncio.create_task(coro))
-
-            # Await all parallel stages
-            for stage_name, (stage, atask) in tasks_map.items():
-                try:
-                    result = await atask
-                except Exception as e:
-                    logger.exception("Parallel stage %s failed", stage_name)
-                    await mark_stage_failed(session, task, stage, str(e), error=e)
-                    # Cancel remaining parallel tasks
-                    for _, (_, other_task) in tasks_map.items():
-                        if not other_task.done():
-                            other_task.cancel()
-                    from app.worker.agents import close_agents_for_task
-                    close_agents_for_task(str(task.id))
-                    await _fail_task(session, task, f"Stage {stage_name} failed: {e}")
-                    return
-
                 if result is None:
-                    return
-                prior_outputs.append({"stage": stage_name, "output": result})
+                    return  # stage failed or circuit breaker
+                prior_outputs.append({"stage": stage.stage_name, "output": result})
                 compressed = await _compress_with_log(task, stage, result)
                 if compressed is not None:
                     compression.add(compressed)
                 else:
-                    logger.warning("Compression failed for stage %s", stage_name)
-                # Phase 1.1/2.1: Collect structured output
+                    logger.warning("Compression failed for stage %s", stage.stage_name)
+
+                # Phase 1.1/2.1: Collect structured output for conditions
                 if stage.output_structured:
                     structured_outputs[stage.stage_name] = stage.output_structured
+
                 await _record_stage_audit(session, stage)
+                if await _check_circuit_breaker(session, task, stage):
+                    return
 
-            if await _check_circuit_breaker(session, task, group[0]):
-                return
+                # Phase 2.3: Dynamic gate insertion for low confidence
+                if await _maybe_insert_dynamic_gate(session, task, stage, result):
+                    pass  # Gate handled, continue
 
-            # Gates for parallel stages (check each)
-            for stage in group:
                 gate_def = gates.get(stage.stage_name)
                 if gate_def:
-                    output = stage.output_summary or ""
                     gate_result = await _handle_gate_with_retry(
                         session, task, stage, gate_def,
-                        output, stage_index_base, prior_outputs, compression,
+                        result, stage_index_base, prior_outputs, compression,
                         project_memory_store, repo_context, stage_defs,
                         worktree_path, sandbox_info, sandbox_required_error,
                     )
                     if gate_result is None:
+                        return  # task failed or gate rejected without retries
+                    # Update result to the latest output after possible retries
+                    result = gate_result
+
+                # Phase 3.2: Interactive planning — pause after parse stage
+                if await _check_interactive_planning(session, task, stage, result):
+                    return  # Task paused for plan review
+
+            else:
+                # Parallel execution for same-order stages
+                logger.info(
+                    "Executing %d stages in parallel: %s",
+                    len(group), [s.stage_name for s in group],
+                )
+                tasks_map = {}
+                for stage in group:
+                    if stage.status == "completed":
+                        prior_outputs.append({
+                            "stage": stage.stage_name,
+                            "output": stage.output_summary or "",
+                        })
+                        if stage.output_structured:
+                            structured_outputs[stage.stage_name] = stage.output_structured
+                        continue
+                    # Phase 2.1: Check condition for parallel stages too
+                    if _should_skip_stage(stage, stage_defs, structured_outputs):
+                        stage.status = "skipped"
+                        await session.commit()
+                        await _safe_broadcast(TASK_STAGE_UPDATE, {
+                            "task_id": task.id, "stage_id": stage.id,
+                            "stage_name": stage.stage_name, "status": "skipped",
+                        })
+                        continue
+                    coro = _execute_single_stage(
+                        session, task, stage, stage_index_base,
+                        prior_outputs, compression, project_memory_store,
+                        repo_context, stage_defs, worktree_path, sandbox_info,
+                        sandbox_required_error=sandbox_required_error,
+                    )
+                    tasks_map[stage.stage_name] = (stage, asyncio.create_task(coro))
+
+                # Await all parallel stages
+                for stage_name, (stage, atask) in tasks_map.items():
+                    try:
+                        result = await atask
+                    except Exception as e:
+                        logger.exception("Parallel stage %s failed", stage_name)
+                        await mark_stage_failed(session, task, stage, str(e), error=e)
+                        # Cancel remaining parallel tasks
+                        for _, (_, other_task) in tasks_map.items():
+                            if not other_task.done():
+                                other_task.cancel()
+                        from app.worker.agents import close_agents_for_task
+                        close_agents_for_task(str(task.id))
+                        await _fail_task(session, task, f"Stage {stage_name} failed: {e}")
                         return
 
-        stage_index_base += len(group)
+                    if result is None:
+                        return
+                    prior_outputs.append({"stage": stage_name, "output": result})
+                    compressed = await _compress_with_log(task, stage, result)
+                    if compressed is not None:
+                        compression.add(compressed)
+                    else:
+                        logger.warning("Compression failed for stage %s", stage_name)
+                    # Phase 1.1/2.1: Collect structured output
+                    if stage.output_structured:
+                        structured_outputs[stage.stage_name] = stage.output_structured
+                    await _record_stage_audit(session, stage)
 
-    # Finalize: extract memories, commit worktree, cleanup resources
-    await _finalize_task_resources(
-        session, task, prior_outputs, project_memory_store,
-        worktree_mgr, worktree_path, sandbox_mgr, sandbox_info,
-    )
+                if await _check_circuit_breaker(session, task, group[0]):
+                    return
 
-    # Clean up per-task agents and mark completed
-    from app.worker.agents import close_agents_for_task
-    close_agents_for_task(str(task.id))
-    await _complete_task(session, task)
+                # Gates for parallel stages (check each)
+                for stage in group:
+                    gate_def = gates.get(stage.stage_name)
+                    if gate_def:
+                        output = stage.output_summary or ""
+                        gate_result = await _handle_gate_with_retry(
+                            session, task, stage, gate_def,
+                            output, stage_index_base, prior_outputs, compression,
+                            project_memory_store, repo_context, stage_defs,
+                            worktree_path, sandbox_info, sandbox_required_error,
+                        )
+                        if gate_result is None:
+                            return
+
+            stage_index_base += len(group)
+
+        # Finalize: extract memories, commit worktree, cleanup resources
+        await _finalize_task_resources(
+            session, task, prior_outputs, project_memory_store,
+            worktree_mgr, worktree_path, sandbox_mgr, sandbox_info,
+        )
+        resources_finalized = True
+
+        # Clean up per-task agents and mark completed
+        from app.worker.agents import close_agents_for_task
+        close_agents_for_task(str(task.id))
+        await _complete_task(session, task)
+    finally:
+        if not resources_finalized:
+            await _cleanup_runtime_resources(
+                task,
+                worktree_mgr,
+                worktree_path,
+                sandbox_mgr,
+                sandbox_info,
+            )
 
 
 async def _process_task_graph(

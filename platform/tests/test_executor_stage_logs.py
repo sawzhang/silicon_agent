@@ -596,3 +596,71 @@ async def test_execute_stage_sandboxed_error_emits_failed_chat_received(monkeypa
     ]
     assert llm_events[1]['status'] == 'failed'
     assert llm_events[1]['response_body']['error'] == 'sandbox boom'
+
+
+@pytest.mark.asyncio
+async def test_execute_stage_sandboxed_uses_agent_model_override_when_stage_model_missing(monkeypatch):
+    from app.worker import agents as worker_agents
+    from app.worker import prompts as worker_prompts
+    from app.worker import sandbox as worker_sandbox
+
+    session = SimpleNamespace(commit=AsyncMock())
+    task = SimpleNamespace(
+        id='task-sandbox-3',
+        title='task title',
+        description='task description',
+        total_tokens=0,
+        total_cost_rmb=0.0,
+    )
+    stage = SimpleNamespace(
+        id='stage-sandbox-3',
+        stage_name='coding',
+        agent_role='coding',
+        status='pending',
+        started_at=None,
+        completed_at=None,
+        duration_seconds=None,
+        tokens_used=0,
+        output_summary=None,
+    )
+    sandbox_info = SimpleNamespace(container_name='sbx-3')
+    db_agent = SimpleNamespace(
+        role='coding',
+        status='idle',
+        current_task_id=None,
+        started_at=None,
+        last_active_at=None,
+        model_name='agent-config-model',
+        config={},
+    )
+
+    fake_pipeline = _FakePipeline()
+    fake_sandbox_result = SimpleNamespace(
+        text_content='sandbox output',
+        total_tokens=17,
+        tool_calls=[],
+        error=None,
+    )
+    fake_sandbox_mgr = _FakeSandboxManager(fake_sandbox_result)
+
+    monkeypatch.setattr(executor, 'get_task_log_pipeline', lambda: fake_pipeline)
+    monkeypatch.setattr(executor, '_get_agent', AsyncMock(return_value=db_agent))
+    monkeypatch.setattr(executor, '_safe_broadcast', AsyncMock())
+    monkeypatch.setattr(worker_agents, 'resolve_model_for_role', lambda _role, model: model or 'role-map-model')
+    monkeypatch.setattr(worker_agents, 'ROLE_TOOLS', {'coding': {'execute'}})
+    monkeypatch.setattr(worker_agents, '_get_skill_dirs', lambda _role: [])
+    monkeypatch.setattr(worker_prompts, 'build_user_prompt', lambda _ctx: 'sandbox prompt')
+    monkeypatch.setattr(worker_prompts, 'SYSTEM_PROMPTS', {'coding': 'system', 'orchestrator': 'system'})
+    monkeypatch.setattr(worker_sandbox, 'get_sandbox_manager', lambda: fake_sandbox_mgr)
+
+    result = await executor.execute_stage_sandboxed(
+        session=session,
+        task=task,
+        stage=stage,
+        prior_outputs=[],
+        sandbox_info=sandbox_info,
+    )
+
+    assert result == 'sandbox output'
+    assert fake_sandbox_mgr.calls
+    assert fake_sandbox_mgr.calls[0]['model'] == 'agent-config-model'

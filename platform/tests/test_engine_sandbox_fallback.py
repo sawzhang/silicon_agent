@@ -136,3 +136,45 @@ async def test_process_task_emits_sandbox_fallback_events_on_create_failure(monk
     assert "sandbox_create_started" in [item["event_type"] for item in emitted]
     assert "sandbox_create_finished" in [item["event_type"] for item in emitted]
     assert "sandbox_fallback" in [item["event_type"] for item in emitted]
+
+
+@pytest.mark.asyncio
+async def test_process_task_always_cleans_up_sandbox_on_early_return(monkeypatch):
+    stage = SimpleNamespace(
+        id="stage-cleanup-1",
+        stage_name="code",
+        agent_role="coding",
+        status="pending",
+        output_summary=None,
+        output_structured=None,
+    )
+    task = SimpleNamespace(
+        id="task-cleanup-1",
+        title="cleanup-test",
+        status="pending",
+        stages=[stage],
+        template=None,
+        project=None,
+        project_id=None,
+        total_tokens=0,
+    )
+    session = SimpleNamespace(commit=AsyncMock())
+    fake_mgr = SimpleNamespace(destroy=AsyncMock())
+    fake_info = SimpleNamespace(container_name="sa-sandbox-task-cleanup")
+
+    monkeypatch.setattr(engine, "_safe_broadcast", AsyncMock())
+    monkeypatch.setattr(engine.event_collector, "record_audit", AsyncMock())
+    monkeypatch.setattr(engine, "_parse_gates", lambda _task: {})
+    monkeypatch.setattr(engine, "_sort_stages", lambda _task: [stage])
+    monkeypatch.setattr(engine, "_parse_stage_defs", lambda _task: {})
+    monkeypatch.setattr(engine, "_group_stages_by_order", lambda _stages, _task: [[stage]])
+    monkeypatch.setattr(engine, "_is_cancelled", AsyncMock(return_value=False))
+    monkeypatch.setattr(engine, "_setup_worktree", AsyncMock(return_value=(None, None)))
+    monkeypatch.setattr(engine, "_setup_sandbox", AsyncMock(return_value=(fake_info, fake_mgr, None)))
+    monkeypatch.setattr(engine, "_execute_single_stage", AsyncMock(return_value=None))
+    monkeypatch.setattr(engine, "_emit_system_log", AsyncMock(return_value="log-1"))
+    monkeypatch.setattr(engine, "_close_started_system_log", AsyncMock())
+
+    await engine._process_task(session=session, task=task)  # type: ignore[arg-type]
+
+    fake_mgr.destroy.assert_awaited_once_with("task-cleanup-1")

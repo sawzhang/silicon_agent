@@ -1,10 +1,7 @@
-import shlex
-
 from app.worker.sandbox import SandboxManager
 
 
-def _extract_env_vars_from_docker_cmd(cmd: str) -> dict[str, str]:
-    tokens = shlex.split(cmd)
+def _extract_env_vars_from_docker_cmd(tokens: list[str]) -> dict[str, str]:
     env: dict[str, str] = {}
     for idx, token in enumerate(tokens):
         if token != "-e" or idx + 1 >= len(tokens):

@@ -14,7 +14,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import shlex
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -38,10 +37,10 @@ def _get_semaphore() -> asyncio.Semaphore:
     return _concurrency_sem
 
 
-async def _run(cmd: str, timeout: float = 60) -> tuple[int, str, str]:
-    """Run a shell command asynchronously."""
-    proc = await asyncio.create_subprocess_shell(
-        cmd,
+async def _run(cmd: list[str], timeout: float = 60) -> tuple[int, str, str]:
+    """Run a command asynchronously without shell interpolation."""
+    proc = await asyncio.create_subprocess_exec(
+        *cmd,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
     )
@@ -292,31 +291,36 @@ class SandboxManager:
         container_name: str,
         image: str,
         workspace: str,
-    ) -> str:
+    ) -> list[str]:
         """Build the docker run command with security constraints."""
         parts = [
-            "docker run -d",
-            f"--name {container_name}",
+            "docker",
+            "run",
+            "-d",
+            "--name",
+            container_name,
             # Resource limits
             f"--cpus={settings.SANDBOX_CPUS}",
             f"--memory={settings.SANDBOX_MEMORY}",
             f"--memory-swap={settings.SANDBOX_MEMORY}",
             f"--pids-limit={settings.SANDBOX_PIDS_LIMIT}",
-            "--ulimit nofile=1024:2048",
+            "--ulimit",
+            "nofile=1024:2048",
             # Security
             "--security-opt=no-new-privileges",
             "--cap-drop=ALL",
             # Filesystem
-            f"--mount type=bind,src={workspace},dst=/workspace",
+            "--mount",
+            f"type=bind,src={workspace},dst=/workspace",
         ]
 
         if settings.SANDBOX_READONLY_ROOT:
             parts.append("--read-only")
-            parts.append("--tmpfs /tmp:size=512m")
-            parts.append("--tmpfs /home/agent:size=256m")
+            parts.extend(["--tmpfs", "/tmp:size=512m"])
+            parts.extend(["--tmpfs", "/home/agent:size=256m"])
 
         # Network — use custom sandbox network if it exists, else host
-        parts.append(f"--network={settings.SANDBOX_NETWORK}")
+        parts.extend(["--network", settings.SANDBOX_NETWORK])
 
         # LLM environment (platform-native + SkillKit compatibility env keys)
         llm_env = build_sandbox_llm_env(
@@ -326,11 +330,11 @@ class SandboxManager:
             agent_port=settings.SANDBOX_AGENT_PORT,
         )
         for key, value in llm_env.items():
-            parts.append(f"-e {key}={shlex.quote(value)}")
+            parts.extend(["-e", f"{key}={value}"])
 
         parts.append(image)
 
-        return " ".join(parts)
+        return parts
 
     async def _resolve_container_host(self, container_name: str) -> Optional[str]:
         """Resolve the container's IP address on the sandbox network."""
@@ -338,9 +342,13 @@ class SandboxManager:
 
         # Try Docker network inspect to get container IP
         rc, out, err = await _run(
-            f"docker inspect -f "
-            f"'{{{{.NetworkSettings.Networks.{network}.IPAddress}}}}' "
-            f"{container_name}",
+            [
+                "docker",
+                "inspect",
+                "-f",
+                f"{{{{.NetworkSettings.Networks.{network}.IPAddress}}}}",
+                container_name,
+            ],
             timeout=10,
         )
         if rc == 0 and out.strip("' \n"):
@@ -350,8 +358,13 @@ class SandboxManager:
 
         # Fallback: try to get IP from any network
         rc, out, err = await _run(
-            f"docker inspect -f '{{{{range .NetworkSettings.Networks}}}}{{{{.IPAddress}}}}{{{{end}}}}' "
-            f"{container_name}",
+            [
+                "docker",
+                "inspect",
+                "-f",
+                "{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}",
+                container_name,
+            ],
             timeout=10,
         )
         if rc == 0 and out.strip("' \n"):
@@ -387,7 +400,7 @@ class SandboxManager:
 
     async def _force_remove(self, container_name: str) -> None:
         """Force-remove a container."""
-        rc, _, err = await _run(f"docker rm -f {container_name}", timeout=30)
+        rc, _, err = await _run(["docker", "rm", "-f", container_name], timeout=30)
         if rc != 0:
             logger.warning("Failed to remove container %s: %s", container_name, err)
 
