@@ -1,2 +1,2 @@
 aiohttp>=3.9.0
-skillkit @ git+ssh://git@github.com/sawzhang/agent-skills-engine.git@master
+skillkit @ git+https://github.com/sawzhang/agent-skills-engine.git@master

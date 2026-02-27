@@ -178,6 +178,23 @@ class _FakeSandboxManager:
         return self._result
 
 
+class _FakeStreamingSandboxManager:
+    def __init__(self, result, events: list[dict[str, object]]) -> None:
+        self._result = result
+        self._events = events
+        self.calls: list[dict[str, object]] = []
+
+    async def execute_stage(self, info, **kwargs):
+        self.calls.append({"info": info, **kwargs})
+        on_event = kwargs.get("on_event")
+        if callable(on_event):
+            for event in self._events:
+                maybe_awaitable = on_event(event)
+                if inspect.isawaitable(maybe_awaitable):
+                    await maybe_awaitable
+        return self._result
+
+
 @pytest.mark.asyncio
 async def test_execute_stage_emits_chat_sent_and_received(monkeypatch):
     session = SimpleNamespace(commit=AsyncMock())
@@ -599,6 +616,107 @@ async def test_execute_stage_sandboxed_error_emits_failed_chat_received(monkeypa
 
 
 @pytest.mark.asyncio
+async def test_execute_stage_sandboxed_stream_events_logged_incrementally(monkeypatch):
+    from app.worker import agents as worker_agents
+    from app.worker import prompts as worker_prompts
+    from app.worker import sandbox as worker_sandbox
+
+    session = SimpleNamespace(commit=AsyncMock())
+    task = SimpleNamespace(
+        id='task-sandbox-stream-1',
+        title='task title',
+        description='task description',
+        total_tokens=0,
+        total_cost_rmb=0.0,
+    )
+    stage = SimpleNamespace(
+        id='stage-sandbox-stream-1',
+        stage_name='coding',
+        agent_role='coding',
+        status='pending',
+        started_at=None,
+        completed_at=None,
+        duration_seconds=None,
+        tokens_used=0,
+        output_summary=None,
+    )
+    sandbox_info = SimpleNamespace(container_name='sbx-stream-1')
+
+    fake_pipeline = _FakePipeline()
+    fake_sandbox_result = SimpleNamespace(
+        text_content='sandbox output',
+        total_tokens=33,
+        tool_calls=[],
+        error=None,
+        streamed=True,
+    )
+    fake_events = [
+        {'type': 'llm_turn_sent', 'data': {'turn': 0, 'message_count': 1}},
+        {
+            'type': 'tool_call_started',
+            'data': {
+                'tool_call_id': 'tc-stream-1',
+                'tool_name': 'execute',
+                'args': {'command': 'echo hi', 'cwd': '/workspace'},
+            },
+        },
+        {'type': 'tool_output', 'data': {'tool_call_id': 'tc-stream-1', 'chunk': 'hi\n'}},
+        {
+            'type': 'tool_call_finished',
+            'data': {
+                'tool_call_id': 'tc-stream-1',
+                'tool_name': 'execute',
+                'args': {'command': 'echo hi', 'cwd': '/workspace'},
+                'result': 'hi',
+                'status': 'success',
+            },
+        },
+        {
+            'type': 'llm_turn_received',
+            'data': {'turn': 0, 'has_tool_calls': True, 'tool_call_count': 1, 'content': 'ok'},
+        },
+    ]
+    fake_sandbox_mgr = _FakeStreamingSandboxManager(fake_sandbox_result, fake_events)
+    fake_broadcast = AsyncMock()
+
+    monkeypatch.setattr(executor, 'get_task_log_pipeline', lambda: fake_pipeline)
+    monkeypatch.setattr(executor, '_get_agent', AsyncMock(return_value=None))
+    monkeypatch.setattr(executor, '_safe_broadcast', fake_broadcast)
+    monkeypatch.setattr(worker_agents, 'resolve_model_for_role', lambda _role, _model: 'sandbox-model')
+    monkeypatch.setattr(worker_agents, 'ROLE_TOOLS', {'coding': {'execute'}})
+    monkeypatch.setattr(worker_agents, '_get_skill_dirs', lambda _role: [])
+    monkeypatch.setattr(worker_prompts, 'build_user_prompt', lambda _ctx: 'sandbox prompt')
+    monkeypatch.setattr(worker_prompts, 'SYSTEM_PROMPTS', {'coding': 'system', 'orchestrator': 'system'})
+    monkeypatch.setattr(worker_sandbox, 'get_sandbox_manager', lambda: fake_sandbox_mgr)
+
+    result = await executor.execute_stage_sandboxed(
+        session=session,
+        task=task,
+        stage=stage,
+        prior_outputs=[],
+        sandbox_info=sandbox_info,
+    )
+
+    assert result == 'sandbox output'
+    turn_sent_events = [item for item in fake_pipeline.created if item['event_type'] == 'llm_turn_sent']
+    turn_recv_events = [item for item in fake_pipeline.created if item['event_type'] == 'llm_turn_received']
+    assert len(turn_sent_events) == 1
+    assert len(turn_recv_events) == 1
+
+    tool_create = next(item for item in fake_pipeline.created if item['event_type'] == 'tool_call_executed')
+    assert tool_create['status'] == 'running'
+    tool_update = next(item for item in fake_pipeline.updated if item['log_id'] == tool_create['log_id'])
+    assert tool_update['updates']['status'] == 'success'
+    assert tool_update['updates']['result'] == 'hi'
+
+    stream_calls = [
+        c for c in fake_broadcast.await_args_list
+        if c.args and c.args[0] == 'task:log_stream_update'
+    ]
+    assert len(stream_calls) >= 2
+
+
+@pytest.mark.asyncio
 async def test_execute_stage_sandboxed_uses_agent_model_override_when_stage_model_missing(monkeypatch):
     from app.worker import agents as worker_agents
     from app.worker import prompts as worker_prompts
@@ -623,30 +741,35 @@ async def test_execute_stage_sandboxed_uses_agent_model_override_when_stage_mode
         tokens_used=0,
         output_summary=None,
     )
-    sandbox_info = SimpleNamespace(container_name='sbx-3')
     db_agent = SimpleNamespace(
         role='coding',
+        model_name='agent-model-priority',
+        config={},
         status='idle',
         current_task_id=None,
         started_at=None,
         last_active_at=None,
-        model_name='agent-config-model',
-        config={},
     )
+    sandbox_info = SimpleNamespace(container_name='sbx-3')
 
     fake_pipeline = _FakePipeline()
     fake_sandbox_result = SimpleNamespace(
         text_content='sandbox output',
-        total_tokens=17,
+        total_tokens=7,
         tool_calls=[],
         error=None,
     )
     fake_sandbox_mgr = _FakeSandboxManager(fake_sandbox_result)
+    captured: dict[str, object] = {}
+
+    def _capture_resolve_model(_role: str, model: object):
+        captured['resolve_arg'] = model
+        return model
 
     monkeypatch.setattr(executor, 'get_task_log_pipeline', lambda: fake_pipeline)
     monkeypatch.setattr(executor, '_get_agent', AsyncMock(return_value=db_agent))
     monkeypatch.setattr(executor, '_safe_broadcast', AsyncMock())
-    monkeypatch.setattr(worker_agents, 'resolve_model_for_role', lambda _role, model: model or 'role-map-model')
+    monkeypatch.setattr(worker_agents, 'resolve_model_for_role', _capture_resolve_model)
     monkeypatch.setattr(worker_agents, 'ROLE_TOOLS', {'coding': {'execute'}})
     monkeypatch.setattr(worker_agents, '_get_skill_dirs', lambda _role: [])
     monkeypatch.setattr(worker_prompts, 'build_user_prompt', lambda _ctx: 'sandbox prompt')
@@ -662,5 +785,5 @@ async def test_execute_stage_sandboxed_uses_agent_model_override_when_stage_mode
     )
 
     assert result == 'sandbox output'
-    assert fake_sandbox_mgr.calls
-    assert fake_sandbox_mgr.calls[0]['model'] == 'agent-config-model'
+    assert captured['resolve_arg'] == 'agent-model-priority'
+    assert fake_sandbox_mgr.calls[0]['model'] == 'agent-model-priority'
