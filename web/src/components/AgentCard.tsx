@@ -23,7 +23,7 @@ const AgentCard: React.FC<AgentCardProps> = ({ agent }) => {
   const badgeStatus = STATUS_BADGE[agent.status] || 'default';
 
   return (
-    <Card size="small" style={{ minWidth: 160 }}>
+    <Card size="small" style={{ minWidth: 160, height: '100%' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
         <RobotOutlined style={{ fontSize: 20 }} />
         <div>
@@ -38,13 +38,13 @@ const AgentCard: React.FC<AgentCardProps> = ({ agent }) => {
       <Text type="secondary" style={{ fontSize: 12 }}>
         {agent.model}
       </Text>
-      {agent.current_task_id && (
-        <div style={{ marginTop: 4 }}>
+      <div style={{ marginTop: 4, minHeight: 18 }}>
+        {agent.current_task_id && (
           <Text type="secondary" style={{ fontSize: 12 }}>
             Task: {agent.current_task_id.slice(0, 8)}...
           </Text>
-        </div>
-      )}
+        )}
+      </div>
     </Card>
   );
 };

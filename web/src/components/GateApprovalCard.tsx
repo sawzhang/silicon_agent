@@ -31,27 +31,27 @@ const GateApprovalCard: React.FC<GateApprovalCardProps> = ({ gate, onApprove, on
       title={
         <Space>
           <Tag color="orange">{gate.gate_type}</Tag>
-          <Text>Stage: {stageName}</Text>
-          {gate.is_dynamic && <Tag color="gold">Dynamic</Tag>}
-          {(gate.retry_count ?? 0) > 0 && <Tag color="blue">Retry {gate.retry_count}</Tag>}
+          <Text>阶段：{stageName}</Text>
+          {gate.is_dynamic && <Tag color="gold">动态</Tag>}
+          {(gate.retry_count ?? 0) > 0 && <Tag color="blue">重试 {gate.retry_count}</Tag>}
         </Space>
       }
       extra={<Text type="secondary">{waitingTime}</Text>}
     >
       <Paragraph ellipsis={{ rows: 3, expandable: true }}>{summary}</Paragraph>
       <Paragraph type="secondary" style={{ fontSize: 12 }}>
-        Task: {gate.task_id}
+        任务：{gate.task_id}
       </Paragraph>
 
       {gate.status === 'pending' ? (
         mode === 'reject' ? (
           <div>
             <Paragraph type="secondary" style={{ fontSize: 12, marginBottom: 4 }}>
-              Your feedback will be sent to the AI agent for revision.
+              你的反馈将发送给 AI 助手进行修改。
             </Paragraph>
             <TextArea
               rows={2}
-              placeholder="Rejection reason..."
+              placeholder="请填写驳回原因..."
               value={comment}
               onChange={(e) => setComment(e.target.value)}
               style={{ marginBottom: 8 }}
@@ -64,28 +64,28 @@ const GateApprovalCard: React.FC<GateApprovalCardProps> = ({ gate, onApprove, on
                 onClick={() => onReject(gate.id, comment)}
                 disabled={!comment.trim()}
               >
-                Confirm Reject
+                确认驳回
               </Button>
               <Button size="small" onClick={() => setMode('actions')}>
-                Cancel
+                取消
               </Button>
             </Space>
           </div>
         ) : mode === 'revise' ? (
           <div>
             <Paragraph type="secondary" style={{ fontSize: 12, marginBottom: 4 }}>
-              Provide modifications. The stage will re-execute with your instructions.
+              提供修改意见。该阶段将根据你的指示重新执行。
             </Paragraph>
             <TextArea
               rows={2}
-              placeholder="Revision instructions..."
+              placeholder="修改指示..."
               value={comment}
               onChange={(e) => setComment(e.target.value)}
               style={{ marginBottom: 8 }}
             />
             <TextArea
               rows={3}
-              placeholder="Optional: paste revised content here..."
+              placeholder="可选：在此处粘贴修改后的内容..."
               value={revisedContent}
               onChange={(e) => setRevisedContent(e.target.value)}
               style={{ marginBottom: 8 }}
@@ -98,10 +98,10 @@ const GateApprovalCard: React.FC<GateApprovalCardProps> = ({ gate, onApprove, on
                 onClick={() => onRevise?.(gate.id, comment, revisedContent || undefined)}
                 disabled={!comment.trim()}
               >
-                Submit Revision
+                提交修改
               </Button>
               <Button size="small" onClick={() => setMode('actions')}>
-                Cancel
+                取消
               </Button>
             </Space>
           </div>
@@ -114,7 +114,7 @@ const GateApprovalCard: React.FC<GateApprovalCardProps> = ({ gate, onApprove, on
               loading={loading}
               onClick={() => onApprove(gate.id, comment || undefined)}
             >
-              Approve
+              通过
             </Button>
             {onRevise && (
               <Button
@@ -122,7 +122,7 @@ const GateApprovalCard: React.FC<GateApprovalCardProps> = ({ gate, onApprove, on
                 size="small"
                 onClick={() => setMode('revise')}
               >
-                Revise
+                修订
               </Button>
             )}
             <Button
@@ -131,7 +131,7 @@ const GateApprovalCard: React.FC<GateApprovalCardProps> = ({ gate, onApprove, on
               size="small"
               onClick={() => setMode('reject')}
             >
-              Reject
+              驳回
             </Button>
           </Space>
         )

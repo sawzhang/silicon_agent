@@ -35,12 +35,12 @@ const Dashboard: React.FC = () => {
 
   return (
     <div>
-      <Title level={4}>KPI Overview</Title>
+      <Title level={4}>KPI 总览</Title>
       <Row gutter={[16, 16]} style={{ marginBottom: 24 }}>
         <Col xs={12} sm={6}>
           <Card size="small">
             <Statistic
-              title="Tasks Total / Completed"
+              title="任务总数 / 已完成"
               value={kpiSummary?.completed_tasks ?? 0}
               suffix={`/ ${kpiSummary?.total_tasks ?? 0}`}
             />
@@ -49,7 +49,7 @@ const Dashboard: React.FC = () => {
         <Col xs={12} sm={6}>
           <Card size="small">
             <Statistic
-              title="Tokens Used"
+              title="Tokens 消耗"
               value={kpiSummary?.total_tokens ?? 0}
               suffix="tokens"
             />
@@ -58,7 +58,7 @@ const Dashboard: React.FC = () => {
         <Col xs={12} sm={6}>
           <Card size="small">
             <Statistic
-              title="Cost"
+              title="成本"
               value={kpiSummary?.total_cost_rmb ?? 0}
               prefix="¥"
               precision={2}
@@ -69,14 +69,14 @@ const Dashboard: React.FC = () => {
           <Card size="small">
             <Link to="/gates">
               <Badge count={pendingCount} offset={[10, 0]}>
-                <Statistic title="Pending Gates" value={pendingCount} />
+                <Statistic title="待处理审批" value={pendingCount} />
               </Badge>
             </Link>
           </Card>
         </Col>
       </Row>
 
-      <Title level={4}>Agent Cluster</Title>
+      <Title level={4}>Agent 集群</Title>
       <Row gutter={[12, 12]} style={{ marginBottom: 24 }}>
         {AGENT_ROLES.map((role) => (
           <Col key={role.key} xs={12} sm={8} md={6} lg={4} xl={3}>
@@ -87,20 +87,20 @@ const Dashboard: React.FC = () => {
 
       <Row gutter={16}>
         <Col xs={24} md={16}>
-          <Card title="Recent Activity" size="small">
+          <Card title="近期活动" size="small">
             <ActivityFeed />
           </Card>
         </Col>
         <Col xs={24} md={8}>
-          <Card title="System Status" size="small">
+          <Card title="系统状态" size="small">
             <Statistic
-              title="Active Agents"
+              title="活跃 Agents"
               value={Object.values(agents).filter((a) => a.status === 'running' || a.status === 'idle').length}
               suffix={`/ ${AGENT_ROLES.length}`}
             />
             {kpiSummary && kpiSummary.success_rate > 0 && (
               <Statistic
-                title="Success Rate"
+                title="成功率"
                 value={kpiSummary.success_rate}
                 suffix="%"
                 style={{ marginTop: 16 }}

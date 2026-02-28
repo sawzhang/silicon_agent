@@ -64,7 +64,7 @@ const CockpitPage: React.FC = () => {
 
   const runningColumns: ColumnsType<CockpitTaskItem> = [
     {
-      title: 'Title',
+      title: '标题',
       dataIndex: 'title',
       key: 'title',
       ellipsis: true,
@@ -72,28 +72,28 @@ const CockpitPage: React.FC = () => {
         <a onClick={() => navigate(`/tasks/${record.id}`)}>{text}</a>
       ),
     },
-    { title: 'Project', dataIndex: 'project_name', key: 'project_name', width: 120, render: (v: string | null) => v ?? '-' },
+    { title: '项目', dataIndex: 'project_name', key: 'project_name', width: 120, render: (v: string | null) => v ?? '-' },
     {
-      title: 'Current Stage',
+      title: '当前阶段',
       dataIndex: 'current_stage',
       key: 'current_stage',
       width: 130,
       render: (v: string | null) => v ? <Tag color="processing">{v}</Tag> : '-',
     },
     {
-      title: 'Tokens',
+      title: 'Tokens 消耗',
       dataIndex: 'total_tokens',
       key: 'total_tokens',
       width: 100,
       render: (v: number) => formatTokens(v),
     },
     {
-      title: '',
+      title: '操作',
       key: 'action',
       width: 80,
       render: (_: unknown, record) => (
-        <Popconfirm title="Cancel this task?" onConfirm={() => handleCancel(record.id)}>
-          <Button size="small" danger loading={cancellingId === record.id}>Cancel</Button>
+        <Popconfirm title="确认取消此任务？" onConfirm={() => handleCancel(record.id)}>
+          <Button size="small" danger loading={cancellingId === record.id}>取消</Button>
         </Popconfirm>
       ),
     },
@@ -101,7 +101,7 @@ const CockpitPage: React.FC = () => {
 
   const failedColumns: ColumnsType<CockpitTaskItem> = [
     {
-      title: 'Title',
+      title: '标题',
       dataIndex: 'title',
       key: 'title',
       ellipsis: true,
@@ -110,29 +110,29 @@ const CockpitPage: React.FC = () => {
       ),
     },
     {
-      title: 'Error',
+      title: '错误信息',
       dataIndex: 'error_message',
       key: 'error_message',
       ellipsis: true,
       render: (v: string | null) => v ? <Text type="danger">{v}</Text> : '-',
     },
     {
-      title: 'Cost',
+      title: '成本',
       dataIndex: 'total_cost_rmb',
       key: 'total_cost_rmb',
       width: 90,
       render: (v: number) => formatCost(v),
     },
     {
-      title: '',
+      title: '操作',
       key: 'action',
       width: 140,
       render: (_: unknown, record) => (
         <Space>
-          <Popconfirm title="Retry this task?" onConfirm={() => handleRetry(record.id)}>
-            <Button size="small" type="primary" loading={retryingId === record.id}>Retry</Button>
+          <Popconfirm title="确认重试此任务？" onConfirm={() => handleRetry(record.id)}>
+            <Button size="small" type="primary" loading={retryingId === record.id}>重试</Button>
           </Popconfirm>
-          <Button size="small" onClick={() => navigate(`/tasks/${record.id}`)}>View</Button>
+          <Button size="small" onClick={() => navigate(`/tasks/${record.id}`)}>查看</Button>
         </Space>
       ),
     },
@@ -140,7 +140,7 @@ const CockpitPage: React.FC = () => {
 
   const completedColumns: ColumnsType<CockpitTaskItem> = [
     {
-      title: 'Title',
+      title: '标题',
       dataIndex: 'title',
       key: 'title',
       ellipsis: true,
@@ -149,21 +149,21 @@ const CockpitPage: React.FC = () => {
       ),
     },
     {
-      title: 'Completed',
+      title: '完成时间',
       dataIndex: 'completed_at',
       key: 'completed_at',
       width: 120,
       render: (v: string | null) => v ? formatRelativeTime(v) : '-',
     },
     {
-      title: 'Tokens',
+      title: 'Tokens 消耗',
       dataIndex: 'total_tokens',
       key: 'total_tokens',
       width: 100,
       render: (v: number) => formatTokens(v),
     },
     {
-      title: 'Cost',
+      title: '成本',
       dataIndex: 'total_cost_rmb',
       key: 'total_cost_rmb',
       width: 90,

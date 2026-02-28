@@ -255,31 +255,31 @@ const TaskList: React.FC = () => {
       render: (_, record) => <Link to={`/tasks/${record.id}`}>{record.id.slice(0, 8)}...</Link>,
       search: false,
     },
-    { title: 'Title', dataIndex: 'title', ellipsis: true },
+    { title: '标题', dataIndex: 'title', ellipsis: true },
     {
-      title: 'Yunxiao ID',
+      title: '云效 ID',
       dataIndex: 'yunxiao_task_id',
       width: 120,
       render: (_, record) => record.yunxiao_task_id ? <Tag color="blue">{record.yunxiao_task_id}</Tag> : '-',
     },
     {
-      title: 'Template',
+      title: '模板',
       dataIndex: 'template_name',
       width: 100,
       search: false,
       render: (_, record) => record.template_name ? <Tag>{record.template_name}</Tag> : '-',
     },
     {
-      title: 'Project',
+      title: '项目',
       dataIndex: 'project_name',
       width: 120,
       search: false,
       render: (_, record) => record.project_name || '-',
     },
     {
-      title: 'Status',
+      title: '状态',
       dataIndex: 'status',
-      valueEnum: { pending: 'Pending', running: 'Running', completed: 'Completed', failed: 'Failed', cancelled: 'Cancelled' },
+      valueEnum: { pending: '待处理', running: '运行中', completed: '已完成', failed: '失败', cancelled: '已取消' },
       render: (_, record) => <Tag color={STATUS_COLOR[record.status]}>{record.status}</Tag>,
     },
     {
@@ -290,14 +290,14 @@ const TaskList: React.FC = () => {
       render: (_, record) => record.total_tokens > 0 ? record.total_tokens.toLocaleString() : '-',
     },
     {
-      title: 'Cost',
+      title: '成本',
       dataIndex: 'total_cost_rmb',
       width: 100,
       search: false,
       render: (_, record) => formatCost(record.total_cost_rmb),
     },
     {
-      title: 'Created',
+      title: '创建时间',
       dataIndex: 'created_at',
       valueType: 'dateRange',
       render: (_, record) => formatTimestamp(record.created_at),
@@ -307,30 +307,30 @@ const TaskList: React.FC = () => {
   // Decomposed tasks table columns
   const decomposeColumns = [
     {
-      title: 'Title',
+      title: '标题',
       dataIndex: 'title',
       render: (_: any, record: EditableTask) => (
         <Input
           value={record.title}
           onChange={(e) => updateTask(record.key, 'title', e.target.value)}
-          placeholder="Task title"
+          placeholder="任务标题"
         />
       ),
     },
     {
-      title: 'Description',
+      title: '描述',
       dataIndex: 'description',
       render: (_: any, record: EditableTask) => (
         <Input.TextArea
           value={record.description}
           onChange={(e) => updateTask(record.key, 'description', e.target.value)}
           autoSize={{ minRows: 2, maxRows: 6 }}
-          placeholder="Task description with acceptance criteria"
+          placeholder="任务描述及验收标准"
         />
       ),
     },
     {
-      title: 'Priority',
+      title: '优先级',
       dataIndex: 'priority',
       width: 100,
       render: (_: any, record: EditableTask) => (
@@ -338,10 +338,10 @@ const TaskList: React.FC = () => {
       ),
     },
     {
-      title: 'Action',
+      title: '操作',
       width: 60,
       render: (_: any, record: EditableTask) => (
-        <Popconfirm title="Remove this task?" onConfirm={() => removeTask(record.key)}>
+        <Popconfirm title="确认移除此任务？" onConfirm={() => removeTask(record.key)}>
           <Button type="link" danger icon={<DeleteOutlined />} size="small" />
         </Popconfirm>
       ),
@@ -362,17 +362,17 @@ const TaskList: React.FC = () => {
           >
             <Radio.Button value="single" style={{ height: 80, lineHeight: '60px', padding: '0 32px' }}>
               <FormOutlined style={{ marginRight: 8 }} />
-              Single Task
+              单个任务
             </Radio.Button>
             <Radio.Button value="prd" style={{ height: 80, lineHeight: '60px', padding: '0 32px' }}>
               <RobotOutlined style={{ marginRight: 8 }} />
-              PRD Smart Decompose
+              PRD 智能拆解
             </Radio.Button>
           </Radio.Group>
           <div style={{ marginTop: 16, color: '#888' }}>
             {createMode === 'single'
-              ? 'Create a single task with title and description'
-              : 'Paste PRD content and let AI decompose it into subtasks'}
+              ? '创建包含独立标题和描述的单个任务'
+              : '粘贴 PRD 内容，让 AI 为你智能拆解为多个子任务并批量执行'}
           </div>
         </div>
       );
@@ -384,55 +384,55 @@ const TaskList: React.FC = () => {
         return (
           <div style={{ maxWidth: 600, margin: '0 auto' }}>
             <div style={{ marginBottom: 16 }}>
-              <label style={{ display: 'block', fontWeight: 500, marginBottom: 4 }}>Title *</label>
+              <label style={{ display: 'block', fontWeight: 500, marginBottom: 4 }}>标题 *</label>
               <Input
                 value={singleForm.title}
                 onChange={(e) => setSingleForm((p) => ({ ...p, title: e.target.value }))}
-                placeholder="Enter task title"
+                placeholder="请输入任务标题"
               />
             </div>
             <div style={{ marginBottom: 16 }}>
-              <label style={{ display: 'block', fontWeight: 500, marginBottom: 4 }}>Description *</label>
+              <label style={{ display: 'block', fontWeight: 500, marginBottom: 4 }}>描述 *</label>
               <Input.TextArea
                 value={singleForm.description}
                 onChange={(e) => setSingleForm((p) => ({ ...p, description: e.target.value }))}
-                placeholder={'Describe the task in detail:\n- What needs to be done\n- Acceptance criteria\n- Technical constraints'}
+                placeholder={'详细描述任务要求：\n- 需要实现什么功能\n- 验收标准\n- 技术约束'}
                 autoSize={{ minRows: 6, maxRows: 12 }}
               />
             </div>
             <div style={{ marginBottom: 16 }}>
-              <label style={{ display: 'block', fontWeight: 500, marginBottom: 4 }}>Pipeline Template</label>
+              <label style={{ display: 'block', fontWeight: 500, marginBottom: 4 }}>流水线模板</label>
               <select
                 value={singleForm.template_id}
                 onChange={(e) => setSingleForm((p) => ({ ...p, template_id: e.target.value }))}
                 style={{ width: '100%', padding: '4px 8px', borderRadius: 6, border: '1px solid #d9d9d9' }}
               >
-                <option value="">Select a template</option>
+                <option value="">请选择模板</option>
                 {templateOptions.map((o) => (
                   <option key={o.value} value={o.value}>{o.label}</option>
                 ))}
               </select>
               {selectedTemplate && selectedTemplate.stages.length > 0 && (
                 <div style={{ marginTop: 4, fontSize: 12, color: '#888' }}>
-                  Stages: {selectedTemplate.stages.map((s: any) => STAGE_DISPLAY[s.name] || s.name).join(' → ')}
+                  包含阶段: {selectedTemplate.stages.map((s: any) => STAGE_DISPLAY[s.name] || s.name).join(' → ')}
                 </div>
               )}
             </div>
             <div style={{ marginBottom: 16 }}>
-              <label style={{ display: 'block', fontWeight: 500, marginBottom: 4 }}>Project</label>
+              <label style={{ display: 'block', fontWeight: 500, marginBottom: 4 }}>关联项目</label>
               <select
                 value={singleForm.project_id}
                 onChange={(e) => setSingleForm((p) => ({ ...p, project_id: e.target.value }))}
                 style={{ width: '100%', padding: '4px 8px', borderRadius: 6, border: '1px solid #d9d9d9' }}
               >
-                <option value="">Select a project (Repo Context)</option>
+                <option value="">请选择项目 (代码库上下文)</option>
                 {projectOptions.map((o) => (
                   <option key={o.value} value={o.value}>{o.label}</option>
                 ))}
               </select>
             </div>
             <div style={{ marginBottom: 16 }}>
-              <label style={{ display: 'block', fontWeight: 500, marginBottom: 4 }}>Yunxiao / Branch *</label>
+              <label style={{ display: 'block', fontWeight: 500, marginBottom: 4 }}>云效 / 分支 *</label>
               <Input.Group compact style={{ display: 'flex' }}>
                 <Input
                   style={{ width: '40%', backgroundColor: '#f5f5f5' }}
@@ -444,11 +444,11 @@ const TaskList: React.FC = () => {
                   style={{ width: '60%' }}
                   value={singleForm.target_branch}
                   onChange={(e) => setSingleForm((p) => ({ ...p, target_branch: e.target.value }))}
-                  placeholder="Target Git Branch (Mandatory)"
+                  placeholder="目标 Git 分支（必填）"
                 />
               </Input.Group>
               <div style={{ marginTop: 4, fontSize: 12, color: '#888' }}>
-                Code will be pushed to the specified branch after successful signoff.
+                代码将在评审通过后推送到该分支。
               </div>
             </div>
           </div>
@@ -459,43 +459,43 @@ const TaskList: React.FC = () => {
       return (
         <div style={{ maxWidth: 700, margin: '0 auto' }}>
           <div style={{ marginBottom: 16 }}>
-            <label style={{ display: 'block', fontWeight: 500, marginBottom: 4 }}>PRD Content *</label>
+            <label style={{ display: 'block', fontWeight: 500, marginBottom: 4 }}>PRD 内容 *</label>
             <Input.TextArea
               value={prdText}
               onChange={(e) => setPrdText(e.target.value)}
-              placeholder={'Paste your PRD document here...\n\nExample:\n用户登录模块需求：\n1. 支持邮箱+密码登录\n2. 支持 OAuth2 第三方登录（Google, GitHub）\n3. 密码重置功能\n4. 登录日志审计'}
+              placeholder={'请将 PRD 文档粘贴到此处...\n\n例如：\n用户登录模块需求：\n1. 支持邮箱+密码登录\n2. 支持 OAuth2 第三方登录（Google, GitHub）\n3. 密码重置功能\n4. 登录日志审计'}
               autoSize={{ minRows: 10, maxRows: 20 }}
             />
           </div>
           <Space style={{ width: '100%' }} direction="vertical" size="middle">
             <div>
-              <label style={{ display: 'block', fontWeight: 500, marginBottom: 4 }}>Project</label>
+              <label style={{ display: 'block', fontWeight: 500, marginBottom: 4 }}>关联项目</label>
               <select
                 value={prdProjectId}
                 onChange={(e) => setPrdProjectId(e.target.value)}
                 style={{ width: '100%', padding: '4px 8px', borderRadius: 6, border: '1px solid #d9d9d9' }}
               >
-                <option value="">Select a project</option>
+                <option value="">请选择项目</option>
                 {projectOptions.map((o) => (
                   <option key={o.value} value={o.value}>{o.label}</option>
                 ))}
               </select>
             </div>
             <div>
-              <label style={{ display: 'block', fontWeight: 500, marginBottom: 4 }}>Default Template</label>
+              <label style={{ display: 'block', fontWeight: 500, marginBottom: 4 }}>默认模板</label>
               <select
                 value={prdTemplateId}
                 onChange={(e) => setPrdTemplateId(e.target.value)}
                 style={{ width: '100%', padding: '4px 8px', borderRadius: 6, border: '1px solid #d9d9d9' }}
               >
-                <option value="">Select a template</option>
+                <option value="">请选择模板</option>
                 {templateOptions.map((o) => (
                   <option key={o.value} value={o.value}>{o.label}</option>
                 ))}
               </select>
             </div>
             <div>
-              <label style={{ display: 'block', fontWeight: 500, marginBottom: 4 }}>Yunxiao / Branch *</label>
+              <label style={{ display: 'block', fontWeight: 500, marginBottom: 4 }}>云效 / 分支 *</label>
               <Input.Group compact style={{ display: 'flex' }}>
                 <Input
                   style={{ width: '40%', backgroundColor: '#f5f5f5' }}
@@ -507,7 +507,7 @@ const TaskList: React.FC = () => {
                   style={{ width: '60%' }}
                   value={prdTargetBranch}
                   onChange={(e) => setPrdTargetBranch(e.target.value)}
-                  placeholder="Target Git Branch (Mandatory)"
+                  placeholder="目标 Git 分支（必填）"
                 />
               </Input.Group>
             </div>
@@ -542,7 +542,7 @@ const TaskList: React.FC = () => {
             onClick={addTask}
             style={{ width: '100%', marginTop: 8 }}
           >
-            Add Task
+            添加子任务
           </Button>
         </div>
       );
@@ -556,17 +556,17 @@ const TaskList: React.FC = () => {
     const buttons: React.ReactNode[] = [];
 
     if (step > 0) {
-      buttons.push(<Button key="back" onClick={() => setStep((s) => s - 1)}>Back</Button>);
+      buttons.push(<Button key="back" onClick={() => setStep((s) => s - 1)}>上一步</Button>);
     }
 
     if (step === 0) {
-      buttons.push(<Button key="next" type="primary" onClick={() => setStep(1)}>Next</Button>);
+      buttons.push(<Button key="next" type="primary" onClick={() => setStep(1)}>下一步</Button>);
     }
 
     if (step === 1 && createMode === 'single') {
       buttons.push(
         <Button key="create" type="primary" loading={creating} onClick={handleCreateSingle}>
-          Create Task
+          创建任务
         </Button>
       );
     }
@@ -574,7 +574,7 @@ const TaskList: React.FC = () => {
     if (step === 1 && createMode === 'prd') {
       buttons.push(
         <Button key="analyze" type="primary" icon={<RobotOutlined />} loading={analyzing} onClick={handleDecompose}>
-          {analyzing ? 'AI Analyzing...' : 'Analyze PRD'}
+          {analyzing ? 'AI 正在分析...' : '智能拆解 PRD'}
         </Button>
       );
     }
@@ -582,7 +582,7 @@ const TaskList: React.FC = () => {
     if (step === 2) {
       buttons.push(
         <Button key="batch" type="primary" loading={creating} onClick={handleBatchCreate} disabled={decomposedTasks.length === 0}>
-          Create {decomposedTasks.length} Tasks
+          创建 {decomposedTasks.length} 个任务
         </Button>
       );
     }
@@ -591,13 +591,13 @@ const TaskList: React.FC = () => {
   };
 
   const stepTitles = createMode === 'prd'
-    ? ['Choose Mode', 'Input PRD', 'Preview & Edit']
-    : ['Choose Mode', 'Task Details'];
+    ? ['选择模式', '输入 PRD', '预览与编辑']
+    : ['选择模式', '任务详情'];
 
   return (
     <>
       <ProTable<Task>
-        headerTitle="Task Pipeline"
+        headerTitle="任务管线"
         actionRef={actionRef}
         rowKey="id"
         columns={columns}
@@ -634,7 +634,7 @@ const TaskList: React.FC = () => {
             </Button>
           </Popconfirm>,
           <Button key="create" type="primary" icon={<PlusOutlined />} onClick={handleOpenWizard}>
-            New Task
+            新建任务
           </Button>,
         ]}
         pagination={{ defaultPageSize: 20 }}
@@ -642,9 +642,9 @@ const TaskList: React.FC = () => {
       <Modal
         title={
           <Space>
-            <span>Create Task</span>
+            <span>创建任务</span>
             <span style={{ fontSize: 12, color: '#888' }}>
-              Step {step + 1}/{stepTitles.length}: {stepTitles[step]}
+              第 {step + 1}/{stepTitles.length} 步：{stepTitles[step]}
             </span>
           </Space>
         }
@@ -654,7 +654,7 @@ const TaskList: React.FC = () => {
         width={step === 2 ? 900 : 640}
         destroyOnClose
       >
-        <Spin spinning={analyzing} tip="AI is analyzing your requirements...">
+        <Spin spinning={analyzing} tip="AI 正在分析你的需求...">
           {renderStepContent()}
         </Spin>
       </Modal>

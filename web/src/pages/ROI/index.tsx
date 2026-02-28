@@ -16,22 +16,22 @@ const DAYS_OPTIONS = [
 ];
 
 const roleColumns: ColumnsType<AgentRoleEfficiency> = [
-  { title: 'Role', dataIndex: 'display_name', key: 'display_name' },
-  { title: 'Stages', dataIndex: 'total_stages', key: 'total_stages' },
+  { title: '角色', dataIndex: 'display_name', key: 'display_name' },
+  { title: '执行阶段数', dataIndex: 'total_stages', key: 'total_stages' },
   {
-    title: 'Tokens',
+    title: '消耗 Tokens',
     dataIndex: 'total_tokens',
     key: 'total_tokens',
     render: (v: number) => formatTokens(v),
   },
   {
-    title: 'Avg Duration',
+    title: '平均耗时',
     dataIndex: 'avg_duration_seconds',
     key: 'avg_duration_seconds',
-    render: (v: number) => `${(v / 60).toFixed(1)} min`,
+    render: (v: number) => `${(v / 60).toFixed(1)} 分钟`,
   },
   {
-    title: 'Cost',
+    title: '总成本',
     dataIndex: 'total_cost_rmb',
     key: 'total_cost_rmb',
     render: (v: number) => formatCost(v),
@@ -111,19 +111,19 @@ const ROIPage: React.FC = () => {
   const chartOption = data
     ? {
         tooltip: { trigger: 'axis' as const },
-        legend: { data: ['Agent Cost', 'Manual Estimate'] },
-        xAxis: { type: 'category' as const, data: ['Cost Comparison'] },
+        legend: { data: ['Agent 成本', '评估人工成本'] },
+        xAxis: { type: 'category' as const, data: ['成本对比'] },
         yAxis: { type: 'value' as const, name: '¥ RMB' },
         series: [
           {
-            name: 'Agent Cost',
+            name: 'Agent 成本',
             type: 'bar',
             data: [data.total_agent_cost_rmb],
             itemStyle: { color: '#1890ff' },
             barWidth: 60,
           },
           {
-            name: 'Manual Estimate',
+            name: '评估人工成本',
             type: 'bar',
             data: [displayEstimatedManual],
             itemStyle: { color: '#ff7a45' },
@@ -136,28 +136,28 @@ const ROIPage: React.FC = () => {
   type DisplayTask = ROITaskBreakdown & { _isTemplateCustom?: boolean };
 
   const taskColumns: ColumnsType<DisplayTask> = [
-    { title: 'Title', dataIndex: 'title', key: 'title', ellipsis: true },
+    { title: '标题', dataIndex: 'title', key: 'title', ellipsis: true },
     {
-      title: 'Agent Cost',
+      title: 'Agent 成本',
       dataIndex: 'agent_cost_rmb',
       key: 'agent_cost_rmb',
       render: (v: number) => formatCost(v),
       width: 110,
     },
     {
-      title: 'Manual Est.',
+      title: '评估人工成本',
       dataIndex: 'estimated_manual_rmb',
       key: 'estimated_manual_rmb',
       render: (v: number, record: DisplayTask) => (
         <span>
           {formatCost(v)}
-          {record._isTemplateCustom && <Tag color="blue" style={{ marginLeft: 4, fontSize: 10 }}>Custom</Tag>}
+          {record._isTemplateCustom && <Tag color="blue" style={{ marginLeft: 4, fontSize: 10 }}>自定义配置</Tag>}
         </span>
       ),
       width: 150,
     },
     {
-      title: 'Savings',
+      title: '节省',
       dataIndex: 'savings_rmb',
       key: 'savings_rmb',
       render: (v: number) => (
@@ -166,10 +166,10 @@ const ROIPage: React.FC = () => {
       width: 110,
     },
     {
-      title: 'Agent Time',
+      title: 'Agent 耗时',
       dataIndex: 'agent_duration_minutes',
       key: 'agent_duration_minutes',
-      render: (v: number) => `${v.toFixed(1)} min`,
+      render: (v: number) => `${v.toFixed(1)} 分钟`,
       width: 110,
     },
   ];
@@ -177,7 +177,7 @@ const ROIPage: React.FC = () => {
   return (
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-        <Title level={4} style={{ margin: 0 }}>ROI Dashboard</Title>
+        <Title level={4} style={{ margin: 0 }}>ROI 大盘</Title>
         <Radio.Group
           optionType="button"
           buttonStyle="solid"
@@ -195,7 +195,7 @@ const ROIPage: React.FC = () => {
             <Col xs={12} sm={6}>
               <Card size="small">
                 <Statistic
-                  title="Total Savings"
+                  title="总节省金额"
                   value={displaySavings}
                   prefix="¥"
                   precision={2}
@@ -206,7 +206,7 @@ const ROIPage: React.FC = () => {
             <Col xs={12} sm={6}>
               <Card size="small">
                 <Statistic
-                  title="ROI Ratio"
+                  title="投资回报率 (ROI Ratio)"
                   value={displayRoi}
                   suffix="x"
                   precision={1}
@@ -217,7 +217,7 @@ const ROIPage: React.FC = () => {
             <Col xs={12} sm={6}>
               <Card size="small">
                 <Statistic
-                  title="Time Saved"
+                  title="节省时间"
                   value={displayTimeSaved}
                   suffix="h"
                   precision={1}
@@ -226,16 +226,16 @@ const ROIPage: React.FC = () => {
             </Col>
             <Col xs={12} sm={6}>
               <Card size="small">
-                <Statistic title="Tasks Automated" value={data.total_tasks_completed} />
+                <Statistic title="自动化任务数" value={data.total_tasks_completed} />
               </Card>
             </Col>
           </Row>
 
           {/* What-If Analysis Slider */}
-          <Card title="What-If Analysis" style={{ marginBottom: 24 }}>
+          <Card title="成本效益测算 (What-If)" style={{ marginBottom: 24 }}>
             <Row gutter={48}>
               <Col xs={24} sm={12}>
-                <Text strong>Hours per Task: {effectiveHours}h</Text>
+                <Text strong>每个任务平均耗时: {effectiveHours}h</Text>
                 <Slider
                   min={1}
                   max={40}
@@ -246,7 +246,7 @@ const ROIPage: React.FC = () => {
                 />
               </Col>
               <Col xs={24} sm={12}>
-                <Text strong>Hourly Rate: ¥{effectiveRate}/h</Text>
+                <Text strong>人工时薪: ¥{effectiveRate}/h</Text>
                 <Slider
                   min={50}
                   max={500}
@@ -259,21 +259,21 @@ const ROIPage: React.FC = () => {
             </Row>
             {isWhatIfActive && (
               <Text type="secondary" style={{ marginTop: 8, display: 'block' }}>
-                Slider values override the global benchmark for tasks without template-specific estimates.{' '}
-                <a onClick={() => { setWhatIfHours(null); setWhatIfRate(null); }}>Reset</a>
+                滑块设置将覆盖未配置特定人工耗时估算的模板全局预设基准。{' '}
+                <a onClick={() => { setWhatIfHours(null); setWhatIfRate(null); }}>重置</a>
               </Text>
             )}
           </Card>
 
-          <Card title="Cost Comparison" style={{ marginBottom: 24 }}>
+          <Card title="成本对比" style={{ marginBottom: 24 }}>
             {data.total_tasks_completed > 0 ? (
               <ReactECharts option={chartOption} style={{ height: 300 }} />
             ) : (
-              <Empty description="No completed tasks in this period" />
+              <Empty description="在此期间暂无已完成的任务" />
             )}
           </Card>
 
-          <Card title="Agent Role Efficiency" style={{ marginBottom: 24 }}>
+          <Card title="Agent 角色效能" style={{ marginBottom: 24 }}>
             <Table<AgentRoleEfficiency>
               dataSource={data.by_role}
               columns={roleColumns}
@@ -283,7 +283,7 @@ const ROIPage: React.FC = () => {
             />
           </Card>
 
-          <Card title="Recent Tasks ROI" style={{ marginBottom: 24 }}>
+          <Card title="近期任务 ROI" style={{ marginBottom: 24 }}>
             <Table<DisplayTask>
               dataSource={displayRecentTasks}
               columns={taskColumns}
@@ -294,11 +294,11 @@ const ROIPage: React.FC = () => {
           </Card>
 
           <Text type="secondary">
-            Benchmarks: {data.benchmark_hours_per_task}h/task @ ¥{data.benchmark_hourly_rate}/h (configurable via .env)
+            成本基准预设: {data.benchmark_hours_per_task}h/任务 @ ¥{data.benchmark_hourly_rate}/h (可通过 .env 配置)
           </Text>
         </>
       ) : (
-        <Empty description="No ROI data available" />
+        <Empty description="暂无 ROI 数据" />
       )}
     </div>
   );

@@ -56,16 +56,16 @@ const GatesPage: React.FC = () => {
   return (
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-        <Title level={4} style={{ margin: 0 }}>Approval Center</Title>
+        <Title level={4} style={{ margin: 0 }}>审批中心</Title>
         <Segmented
           value={statusFilter}
           onChange={(v) => setStatusFilter(v as string)}
           options={[
-            { label: 'Pending', value: 'pending' },
-            { label: 'Approved', value: 'approved' },
-            { label: 'Rejected', value: 'rejected' },
-            { label: 'Revised', value: 'revised' },
-            { label: 'All', value: '' },
+            { label: '待处理', value: 'pending' },
+            { label: '已通过', value: 'approved' },
+            { label: '已驳回', value: 'rejected' },
+            { label: '已修订', value: 'revised' },
+            { label: '全部', value: '' },
           ]}
         />
       </div>
@@ -73,7 +73,7 @@ const GatesPage: React.FC = () => {
       {isLoading ? (
         <Spin size="large" style={{ display: 'block', margin: '100px auto' }} />
       ) : !gates || gates.length === 0 ? (
-        <Empty description="No gates found" />
+        <Empty description="暂无审批记录" />
       ) : (
         <Row gutter={[16, 16]}>
           {gates.map((gate) => (
