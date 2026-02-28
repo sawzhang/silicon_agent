@@ -195,6 +195,36 @@ class _FakeStreamingSandboxManager:
         return self._result
 
 
+def test_apply_runner_workspace_override_replaces_prompt_and_cwd():
+    runner = SimpleNamespace(
+        default_cwd='/tmp/old-workspace',
+        config=SimpleNamespace(
+            system_prompt=(
+                '你是测试助手。'
+                '\n\n你的工作目录是: /tmp/old-workspace\n所有文件操作请在此目录下进行。'
+            ),
+        ),
+    )
+
+    executor._apply_runner_workspace_override(runner, '/repo/worktree/task-1')
+
+    assert runner.default_cwd == '/repo/worktree/task-1'
+    assert '/repo/worktree/task-1' in runner.config.system_prompt
+    assert '/tmp/old-workspace' not in runner.config.system_prompt
+
+
+def test_apply_runner_workspace_override_appends_hint_when_missing():
+    runner = SimpleNamespace(
+        default_cwd='/tmp/old-workspace',
+        config=SimpleNamespace(system_prompt='你是测试助手。'),
+    )
+
+    executor._apply_runner_workspace_override(runner, '/repo/worktree/task-2')
+
+    assert runner.default_cwd == '/repo/worktree/task-2'
+    assert '你的工作目录是: /repo/worktree/task-2' in runner.config.system_prompt
+
+
 @pytest.mark.asyncio
 async def test_execute_stage_emits_chat_sent_and_received(monkeypatch):
     session = SimpleNamespace(commit=AsyncMock())

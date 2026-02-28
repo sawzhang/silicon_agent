@@ -67,7 +67,7 @@ class Settings(BaseSettings):
     # Git worktree isolation for coding agents
     WORKTREE_ENABLED: bool = False
     WORKTREE_BASE_DIR: str = "/var/lib/silicon_agent/worktrees"
-    WORKTREE_AUTO_PR: bool = False  # auto-create PR on task completion
+    WORKTREE_REPO_CACHE_DIR: str = ""
 
     # Container sandbox configuration
     SANDBOX_ENABLED: bool = False

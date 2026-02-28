@@ -4,6 +4,8 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import shutil
+import tempfile
 import time
 import uuid
 from collections import defaultdict
@@ -31,7 +33,14 @@ from app.websocket.manager import ws_manager
 from app.services.task_log_pipeline import get_task_log_pipeline
 from app.worker.compressor import CompressionResult, compress_stage_output
 from app.worker.executor import execute_stage, execute_stage_sandboxed, mark_stage_failed
-from app.worker.worktree import get_worktree_manager
+from app.worker.worktree import (
+    commit_and_push_workspace,
+    create_pr_for_workspace,
+    ensure_repo_local_mirror,
+    get_managed_repo_path,
+    get_worktree_manager,
+    prepare_workspace_from_repo,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -103,9 +112,13 @@ def _resolve_sandbox_fallback_mode() -> str:
     return raw if raw in {"graceful", "strict"} else "graceful"
 
 
-def _resolve_sandbox_workspace(task_id: str, worktree_path: Optional[str]) -> tuple[str, str]:
-    if worktree_path:
-        return worktree_path, "worktree"
+def _resolve_sandbox_workspace(
+    task_id: str,
+    workspace_path: Optional[str],
+    workspace_source: str,
+) -> tuple[str, str]:
+    if workspace_path:
+        return workspace_path, workspace_source
     return str(Path(settings.SANDBOX_WORKSPACE_BASE_DIR) / task_id), "fallback"
 
 
@@ -155,10 +168,17 @@ async def _prune_stale_worktrees() -> None:
             # Find all projects with repo_local_path to know which repos to prune
             from app.models.project import ProjectModel
             result = await session.execute(
-                select(ProjectModel.repo_local_path)
-                .where(ProjectModel.repo_local_path.isnot(None))
+                select(ProjectModel.id, ProjectModel.repo_local_path, ProjectModel.repo_url)
             )
-            repo_paths = [r for (r,) in result.all() if r]
+            repo_paths: list[str] = []
+            for project_id, repo_local_path, repo_url in result.all():
+                if repo_local_path:
+                    repo_paths.append(repo_local_path)
+                    continue
+                if repo_url:
+                    managed_path = get_managed_repo_path(str(project_id), repo_url)
+                    if (managed_path / ".git").exists():
+                        repo_paths.append(str(managed_path))
 
         for repo_path in repo_paths:
             mgr = get_worktree_manager(repo_path)
@@ -316,11 +336,41 @@ async def _ensure_code_stage_has_changes(
 
 async def _setup_worktree(task: TaskModel) -> tuple[Optional[str], Any]:
     """Create git worktree for the task if enabled. Returns (worktree_path, worktree_mgr)."""
-    if not (settings.WORKTREE_ENABLED and task.project and task.project.repo_local_path):
+    if not (settings.WORKTREE_ENABLED and task.project):
         return None, None
 
+    repo_local_path = (task.project.repo_local_path or "").strip()
+    repo_path_source = "project_config"
+    repo_url = (task.project.repo_url or "").strip()
+    if repo_local_path and not Path(repo_local_path).exists():
+        logger.warning(
+            "Configured repo_local_path is invalid for project %s: %s",
+            task.project.id,
+            repo_local_path,
+        )
+        repo_local_path = ""
+        repo_path_source = "invalid_config_repaired"
+        task.project.repo_local_path = None
+    if not repo_local_path:
+        if not repo_url:
+            return None, None
+        repo_local_path = await ensure_repo_local_mirror(
+            project_id=str(task.project.id),
+            repo_url=repo_url,
+            base_branch=task.project.branch or "main",
+        ) or ""
+        if not repo_local_path:
+            logger.warning(
+                "Failed to prepare local mirror for task %s from repo_url=%s",
+                task.id,
+                repo_url,
+            )
+            return None, None
+        repo_path_source = "auto_cloned" if repo_path_source == "project_config" else repo_path_source
+        task.project.repo_local_path = repo_local_path
+
     worktree_path: Optional[str] = None
-    worktree_mgr = get_worktree_manager(task.project.repo_local_path)
+    worktree_mgr = get_worktree_manager(repo_local_path)
     worktree_corr = f"worktree-create-{uuid.uuid4().hex}"
     worktree_started_at = time.monotonic()
     worktree_started_log_id = await _emit_system_log(
@@ -328,7 +378,11 @@ async def _setup_worktree(task: TaskModel) -> tuple[Optional[str], Any]:
         event_type="worktree_create_started",
         status="running",
         correlation_id=worktree_corr,
-        response_body={"repo_local_path": task.project.repo_local_path},
+        response_body={
+            "repo_local_path": repo_local_path,
+            "repo_path_source": repo_path_source,
+            "repo_url": task.project.repo_url,
+        },
     )
     try:
         worktree_path = await worktree_mgr.create_worktree(
@@ -337,9 +391,9 @@ async def _setup_worktree(task: TaskModel) -> tuple[Optional[str], Any]:
             base_branch=task.project.branch or "main",
             target_branch=task.target_branch,
         )
+        duration_ms = round((time.monotonic() - worktree_started_at) * 1000, 2)
         if worktree_path:
             logger.info("Task %s using worktree: %s", task.id, worktree_path)
-            duration_ms = round((time.monotonic() - worktree_started_at) * 1000, 2)
             await _emit_system_log(
                 task,
                 event_type="worktree_create_finished",
@@ -354,21 +408,21 @@ async def _setup_worktree(task: TaskModel) -> tuple[Optional[str], Any]:
                 status="success",
             )
         else:
-            duration_ms = round((time.monotonic() - worktree_started_at) * 1000, 2)
             await _emit_system_log(
                 task,
                 event_type="worktree_create_finished",
                 status="failed",
                 correlation_id=worktree_corr,
-                response_body={"error": "create_worktree_returned_none"},
+                response_body={"error": "worktree_path_unavailable"},
                 duration_ms=duration_ms,
             )
             await _close_started_system_log(
                 started_log_id=worktree_started_log_id,
                 started_at_monotonic=worktree_started_at,
                 status="failed",
-                result="create_worktree_returned_none",
+                result="worktree_path_unavailable",
             )
+            return None, None
     except Exception:
         logger.warning(
             "Failed to create worktree for task %s, falling back to tmpdir",
@@ -393,8 +447,50 @@ async def _setup_worktree(task: TaskModel) -> tuple[Optional[str], Any]:
     return worktree_path, worktree_mgr
 
 
+async def _prepare_runtime_workspace(
+    task: TaskModel,
+    worktree_path: Optional[str],
+) -> tuple[Optional[str], str, Optional[str]]:
+    """Resolve task workspace once before stages start.
+
+    Returns (workspace_path, workspace_source, branch_name).
+    """
+    if worktree_path:
+        return worktree_path, "worktree", getattr(task, "target_branch", None)
+
+    workspace_path = Path(tempfile.gettempdir()) / "silicon_agent" / "tasks" / str(task.id)
+    workspace_path.mkdir(parents=True, exist_ok=True)
+    target_branch = (getattr(task, "target_branch", None) or "").strip() or None
+
+    repo_url = (task.project.repo_url or "").strip() if task.project else ""
+    if settings.WORKTREE_ENABLED and repo_url:
+        return None, "worktree_required", None
+
+    if not repo_url:
+        return str(workspace_path), "tmp_empty", target_branch
+
+    prepared, branch_name, error = await prepare_workspace_from_repo(
+        workspace=str(workspace_path),
+        repo_url=repo_url,
+        task_id=str(task.id),
+        task_title=task.title,
+        base_branch=(task.project.branch if task.project else None) or "main",
+        target_branch=target_branch,
+    )
+    if not prepared:
+        logger.error(
+            "Failed to prepare fallback repo workspace for task %s: %s",
+            task.id,
+            error or "unknown",
+        )
+        return None, "tmp_clone_failed", None
+    return str(workspace_path), "tmp_cloned", branch_name
+
+
 async def _setup_sandbox(
-    task: TaskModel, worktree_path: Optional[str],
+    task: TaskModel,
+    workspace_path: Optional[str],
+    workspace_source_hint: str,
 ) -> tuple[Any, Any, Optional[str]]:
     """Create sandbox container if enabled.
 
@@ -410,7 +506,11 @@ async def _setup_sandbox(
     if task.project and task.project.sandbox_image:
         sandbox_image = task.project.sandbox_image
     fallback_mode = _resolve_sandbox_fallback_mode()
-    resolved_workspace, workspace_source = _resolve_sandbox_workspace(str(task.id), worktree_path)
+    resolved_workspace, workspace_source = _resolve_sandbox_workspace(
+        str(task.id),
+        workspace_path,
+        workspace_source_hint,
+    )
 
     workspace_prepare_error_code: Optional[str] = None
     workspace_prepare_error: Optional[str] = None
@@ -422,9 +522,9 @@ async def _setup_sandbox(
             workspace_prepare_error_code = "workspace_prepare_failed"
             workspace_prepare_error = str(exc)
     elif not workspace_path.exists() or not workspace_path.is_dir():
-        workspace_prepare_error_code = "worktree_workspace_not_found"
+        workspace_prepare_error_code = "workspace_not_found"
         workspace_prepare_error = (
-            f"Worktree path does not exist or is not directory: {resolved_workspace}"
+            f"Workspace path does not exist or is not directory: {resolved_workspace}"
         )
 
     sandbox_corr = f"sandbox-create-{uuid.uuid4().hex}"
@@ -584,6 +684,9 @@ async def _finalize_task_resources(
     project_memory_store: Any,
     worktree_mgr: Any,
     worktree_path: Optional[str],
+    workspace_path: Optional[str],
+    workspace_source: str,
+    workspace_branch: Optional[str],
     sandbox_mgr: Any,
     sandbox_info: Any,
 ) -> bool:
@@ -648,25 +751,9 @@ async def _finalize_task_resources(
                 "Skill metrics aggregation failed for task %s", task.id, exc_info=True
             )
 
-    # Worktree: commit, push, and optionally create PR
-    worktree_expected = bool(
-        settings.WORKTREE_ENABLED and task.project and task.project.repo_local_path
-    )
-    if worktree_expected and not worktree_path:
-        await _emit_system_log(
-            task,
-            event_type="worktree_commit_push_finished",
-            status="failed",
-            response_body={"error": "worktree_path_missing"},
-        )
-        await _fail_task(
-            session,
-            task,
-            "Worktree unavailable: worktree_path missing, skip commit/push",
-        )
-        return False
-
-    if worktree_mgr and worktree_path:
+    # SCM finalize: commit, push, and create PR when repo is configured
+    repo_url = (task.project.repo_url or "").strip() if task.project else ""
+    if repo_url and workspace_path:
         worktree_commit_corr = f"worktree-commit-{uuid.uuid4().hex}"
         worktree_commit_started_at = time.monotonic()
         worktree_commit_started_log_id = await _emit_system_log(
@@ -674,16 +761,21 @@ async def _finalize_task_resources(
             event_type="worktree_commit_push_started",
             status="running",
             correlation_id=worktree_commit_corr,
-            response_body={"worktree_path": worktree_path},
+            response_body={"workspace_path": workspace_path},
         )
         try:
-            branch = await worktree_mgr.commit_and_push(
-                task_id=str(task.id),
-                commit_message=f"feat: {task.title}\n\nTask-ID: {task.id}",
-                target_branch=task.target_branch,
-            )
-            if not branch:
-                raise RuntimeError("worktree_commit_push_failed_or_no_branch")
+            if worktree_mgr and worktree_path:
+                branch = await worktree_mgr.commit_and_push(
+                    task_id=str(task.id),
+                    commit_message=f"feat: {task.title}\n\nTask-ID: {task.id}",
+                    target_branch=task.target_branch,
+                )
+            else:
+                branch = await commit_and_push_workspace(
+                    workspace=workspace_path,
+                    commit_message=f"feat: {task.title}\n\nTask-ID: {task.id}",
+                    target_branch=task.target_branch or workspace_branch,
+                )
             duration_ms = round((time.monotonic() - worktree_commit_started_at) * 1000, 2)
             await _emit_system_log(
                 task,
@@ -698,9 +790,10 @@ async def _finalize_task_resources(
                 started_at_monotonic=worktree_commit_started_at,
                 status="success",
             )
-            task.branch_name = branch
-            await session.commit()
-            if settings.WORKTREE_AUTO_PR:
+            if branch:
+                task.branch_name = branch
+                await session.commit()
+            if branch:
                 pr_corr = f"worktree-pr-{uuid.uuid4().hex}"
                 pr_started_at = time.monotonic()
                 pr_started_log_id = await _emit_system_log(
@@ -711,12 +804,20 @@ async def _finalize_task_resources(
                     response_body={"branch": branch},
                 )
                 pr_body = f"Automated PR for task: {task.title}\n\nTask ID: {task.id}"
-                pr_url = await worktree_mgr.create_pr(
-                    task_id=str(task.id),
-                    title=task.title,
-                    body=pr_body,
-                    base_branch=task.project.branch or "main",
-                )
+                if worktree_mgr and worktree_path:
+                    pr_url = await worktree_mgr.create_pr(
+                        task_id=str(task.id),
+                        title=task.title,
+                        body=pr_body,
+                        base_branch=task.project.branch or "main",
+                    )
+                else:
+                    pr_url = await create_pr_for_workspace(
+                        workspace=workspace_path,
+                        title=task.title,
+                        body=pr_body,
+                        base_branch=task.project.branch or "main",
+                    )
                 if pr_url:
                     task.pr_url = pr_url
                     await session.commit()
@@ -755,7 +856,15 @@ async def _finalize_task_resources(
             await _fail_task(session, task, "Worktree commit/push failed")
             return False
 
-    await _cleanup_runtime_resources(task, worktree_mgr, worktree_path, sandbox_mgr, sandbox_info)
+    await _cleanup_runtime_resources(
+        task,
+        worktree_mgr,
+        worktree_path,
+        workspace_path,
+        workspace_source,
+        sandbox_mgr,
+        sandbox_info,
+    )
     return True
 
 
@@ -763,6 +872,8 @@ async def _cleanup_runtime_resources(
     task: TaskModel,
     worktree_mgr: Any,
     worktree_path: Optional[str],
+    workspace_path: Optional[str],
+    workspace_source: str,
     sandbox_mgr: Any,
     sandbox_info: Any,
 ) -> None:
@@ -810,6 +921,16 @@ async def _cleanup_runtime_resources(
                 result="worktree_cleanup_failed",
             )
 
+    # Cleanup temporary task workspace (non-worktree execution path)
+    if workspace_path and workspace_source.startswith("tmp_"):
+        try:
+            tmp_workspace = Path(workspace_path).resolve()
+            tmp_root = (Path(tempfile.gettempdir()) / "silicon_agent" / "tasks").resolve()
+            if tmp_workspace.is_relative_to(tmp_root):
+                shutil.rmtree(tmp_workspace, ignore_errors=True)
+        except Exception:
+            logger.warning("Temporary workspace cleanup failed for task %s", task.id, exc_info=True)
+
     # Clean up sandbox container
     if sandbox_mgr and sandbox_info:
         try:
@@ -850,6 +971,9 @@ async def _process_task(session: AsyncSession, task: TaskModel) -> None:
     structured_outputs: Dict[str, dict] = {}
     worktree_path: Optional[str] = None
     worktree_mgr: Any = None
+    workspace_path: Optional[str] = None
+    workspace_source: str = "unresolved"
+    workspace_branch: Optional[str] = None
     sandbox_info: Any = None
     sandbox_mgr: Any = None
     resources_finalized = False
@@ -860,9 +984,35 @@ async def _process_task(session: AsyncSession, task: TaskModel) -> None:
         if task.project and task.project.repo_tree:
             repo_context = _build_repo_context(task.project)
 
-        # Setup git worktree and sandbox
+        # Setup task workspace before any stage starts
         worktree_path, worktree_mgr = await _setup_worktree(task)
-        sandbox_info, sandbox_mgr, sandbox_required_error = await _setup_sandbox(task, worktree_path)
+        workspace_path, workspace_source, workspace_branch = await _prepare_runtime_workspace(
+            task,
+            worktree_path,
+        )
+        if not workspace_path:
+            if workspace_source == "worktree_required":
+                reason = "Task workspace preparation failed: worktree is required but unavailable"
+            elif workspace_source == "tmp_clone_failed":
+                reason = "Task workspace preparation failed: clone repository to temporary workspace failed"
+            else:
+                reason = "Task workspace preparation failed"
+            await _fail_task(
+                session,
+                task,
+                reason,
+            )
+            return
+        task_target_branch = (getattr(task, "target_branch", None) or "").strip()
+        if not task_target_branch and workspace_branch:
+            task.target_branch = workspace_branch
+            await session.commit()
+
+        sandbox_info, sandbox_mgr, sandbox_required_error = await _setup_sandbox(
+            task,
+            workspace_path,
+            workspace_source,
+        )
 
         # Load project memory for this task's project
         project_memory_store = None
@@ -877,11 +1027,12 @@ async def _process_task(session: AsyncSession, task: TaskModel) -> None:
             await _process_task_graph(
                 session, task, sorted_stages, stage_defs, gates,
                 prior_outputs, compression, structured_outputs,
-                project_memory_store, repo_context, worktree_path, sandbox_info, sandbox_required_error,
+                project_memory_store, repo_context, workspace_path, sandbox_info, sandbox_required_error,
             )
             finalized = await _finalize_task_resources(
                 session, task, prior_outputs, project_memory_store,
-                worktree_mgr, worktree_path, sandbox_mgr, sandbox_info,
+                worktree_mgr, worktree_path, workspace_path, workspace_source,
+                workspace_branch, sandbox_mgr, sandbox_info,
             )
             if not finalized:
                 from app.worker.agents import close_agents_for_task
@@ -929,7 +1080,7 @@ async def _process_task(session: AsyncSession, task: TaskModel) -> None:
                             session, task, stage, gate_def,
                             stage.output_summary or "", stage_index_base, prior_outputs, compression,
                             project_memory_store, repo_context, stage_defs,
-                            worktree_path, sandbox_info, sandbox_required_error,
+                            workspace_path, sandbox_info, sandbox_required_error,
                         )
                         if gate_result is None:
                             return
@@ -965,7 +1116,7 @@ async def _process_task(session: AsyncSession, task: TaskModel) -> None:
                 result = await _execute_single_stage(
                     session, task, stage, stage_index_base,
                     prior_outputs, compression, project_memory_store,
-                    repo_context, stage_defs, worktree_path, sandbox_info,
+                    repo_context, stage_defs, workspace_path, sandbox_info,
                     sandbox_required_error=sandbox_required_error,
                 )
                 if result is None:
@@ -997,7 +1148,7 @@ async def _process_task(session: AsyncSession, task: TaskModel) -> None:
                         session, task, stage, gate_def,
                         result, stage_index_base, prior_outputs, compression,
                         project_memory_store, repo_context, stage_defs,
-                        worktree_path, sandbox_info, sandbox_required_error,
+                        workspace_path, sandbox_info, sandbox_required_error,
                     )
                     if gate_result is None:
                         return  # task failed or gate rejected without retries
@@ -1036,7 +1187,7 @@ async def _process_task(session: AsyncSession, task: TaskModel) -> None:
                     coro = _execute_single_stage(
                         session, task, stage, stage_index_base,
                         prior_outputs, compression, project_memory_store,
-                        repo_context, stage_defs, worktree_path, sandbox_info,
+                        repo_context, stage_defs, workspace_path, sandbox_info,
                         sandbox_required_error=sandbox_required_error,
                     )
                     tasks_map[stage.stage_name] = (stage, asyncio.create_task(coro))
@@ -1084,7 +1235,7 @@ async def _process_task(session: AsyncSession, task: TaskModel) -> None:
                             session, task, stage, gate_def,
                             output, stage_index_base, prior_outputs, compression,
                             project_memory_store, repo_context, stage_defs,
-                            worktree_path, sandbox_info, sandbox_required_error,
+                            workspace_path, sandbox_info, sandbox_required_error,
                         )
                         if gate_result is None:
                             return
@@ -1094,7 +1245,8 @@ async def _process_task(session: AsyncSession, task: TaskModel) -> None:
         # Finalize: extract memories, commit worktree, cleanup resources
         finalized = await _finalize_task_resources(
             session, task, prior_outputs, project_memory_store,
-            worktree_mgr, worktree_path, sandbox_mgr, sandbox_info,
+            worktree_mgr, worktree_path, workspace_path, workspace_source,
+            workspace_branch, sandbox_mgr, sandbox_info,
         )
         if not finalized:
             from app.worker.agents import close_agents_for_task
@@ -1112,6 +1264,8 @@ async def _process_task(session: AsyncSession, task: TaskModel) -> None:
                 task,
                 worktree_mgr,
                 worktree_path,
+                workspace_path,
+                workspace_source,
                 sandbox_mgr,
                 sandbox_info,
             )
@@ -1128,7 +1282,7 @@ async def _process_task_graph(
     structured_outputs: Dict[str, dict],
     project_memory_store,
     repo_context: Optional[str],
-    worktree_path: Optional[str] = None,
+    workspace_path: Optional[str] = None,
     sandbox_info=None,
     sandbox_required_error: Optional[str] = None,
 ) -> None:
@@ -1163,7 +1317,7 @@ async def _process_task_graph(
 
     for stage in sorted_stages:
         if stage.status == "completed":
-            if not await _ensure_code_stage_has_changes(session, task, stage, worktree_path):
+            if not await _ensure_code_stage_has_changes(session, task, stage, workspace_path):
                 return
             completed.add(stage.stage_name)
             prior_outputs.append({
@@ -1184,7 +1338,7 @@ async def _process_task_graph(
                     stage.output_summary or "", len(completed) + len(skipped),  # stage_index approximate
                     prior_outputs, compression,
                     project_memory_store, repo_context, stage_defs,
-                    worktree_path, sandbox_info,
+                    workspace_path, sandbox_info,
                 )
                 if gate_result is None:
                     return
@@ -1244,7 +1398,7 @@ async def _process_task_graph(
             result = await _execute_single_stage(
                 session, task, stage, stage_index,
                 prior_outputs, compression, project_memory_store,
-                repo_context, stage_defs, worktree_path, sandbox_info,
+                repo_context, stage_defs, workspace_path, sandbox_info,
                 sandbox_required_error=sandbox_required_error,
             )
             if result is None:
@@ -1268,7 +1422,7 @@ async def _process_task_graph(
                     return
                 continue
 
-            if not await _ensure_code_stage_has_changes(session, task, stage, worktree_path):
+            if not await _ensure_code_stage_has_changes(session, task, stage, workspace_path):
                 return
             completed.add(node.name)
             prior_outputs.append({"stage": node.name, "output": result})
@@ -1285,7 +1439,7 @@ async def _process_task_graph(
                     session, task, stage, gate_def,
                     result, stage_index, prior_outputs, compression,
                     project_memory_store, repo_context, stage_defs,
-                    worktree_path, sandbox_info, sandbox_required_error,
+                    workspace_path, sandbox_info, sandbox_required_error,
                 )
                 if gate_result is None:
                     return
@@ -1310,7 +1464,7 @@ async def _process_task_graph(
                 coro = _execute_single_stage(
                     session, task, stage, stage_index,
                     prior_outputs, compression, project_memory_store,
-                    repo_context, stage_defs, worktree_path, sandbox_info,
+                    repo_context, stage_defs, workspace_path, sandbox_info,
                     sandbox_required_error=sandbox_required_error,
                 )
                 tasks_async[node.name] = (stage, asyncio.create_task(coro))
@@ -1328,7 +1482,7 @@ async def _process_task_graph(
                     failed.add(name)
                     continue
 
-                if not await _ensure_code_stage_has_changes(session, task, stage, worktree_path):
+                if not await _ensure_code_stage_has_changes(session, task, stage, workspace_path):
                     return
                 completed.add(name)
                 prior_outputs.append({"stage": name, "output": result})
@@ -1355,7 +1509,7 @@ async def _execute_single_stage(
     project_memory_store,
     repo_context: Optional[str],
     stage_defs: Dict[str, dict],
-    worktree_path: Optional[str] = None,
+    workspace_path: Optional[str] = None,
     sandbox_info=None,
     gate_rejection_context: Optional[Dict[str, str]] = None,
     sandbox_required_error: Optional[str] = None,
@@ -1446,9 +1600,9 @@ async def _execute_single_stage(
                     "prior_output": (stage.output_summary or "")[:2000],
                 }
 
-    # Determine working directory: worktree for code-producing roles, tmpdir otherwise
+    # Determine working directory: all stages share the same task workspace
     _CODE_ROLES = {"coding", "test"}
-    effective_workdir = worktree_path if (worktree_path and stage.agent_role in _CODE_ROLES) else None
+    effective_workdir = workspace_path if workspace_path else None
     fallback_mode = _resolve_sandbox_fallback_mode()
 
     # Route to sandbox container or in-process execution
@@ -1923,7 +2077,7 @@ async def _handle_gate_with_retry(
     project_memory_store,
     repo_context: Optional[str],
     stage_defs: Dict[str, dict],
-    worktree_path: Optional[str] = None,
+    workspace_path: Optional[str] = None,
     sandbox_info=None,
     sandbox_required_error: Optional[str] = None,
 ) -> Optional[str]:
@@ -1961,7 +2115,7 @@ async def _handle_gate_with_retry(
             new_output = await _execute_single_stage(
                 session, task, stage, stage_index,
                 prior_outputs, compression, project_memory_store,
-                repo_context, stage_defs, worktree_path, sandbox_info,
+                repo_context, stage_defs, workspace_path, sandbox_info,
                 gate_rejection_context=gate_rejection_ctx,
                 sandbox_required_error=sandbox_required_error,
             )
@@ -1995,7 +2149,7 @@ async def _handle_gate_with_retry(
                 new_output = await _execute_single_stage(
                     session, task, stage, stage_index,
                     prior_outputs, compression, project_memory_store,
-                    repo_context, stage_defs, worktree_path, sandbox_info,
+                    repo_context, stage_defs, workspace_path, sandbox_info,
                     gate_rejection_context=gate_rejection_ctx,
                     sandbox_required_error=sandbox_required_error,
                 )

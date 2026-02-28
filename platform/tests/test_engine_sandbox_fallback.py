@@ -64,7 +64,7 @@ async def test_execute_single_stage_strict_mode_fails_when_sandbox_unavailable(m
         project_memory_store=None,
         repo_context=None,
         stage_defs={},
-        worktree_path=None,
+        workspace_path=None,
         sandbox_info=None,
         sandbox_required_error="docker_run_failed: boom",
     )

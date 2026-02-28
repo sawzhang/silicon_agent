@@ -52,7 +52,7 @@ The system processes tasks through a multi-stage pipeline driven by a background
 
 **Parallel stage execution**: Stages with the same `order` value in a template execute concurrently.
 
-**Git worktree isolation**: When `WORKTREE_ENABLED=true` and a project has `repo_local_path` set, coding/test agents work in isolated git worktrees. On task completion, changes are committed, pushed, and optionally a PR is created (`WORKTREE_AUTO_PR`).
+**Git worktree isolation**: When `WORKTREE_ENABLED=true`, the worker prepares/uses a managed local repo cache and creates an isolated git worktree per task. On task completion, changes are committed, pushed, and a PR is created when repo config exists.
 
 **External notifications**: When `NOTIFY_WEBHOOK_URL` is set, task lifecycle events (completed, failed, gate created) are POSTed to the webhook (compatible with Slack/飞书/钉钉).
 
@@ -123,7 +123,7 @@ All settings load from `.env` via Pydantic BaseSettings. Critical ones:
 - `WORKER_STAGE_TIMEOUT` (300s) / `WORKER_TASK_TIMEOUT` (1800s) — execution limits
 - `CB_MAX_TOKENS_PER_TASK` (200k) / `CB_MAX_COST_PER_TASK_RMB` (¥50) — circuit breaker
 - `MEMORY_ENABLED` — project-level memory across tasks
-- `WORKTREE_ENABLED` / `WORKTREE_AUTO_PR` — git worktree isolation for coding agents
+- `WORKTREE_ENABLED` / `WORKTREE_BASE_DIR` / `WORKTREE_REPO_CACHE_DIR` — git worktree isolation and local repo cache
 - `NOTIFY_WEBHOOK_URL` / `NOTIFY_EVENTS` — external webhook notifications
 
 ## Conventions

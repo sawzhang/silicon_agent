@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import inspect
 import logging
+import re
 import time
 import uuid
 from datetime import datetime, timezone
@@ -30,6 +31,10 @@ _TOOL_FAILURE_PREFIXES = (
     "Error reading file:",
     "Error writing file:",
     "Exit code:",
+)
+
+_WORKDIR_PROMPT_PATTERN = re.compile(
+    r"\n\n你的工作目录是: .*\n所有文件操作请在此目录下进行。",
 )
 
 
@@ -87,6 +92,29 @@ def _chat_kwargs_for_runner(runner: Any, runtime_overrides: dict[str, Any]) -> d
 
 def infer_tool_status(output: str) -> str:
     return "failed" if output.startswith(_TOOL_FAILURE_PREFIXES) else "success"
+
+
+def _apply_runner_workspace_override(runner: Any, workdir_override: Optional[str]) -> None:
+    """Keep runner cwd and system prompt workspace hint aligned with runtime override."""
+    if not workdir_override:
+        return
+
+    if getattr(runner, "default_cwd", None) != workdir_override:
+        runner.default_cwd = workdir_override
+
+    config = getattr(runner, "config", None)
+    system_prompt = getattr(config, "system_prompt", None) if config else None
+    if not isinstance(system_prompt, str):
+        return
+
+    workspace_hint = (
+        f"\n\n你的工作目录是: {workdir_override}\n所有文件操作请在此目录下进行。"
+    )
+    if _WORKDIR_PROMPT_PATTERN.search(system_prompt):
+        system_prompt = _WORKDIR_PROMPT_PATTERN.sub(workspace_hint, system_prompt, count=1)
+    else:
+        system_prompt = f"{system_prompt}{workspace_hint}"
+    config.system_prompt = system_prompt
 
 
 async def _safe_broadcast(event: str, data: dict) -> None:
@@ -832,8 +860,7 @@ async def execute_stage(
         extra_skill_dirs=runtime_overrides["extra_skill_dirs"],
         system_prompt_append=runtime_overrides["system_prompt_append"],
     )
-    if workdir_override and runner.default_cwd != workdir_override:
-        runner.default_cwd = workdir_override
+    _apply_runner_workspace_override(runner, workdir_override)
     runner.reset_usage()
 
     pipeline = get_task_log_pipeline()
@@ -936,8 +963,7 @@ async def execute_stage(
                         extra_skill_dirs=runtime_overrides["extra_skill_dirs"],
                         system_prompt_append=runtime_overrides["system_prompt_append"],
                     )
-                    if workdir_override and runner.default_cwd != workdir_override:
-                        runner.default_cwd = workdir_override
+                    _apply_runner_workspace_override(runner, workdir_override)
                     runner.reset_usage()
                     tracker.register_runner_events(runner)
                     used_text_only_fallback = True
