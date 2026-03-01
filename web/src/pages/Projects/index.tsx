@@ -1,13 +1,13 @@
 import React, { useState } from 'react';
 import { Button, Tag, message, Popconfirm, Space, Tooltip } from 'antd';
-import { PlusOutlined, DeleteOutlined, SyncOutlined } from '@ant-design/icons';
+import { PlusOutlined, DeleteOutlined, SyncOutlined, EditOutlined } from '@ant-design/icons';
 import { ProTable } from '@ant-design/pro-components';
 import type { ActionType, ProColumns } from '@ant-design/pro-components';
-import { ModalForm, ProFormText, ProFormTextArea } from '@ant-design/pro-components';
+import { ModalForm, ProFormText, ProFormTextArea, ProFormSelect } from '@ant-design/pro-components';
 import { listProjects, syncProject } from '@/services/projectApi';
-import { useCreateProject, useDeleteProject } from '@/hooks/useProjects';
+import { useCreateProject, useDeleteProject, useUpdateProject } from '@/hooks/useProjects';
 import { formatTimestamp } from '@/utils/formatters';
-import type { Project, ProjectCreateRequest } from '@/types/project';
+import type { Project } from '@/types/project';
 
 const STATUS_COLOR: Record<string, string> = {
   active: 'success',
@@ -32,8 +32,11 @@ const TECH_COLORS: Record<string, string> = {
 const ProjectList: React.FC = () => {
   const actionRef = React.useRef<ActionType>();
   const createProject = useCreateProject();
+  const updateProject = useUpdateProject();
   const deleteProject = useDeleteProject();
   const [createOpen, setCreateOpen] = useState(false);
+  const [editOpen, setEditOpen] = useState(false);
+  const [editingProject, setEditingProject] = useState<Project | null>(null);
   const [syncingIds, setSyncingIds] = useState<Set<string>>(new Set());
 
   const handleSync = async (projectId: string) => {
@@ -119,10 +122,21 @@ const ProjectList: React.FC = () => {
     },
     {
       title: '操作',
-      width: 120,
+      width: 180,
       search: false,
       render: (_, record) => (
         <Space size="small">
+          <Tooltip title="编辑项目">
+            <Button
+              type="link"
+              icon={<EditOutlined />}
+              size="small"
+              onClick={() => {
+                setEditingProject(record);
+                setEditOpen(true);
+              }}
+            />
+          </Tooltip>
           <Tooltip title={record.repo_url ? '同步代码库信息' : '未配置代码库地址'}>
             <Button
               type="link"
@@ -200,6 +214,61 @@ const ProjectList: React.FC = () => {
         <ProFormText name="display_name" label="显示名称" placeholder="例如：Silicon Agent" rules={[{ required: true }]} />
         <ProFormText name="repo_url" label="代码库地址" placeholder="https://github.com/org/repo" />
         <ProFormText name="branch" label="目标分支" initialValue="main" />
+        <ProFormTextArea name="description" label="项目描述" />
+      </ModalForm>
+      <ModalForm
+        title="编辑项目"
+        open={editOpen}
+        onOpenChange={(open) => {
+          setEditOpen(open);
+          if (!open) setEditingProject(null);
+        }}
+        initialValues={{
+          display_name: editingProject?.display_name,
+          repo_url: editingProject?.repo_url || '',
+          branch: editingProject?.branch || 'main',
+          description: editingProject?.description || '',
+          status: editingProject?.status || 'active',
+        }}
+        submitter={{
+          submitButtonProps: {
+            loading: updateProject.isPending,
+          },
+        }}
+        onFinish={async (values: Record<string, string>) => {
+          if (!editingProject) return false;
+          try {
+            await updateProject.mutateAsync({
+              id: editingProject.id,
+              req: {
+                display_name: values.display_name,
+                repo_url: values.repo_url || undefined,
+                branch: values.branch || undefined,
+                description: values.description || undefined,
+                status: values.status || undefined,
+              },
+            });
+            message.success('项目更新成功');
+            actionRef.current?.reload();
+            return true;
+          } catch (err: any) {
+            message.error(err?.response?.data?.detail || '项目更新失败');
+            return false;
+          }
+        }}
+      >
+        <ProFormText name="display_name" label="显示名称" rules={[{ required: true }]} />
+        <ProFormText name="repo_url" label="代码库地址" />
+        <ProFormText name="branch" label="目标分支" />
+        <ProFormSelect
+          name="status"
+          label="状态"
+          options={[
+            { label: '活跃', value: 'active' },
+            { label: '已归档', value: 'archived' },
+          ]}
+          rules={[{ required: true }]}
+        />
         <ProFormTextArea name="description" label="项目描述" />
       </ModalForm>
     </>

@@ -1,0 +1,3 @@
+# Runtime project memory snapshots
+memory/*
+!memory/.gitkeep

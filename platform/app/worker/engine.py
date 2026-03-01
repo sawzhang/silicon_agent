@@ -321,6 +321,14 @@ async def _ensure_code_stage_has_changes(
     """Code stage must produce repository changes; otherwise fail fast."""
     if (stage.stage_name or "").lower() != "code":
         return True
+    # When worktree mode is disabled/unavailable, skip git diff verification.
+    # Some tasks still complete via sandbox workspace edits without a git worktree.
+    if not worktree_path:
+        logger.info(
+            "Skip code-stage git change verification for task %s: worktree not enabled/available",
+            task.id,
+        )
+        return True
 
     changed = await _has_git_worktree_changes(worktree_path)
     if changed:
