@@ -6,11 +6,9 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 import pytest
-from sqlalchemy import select
 
 from app.db.session import async_session_factory
-from app.models.gate import HumanGateModel
-from app.models.task import TaskModel, TaskStageModel
+from app.models.task import TaskModel
 from app.worker import engine
 
 

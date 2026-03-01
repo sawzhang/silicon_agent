@@ -1,16 +1,13 @@
 """Tests for core engine functions: circuit breaker, task claim, state transitions, gates."""
 from __future__ import annotations
 
-import asyncio
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock
 
 import pytest
-from sqlalchemy import select
 
 from app.db.session import async_session_factory
-from app.models.gate import HumanGateModel
-from app.models.task import TaskModel, TaskStageModel
+from app.models.task import TaskModel
 from app.worker import engine
 
 

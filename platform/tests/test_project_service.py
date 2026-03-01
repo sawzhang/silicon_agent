@@ -30,7 +30,6 @@ async def _cleanup_project(project_id: str) -> None:
 
 
 async def _cleanup_by_name_prefix(prefix: str) -> None:
-    from sqlalchemy import select
     async with async_session_factory() as session:
         from sqlalchemy import select as sa_select
         result = await session.execute(

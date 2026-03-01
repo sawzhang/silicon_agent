@@ -36,7 +36,6 @@ import pytest
 from app.services.task_service import TaskService
 from app.schemas.task import (
     TaskBatchCreateRequest,
-    TaskBatchRetryRequest,
     TaskCreateRequest,
     TaskDecomposeRequest,
     BatchTaskItem,
@@ -947,7 +946,6 @@ async def test_retry_batch_retry_from_stage_raises_exception():
 
     # We'll monkeypatch retry_from_stage to raise ValueError
     svc = TaskService(session)
-    original_retry_from_stage = svc.retry_from_stage
 
     async def raising_retry(*args, **kwargs):
         raise ValueError("Stage retry limit reached (3/3)")

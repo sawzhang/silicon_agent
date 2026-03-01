@@ -2,13 +2,10 @@
 import time
 
 import jwt
-import pytest
 from fastapi import FastAPI
-from fastapi.responses import JSONResponse
 from httpx import ASGITransport, AsyncClient
 
 from app.config import settings
-from app.middleware.auth import JWTAuthMiddleware
 from app.middleware.error_handler import ErrorHandlerMiddleware
 
 

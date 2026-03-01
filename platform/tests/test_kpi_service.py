@@ -297,7 +297,6 @@ async def test_generate_report_all_roles():
     role_calls = []
     for i, role in enumerate(roles):
         # Returns a row with (count, sum_tokens, avg_secs)
-        row = SimpleNamespace(**{"0": i + 1, "1": (i + 1) * 1000, "2": (i + 1) * 10.0})
         # one() returns a tuple-like object
         result = MagicMock()
         result.one.return_value = ((i + 1), (i + 1) * 1000, (i + 1) * 10.0)
@@ -740,7 +739,6 @@ async def test_get_cockpit_with_pending_gates():
 @pytest.mark.asyncio
 async def test_get_cockpit_running_task_with_stage():
     """Lines 327-334: running task's current_stage identified from running stage."""
-    now = datetime.now(timezone.utc)
     running_stage = SimpleNamespace(
         status="running",
         stage_name="coding",

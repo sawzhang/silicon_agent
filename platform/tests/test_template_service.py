@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import json
 import uuid
-from datetime import datetime
 
 import pytest
 import pytest_asyncio
@@ -351,7 +350,7 @@ async def test_update_template_versioning_creates_new_version():
     versioning branch executes its logic by using a mock session that bypasses
     the DB constraint while still running the real service code.
     """
-    from unittest.mock import AsyncMock, MagicMock
+    from unittest.mock import MagicMock
     original_flag = settings.TEMPLATE_VERSIONING_ENABLED
 
     # Build a fake "old" template object
@@ -421,7 +420,7 @@ async def test_update_template_versioning_creates_new_version():
 @pytest.mark.asyncio
 async def test_update_template_versioning_preserves_unchanged_fields():
     """Versioned update preserves fields not passed in the request."""
-    from unittest.mock import AsyncMock, MagicMock
+    from unittest.mock import MagicMock
     original_flag = settings.TEMPLATE_VERSIONING_ENABLED
 
     old_id = str(uuid.uuid4())

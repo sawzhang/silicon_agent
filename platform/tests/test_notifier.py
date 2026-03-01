@@ -1,8 +1,7 @@
 """Tests for app/integration/notifier.py."""
 import logging
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
-import pytest
 
 import app.integration.notifier as notifier_mod
 from app.config import settings
