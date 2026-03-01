@@ -86,12 +86,16 @@ def _get_skill_dirs(role: str, extra_skill_dirs: list[str] | None = None) -> lis
 def _build_runtime_signature(
     *,
     model: str | None,
+    temperature: float | None,
+    max_tokens: int | None,
     max_turns: int | None,
     skill_dirs: list[Path],
     system_prompt_append: str | None,
 ) -> tuple:
     return (
         model or "",
+        temperature,
+        max_tokens,
         max_turns,
         tuple(str(p) for p in skill_dirs),
         (system_prompt_append or "").strip(),
@@ -128,6 +132,8 @@ def _create_or_refresh_runner(
     task_id: str,
     enable_tools: bool,
     model: str | None,
+    temperature: float | None,
+    max_tokens: int | None,
     max_turns: int | None,
     extra_skill_dirs: list[str] | None,
     system_prompt_append: str | None,
@@ -137,6 +143,8 @@ def _create_or_refresh_runner(
     normalized_prompt_append = _normalize_prompt_append(system_prompt_append)
     signature = _build_runtime_signature(
         model=model,
+        temperature=temperature,
+        max_tokens=max_tokens,
         max_turns=effective_max_turns,
         skill_dirs=skill_dirs,
         system_prompt_append=normalized_prompt_append,
@@ -156,6 +164,8 @@ def _create_or_refresh_runner(
         task_id,
         enable_tools=enable_tools,
         model=model,
+        temperature=temperature,
+        max_tokens=max_tokens,
         max_turns=effective_max_turns,
         skill_dirs=skill_dirs,
         system_prompt_append=normalized_prompt_append,
@@ -265,6 +275,8 @@ def resolve_model_for_role(role: str, stage_model: str | None = None) -> str | N
 def _create_runner(
     role: str, task_id: str, *, enable_tools: bool = True,
     model: str | None = None,
+    temperature: float | None = None,
+    max_tokens: int | None = None,
     max_turns: int | None = None,
     skill_dirs: list[Path] | None = None,
     system_prompt_append: str | None = None,
@@ -303,6 +315,12 @@ def _create_runner(
         # SkillKit's AgentConfig.from_env already sets model internally.
         # Override after creation to avoid duplicate keyword collisions.
         base.config.model = model
+    if temperature is not None:
+        # Keep runtime override handling consistent with model override.
+        base.config.temperature = temperature
+    if max_tokens is not None:
+        # Keep runtime override handling consistent with model override.
+        base.config.max_tokens = max_tokens
 
     # Disable MiniMax-specific reasoning_split for non-MiniMax models (e.g. Gemini).
     # SkillKit defaults enable_reasoning=True which injects extra_body={"reasoning_split": True}
@@ -317,14 +335,18 @@ def _create_runner(
         allowed_tools=allowed,
     )
     configured_model = getattr(runner.config, "model", None)
+    configured_temperature = getattr(runner.config, "temperature", None)
+    configured_max_tokens = getattr(runner.config, "max_tokens", None)
     logger.info(
         "Created SandboxedAgentRunner for role=%s task=%s requested_model=%s "
-        "effective_model=%s max_turns=%s "
+        "effective_model=%s temperature=%s max_tokens=%s max_turns=%s "
         "skill_dirs=%s tools=%s enable_tools=%s cwd=%s",
         role,
         task_id,
         model or "default",
         configured_model or "default",
+        configured_temperature,
+        configured_max_tokens,
         effective_max_turns,
         [str(p) for p in effective_skill_dirs],
         sorted(allowed),
@@ -336,6 +358,8 @@ def _create_runner(
 
 def get_agent(
     role: str, task_id: str, *, model: str | None = None,
+    temperature: float | None = None,
+    max_tokens: int | None = None,
     max_turns: int | None = None,
     extra_skill_dirs: list[str] | None = None,
     system_prompt_append: str | None = None,
@@ -349,6 +373,8 @@ def get_agent(
         task_id=task_id,
         enable_tools=True,
         model=resolved_model,
+        temperature=temperature,
+        max_tokens=max_tokens,
         max_turns=max_turns,
         extra_skill_dirs=extra_skill_dirs,
         system_prompt_append=system_prompt_append,
@@ -357,6 +383,8 @@ def get_agent(
 
 def get_agent_text_only(
     role: str, task_id: str, *, model: str | None = None,
+    temperature: float | None = None,
+    max_tokens: int | None = None,
     max_turns: int | None = None,
     extra_skill_dirs: list[str] | None = None,
     system_prompt_append: str | None = None,
@@ -374,6 +402,8 @@ def get_agent_text_only(
         task_id=task_id,
         enable_tools=False,
         model=resolved_model,
+        temperature=temperature,
+        max_tokens=max_tokens,
         max_turns=max_turns,
         extra_skill_dirs=extra_skill_dirs,
         system_prompt_append=system_prompt_append,

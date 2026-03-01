@@ -102,3 +102,39 @@ def test_create_runner_keeps_env_model_when_override_missing(monkeypatch, tmp_pa
     assert isinstance(kwargs, dict)
     assert "model" not in kwargs
     assert runner.config.model == "env-default"
+
+
+def test_create_runner_applies_temperature_and_max_tokens_overrides(monkeypatch, tmp_path):
+    captured: dict[str, object] = {}
+
+    class _FakeAgentRunner:
+        @staticmethod
+        def create(**kwargs):
+            captured["kwargs"] = kwargs
+            return SimpleNamespace(
+                engine=object(),
+                config=SimpleNamespace(
+                    model="env-default",
+                    temperature=1.0,
+                    max_tokens=4096,
+                    load_context_files=False,
+                ),
+            )
+
+    monkeypatch.setattr(agents_mod, "AgentRunner", _FakeAgentRunner)
+    monkeypatch.setattr(agents_mod, "SKILLKIT_AVAILABLE", True)
+
+    runner = agents_mod._create_runner(
+        "coding",
+        "tt-task-config-override",
+        temperature=0.3,
+        max_tokens=8192,
+        skill_dirs=[tmp_path],
+    )
+
+    kwargs = captured["kwargs"]
+    assert isinstance(kwargs, dict)
+    assert "temperature" not in kwargs
+    assert "max_tokens" not in kwargs
+    assert runner.config.temperature == 0.3
+    assert runner.config.max_tokens == 8192

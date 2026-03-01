@@ -137,6 +137,10 @@ def _parse_request_body(body: dict[str, Any]) -> dict[str, Any]:
     system_prompt = str(body.get("system_prompt", ""))
     user_prompt = str(body.get("user_prompt", ""))
     model = body.get("model")
+    temperature_raw = body.get("temperature")
+    temperature = float(temperature_raw) if temperature_raw is not None else None
+    max_tokens_raw = body.get("max_tokens")
+    max_tokens = int(max_tokens_raw) if max_tokens_raw is not None else None
     max_turns = int(body.get("max_turns", 20) or 20)
     enable_tools = bool(body.get("enable_tools", True))
     allowed_tools = set(body.get("allowed_tools", list(_ALL_TOOLS)))
@@ -148,6 +152,8 @@ def _parse_request_body(body: dict[str, Any]) -> dict[str, Any]:
         "system_prompt": system_prompt,
         "user_prompt": user_prompt,
         "model": model,
+        "temperature": temperature,
+        "max_tokens": max_tokens,
         "max_turns": max_turns,
         "enable_tools": enable_tools,
         "allowed_tools": allowed_tools,
@@ -170,6 +176,12 @@ def _create_runner(parsed: dict[str, Any]) -> ContainerAgentRunner:
         # SkillKit's AgentConfig.from_env already sets model internally.
         # Override after creation to avoid duplicate keyword collisions.
         base.config.model = parsed["model"]
+    if parsed["temperature"] is not None:
+        # Keep runtime override handling consistent with model override.
+        base.config.temperature = parsed["temperature"]
+    if parsed["max_tokens"] is not None:
+        # Keep runtime override handling consistent with model override.
+        base.config.max_tokens = parsed["max_tokens"]
     runner = ContainerAgentRunner(
         engine=base.engine,
         config=base.config,
@@ -332,8 +344,10 @@ async def handle_execute(request: web.Request) -> web.Response:
 
     parsed = _parse_request_body(body)
     logger.info(
-        "Executing stage: model=%s max_turns=%d tools=%s workdir=%s timeout=%ds",
+        "Executing stage: model=%s temperature=%s max_tokens=%s max_turns=%d tools=%s workdir=%s timeout=%ds",
         parsed["model"] or "default",
+        parsed["temperature"],
+        parsed["max_tokens"],
         parsed["max_turns"],
         sorted(parsed["allowed_tools"]),
         parsed["workdir"],
@@ -400,8 +414,10 @@ async def handle_execute_stream(request: web.Request) -> web.StreamResponse:
 
     parsed = _parse_request_body(body)
     logger.info(
-        "Executing stage stream: model=%s max_turns=%d tools=%s workdir=%s timeout=%ds",
+        "Executing stage stream: model=%s temperature=%s max_tokens=%s max_turns=%d tools=%s workdir=%s timeout=%ds",
         parsed["model"] or "default",
+        parsed["temperature"],
+        parsed["max_tokens"],
         parsed["max_turns"],
         sorted(parsed["allowed_tools"]),
         parsed["workdir"],

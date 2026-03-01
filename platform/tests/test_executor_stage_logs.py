@@ -255,7 +255,7 @@ async def test_execute_stage_emits_chat_sent_and_received(monkeypatch):
     monkeypatch.setattr(
         executor,
         'get_agent',
-        lambda _role, _task_id, model=None, max_turns=None, extra_skill_dirs=None, system_prompt_append=None: _FakeRunner(),
+        lambda _role, _task_id, model=None, temperature=None, max_tokens=None, max_turns=None, extra_skill_dirs=None, system_prompt_append=None: _FakeRunner(),
     )
 
     result = await executor.execute_stage(
@@ -327,11 +327,15 @@ async def test_execute_stage_uses_agent_config_runtime_overrides(monkeypatch):
         _role,
         _task_id,
         model=None,
+        temperature=None,
+        max_tokens=None,
         max_turns=None,
         extra_skill_dirs=None,
         system_prompt_append=None,
     ):
         captured_params['model'] = model
+        captured_params['temperature_override'] = temperature
+        captured_params['max_tokens_override'] = max_tokens
         captured_params['max_turns'] = max_turns
         captured_params['extra_skill_dirs'] = extra_skill_dirs
         captured_params['system_prompt_append'] = system_prompt_append
@@ -352,6 +356,8 @@ async def test_execute_stage_uses_agent_config_runtime_overrides(monkeypatch):
 
     assert result == 'stage output'
     assert captured_params['model'] == 'gpt-5.1-codex-mini'
+    assert captured_params['temperature_override'] == 0.2
+    assert captured_params['max_tokens_override'] == 1200
     assert captured_params['max_turns'] == 18
     assert captured_params['extra_skill_dirs'] == ['/tmp/skills']
     assert captured_params['system_prompt_append'] == 'extra prompt'
@@ -389,7 +395,7 @@ async def test_execute_stage_tool_single_record_lifecycle(monkeypatch):
     monkeypatch.setattr(
         executor,
         'get_agent',
-        lambda _role, _task_id, model=None, max_turns=None, extra_skill_dirs=None, system_prompt_append=None: _FakeRunner(with_tool=True),
+        lambda _role, _task_id, model=None, temperature=None, max_tokens=None, max_turns=None, extra_skill_dirs=None, system_prompt_append=None: _FakeRunner(with_tool=True),
     )
 
     result = await executor.execute_stage(
@@ -462,7 +468,7 @@ async def test_execute_stage_cancellation_still_finalizes_started_logs(monkeypat
     monkeypatch.setattr(
         executor,
         'get_agent',
-        lambda _role, _task_id, model=None, max_turns=None, extra_skill_dirs=None, system_prompt_append=None: _CancelledRunner(),
+        lambda _role, _task_id, model=None, temperature=None, max_tokens=None, max_turns=None, extra_skill_dirs=None, system_prompt_append=None: _CancelledRunner(),
     )
 
     with pytest.raises(asyncio.CancelledError):
@@ -774,7 +780,10 @@ async def test_execute_stage_sandboxed_uses_agent_model_override_when_stage_mode
     db_agent = SimpleNamespace(
         role='coding',
         model_name='agent-model-priority',
-        config={},
+        config={
+            'temperature': 0.35,
+            'max_tokens': 6400,
+        },
         status='idle',
         current_task_id=None,
         started_at=None,
@@ -817,3 +826,5 @@ async def test_execute_stage_sandboxed_uses_agent_model_override_when_stage_mode
     assert result == 'sandbox output'
     assert captured['resolve_arg'] == 'agent-model-priority'
     assert fake_sandbox_mgr.calls[0]['model'] == 'agent-model-priority'
+    assert fake_sandbox_mgr.calls[0]['temperature'] == 0.35
+    assert fake_sandbox_mgr.calls[0]['max_tokens'] == 6400

@@ -221,6 +221,8 @@ class SandboxManager:
         system_prompt: str,
         user_prompt: str,
         model: Optional[str] = None,
+        temperature: Optional[float] = None,
+        max_tokens: Optional[int] = None,
         max_turns: int = 20,
         enable_tools: bool = True,
         allowed_tools: Optional[list[str]] = None,
@@ -238,6 +240,8 @@ class SandboxManager:
             "system_prompt": system_prompt,
             "user_prompt": user_prompt,
             "model": model,
+            "temperature": temperature,
+            "max_tokens": max_tokens,
             "max_turns": max_turns,
             "enable_tools": enable_tools,
             "allowed_tools": allowed_tools or list(_ALL_TOOLS),
@@ -247,8 +251,12 @@ class SandboxManager:
         }
 
         logger.info(
-            "Sending stage to sandbox %s (model=%s, timeout=%ds)",
-            info.container_name, model or "default", timeout,
+            "Sending stage to sandbox %s (model=%s, temperature=%s, max_tokens=%s, timeout=%ds)",
+            info.container_name,
+            model or "default",
+            temperature,
+            max_tokens,
+            timeout,
         )
 
         request_timeout = httpx.Timeout(timeout + 30, connect=10)
