@@ -34,3 +34,11 @@ docs/media/
 *.pdf
 *.docx
 .claude/settings.local.json
+
+# Runtime memory store (written by worker and tests — never commit project subdirs)
+platform/memory/*/
+
+# Test artifacts
+platform/.coverage
+platform/htmlcov/
+platform/coverage.xml
