@@ -75,7 +75,7 @@ jobs:
           --reruns 2 --reruns-delay 1
           --cov=app --cov-report=term-missing
           --cov-report=xml --cov-report=html
-          --cov-fail-under=60
+          --cov-fail-under=70
 
       - name: Write coverage summary to job summary
         if: always()

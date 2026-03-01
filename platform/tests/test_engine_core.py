@@ -2781,22 +2781,19 @@ async def test_process_task_memory_init_exception(monkeypatch):
             raise RuntimeError("memory store failure")
 
     import sys
-    sys.modules["app.worker.memory"] = SimpleNamespace(ProjectMemoryStore=_BadStore)
+    monkeypatch.setitem(sys.modules, "app.worker.memory", SimpleNamespace(ProjectMemoryStore=_BadStore))
 
-    try:
-        task = _make_task(
-            project=SimpleNamespace(repo_tree=None),
-            project_id="proj-1",
-            target_branch=None,
-            stages=[],
-        )
-        task.template = None
-        session = SimpleNamespace(commit=AsyncMock())
-        # No stages → _complete_task called
-        await engine._process_task(session, task)
-        engine._complete_task.assert_awaited()
-    finally:
-        sys.modules.pop("app.worker.memory", None)
+    task = _make_task(
+        project=SimpleNamespace(repo_tree=None),
+        project_id="proj-1",
+        target_branch=None,
+        stages=[],
+    )
+    task.template = None
+    session = SimpleNamespace(commit=AsyncMock())
+    # No stages → _complete_task called
+    await engine._process_task(session, task)
+    engine._complete_task.assert_awaited()
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -3020,28 +3017,25 @@ async def test_execute_single_stage_skill_reflection(monkeypatch):
     })
 
     import sys
-    sys.modules["app.worker.failure"] = SimpleNamespace(generate_structured_reflection=reflection_mock)
+    monkeypatch.setitem(sys.modules, "app.worker.failure", SimpleNamespace(generate_structured_reflection=reflection_mock))
 
-    try:
-        task = _make_task(project_id="proj-1", project=None, template=None)
-        stage = _make_stage(
-            stage_name="coding", agent_role="coding",
-            error_message="FileNotFoundError: no such file",
-            output_summary="partial output",
-        )
-        session = SimpleNamespace(commit=AsyncMock())
+    task = _make_task(project_id="proj-1", project=None, template=None)
+    stage = _make_stage(
+        stage_name="coding", agent_role="coding",
+        error_message="FileNotFoundError: no such file",
+        output_summary="partial output",
+    )
+    session = SimpleNamespace(commit=AsyncMock())
 
-        from app.worker.compressor import CompressionResult
-        compression = CompressionResult()
+    from app.worker.compressor import CompressionResult
+    compression = CompressionResult()
 
-        result = await engine._execute_single_stage(
-            session, task, stage, 0, [], compression,
-            None, None, {}, "/tmp/ws", None,
-        )
-        assert result == "retry output"
-        reflection_mock.assert_awaited_once()
-    finally:
-        sys.modules.pop("app.worker.failure", None)
+    result = await engine._execute_single_stage(
+        session, task, stage, 0, [], compression,
+        None, None, {}, "/tmp/ws", None,
+    )
+    assert result == "retry output"
+    reflection_mock.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -3055,28 +3049,25 @@ async def test_execute_single_stage_skill_reflection_exception(monkeypatch):
     monkeypatch.setattr(engine, "_close_started_system_log", AsyncMock())
 
     import sys
-    sys.modules["app.worker.failure"] = SimpleNamespace(
+    monkeypatch.setitem(sys.modules, "app.worker.failure", SimpleNamespace(
         generate_structured_reflection=AsyncMock(side_effect=RuntimeError("reflection failed"))
+    ))
+
+    task = _make_task(project_id=None, project=None, template=None)
+    stage = _make_stage(
+        stage_name="coding", agent_role="coding",
+        error_message="some error",
+        output_summary="prior output",
     )
+    session = SimpleNamespace(commit=AsyncMock())
 
-    try:
-        task = _make_task(project_id=None, project=None, template=None)
-        stage = _make_stage(
-            stage_name="coding", agent_role="coding",
-            error_message="some error",
-            output_summary="prior output",
-        )
-        session = SimpleNamespace(commit=AsyncMock())
+    from app.worker.compressor import CompressionResult
+    compression = CompressionResult()
 
-        from app.worker.compressor import CompressionResult
-        compression = CompressionResult()
-
-        result = await engine._execute_single_stage(
-            session, task, stage, 0, [], compression, None, None, {}, "/tmp/ws", None,
-        )
-        assert result == "output"
-    finally:
-        sys.modules.pop("app.worker.failure", None)
+    result = await engine._execute_single_stage(
+        session, task, stage, 0, [], compression, None, None, {}, "/tmp/ws", None,
+    )
+    assert result == "output"
 
 
 @pytest.mark.asyncio
@@ -3096,7 +3087,7 @@ async def test_execute_single_stage_skill_reflection_with_memory(monkeypatch):
     })
 
     import sys
-    sys.modules["app.worker.failure"] = SimpleNamespace(generate_structured_reflection=reflection_mock)
+    monkeypatch.setitem(sys.modules, "app.worker.failure", SimpleNamespace(generate_structured_reflection=reflection_mock))
 
     add_entries_mock = AsyncMock()
 
@@ -3111,31 +3102,27 @@ async def test_execute_single_stage_skill_reflection_with_memory(monkeypatch):
         async def add_entries(self, category, entries):
             await add_entries_mock(category, entries)
 
-    sys.modules["app.worker.memory"] = SimpleNamespace(
+    monkeypatch.setitem(sys.modules, "app.worker.memory", SimpleNamespace(
         MemoryEntry=FakeEntry,
         ProjectMemoryStore=FakeStore,
+    ))
+
+    task = _make_task(project_id="proj-1", project=None, template=None)
+    stage = _make_stage(
+        stage_name="coding", agent_role="coding",
+        error_message="NullPointerException",
+        output_summary="partial",
     )
+    session = SimpleNamespace(commit=AsyncMock())
 
-    try:
-        task = _make_task(project_id="proj-1", project=None, template=None)
-        stage = _make_stage(
-            stage_name="coding", agent_role="coding",
-            error_message="NullPointerException",
-            output_summary="partial",
-        )
-        session = SimpleNamespace(commit=AsyncMock())
+    from app.worker.compressor import CompressionResult
+    compression = CompressionResult()
 
-        from app.worker.compressor import CompressionResult
-        compression = CompressionResult()
-
-        result = await engine._execute_single_stage(
-            session, task, stage, 0, [], compression, None, None, {}, "/tmp/ws", None,
-        )
-        assert result == "output"
-        add_entries_mock.assert_awaited_once()
-    finally:
-        sys.modules.pop("app.worker.failure", None)
-        sys.modules.pop("app.worker.memory", None)
+    result = await engine._execute_single_stage(
+        session, task, stage, 0, [], compression, None, None, {}, "/tmp/ws", None,
+    )
+    assert result == "output"
+    add_entries_mock.assert_awaited_once()
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -5336,11 +5323,11 @@ async def test_execute_single_stage_skill_reflection_memory_save_exception(monke
     monkeypatch.setattr(engine, "_close_started_system_log", AsyncMock())
 
     import sys
-    sys.modules["app.worker.failure"] = SimpleNamespace(
+    monkeypatch.setitem(sys.modules, "app.worker.failure", SimpleNamespace(
         generate_structured_reflection=AsyncMock(return_value={
             "root_cause": "error", "lesson": "lesson text", "suggestion": "suggestion",
         })
-    )
+    ))
 
     class FakeEntry:
         @staticmethod
@@ -5353,29 +5340,25 @@ async def test_execute_single_stage_skill_reflection_memory_save_exception(monke
         async def add_entries(self, category, entries):
             raise RuntimeError("memory save failed")
 
-    sys.modules["app.worker.memory"] = SimpleNamespace(
+    monkeypatch.setitem(sys.modules, "app.worker.memory", SimpleNamespace(
         MemoryEntry=FakeEntry,
         ProjectMemoryStore=BadStore,
+    ))
+
+    task = _make_task(project_id="proj-1", project=None, template=None)
+    stage = _make_stage(
+        stage_name="coding", agent_role="coding",
+        error_message="some error", output_summary="partial",
     )
+    session = SimpleNamespace(commit=AsyncMock())
 
-    try:
-        task = _make_task(project_id="proj-1", project=None, template=None)
-        stage = _make_stage(
-            stage_name="coding", agent_role="coding",
-            error_message="some error", output_summary="partial",
-        )
-        session = SimpleNamespace(commit=AsyncMock())
+    from app.worker.compressor import CompressionResult
+    compression = CompressionResult()
 
-        from app.worker.compressor import CompressionResult
-        compression = CompressionResult()
-
-        result = await engine._execute_single_stage(
-            session, task, stage, 0, [], compression, None, None, {}, "/tmp/ws", None,
-        )
-        assert result == "output"
-    finally:
-        sys.modules.pop("app.worker.failure", None)
-        sys.modules.pop("app.worker.memory", None)
+    result = await engine._execute_single_stage(
+        session, task, stage, 0, [], compression, None, None, {}, "/tmp/ws", None,
+    )
+    assert result == "output"
 
 
 # ═══════════════════════════════════════════════════════════════════════
