@@ -103,7 +103,7 @@ const ConfigPage: React.FC = () => {
     <div>
       <Title level={4}>Agent 配置中心</Title>
       <Paragraph type="secondary">
-        配置项来自后端实时数据，可按角色独立调整模型、推理参数及扩展技能目录。
+        配置项来自后端实时数据，可按角色独立调整模型、推理参数及扩展 Skill 目录。
       </Paragraph>
       <Row gutter={[16, 16]}>
         {AGENT_ROLES.map((roleMeta) => {
@@ -151,7 +151,7 @@ const ConfigPage: React.FC = () => {
                     </Col>
                   </Row>
                   <ProFormSelect name="thinking_level" label="Thinking Level" options={thinkingLevelOptions} />
-                  <ProFormSelect name="extra_skill_dirs" label="额外技能目录" mode="tags" />
+                  <ProFormSelect name="extra_skill_dirs" label="额外 Skill 目录" mode="tags" />
                   <ProFormTextArea name="system_prompt_append" label="系统提示词追加" fieldProps={{ rows: 3, maxLength: 1000 }} />
                   <ProFormSwitch name="enabled" label="运行状态" />
                 </ProForm>

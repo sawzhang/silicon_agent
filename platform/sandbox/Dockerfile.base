@@ -18,6 +18,7 @@ RUN pip install --no-cache-dir -r /app/requirements.txt
 
 # Copy agent server
 COPY sandbox/agent_server.py /app/agent_server.py
+COPY sandbox/tool_policy.py /app/tool_policy.py
 
 # Copy skills
 COPY skills/ /skills/

@@ -14,17 +14,24 @@ const RISK_COLOR: Record<string, string> = {
   critical: 'red',
 };
 
+const RISK_LABEL: Record<string, string> = {
+  low: '低',
+  medium: '中',
+  high: '高',
+  critical: '严重',
+};
+
 const AuditPage: React.FC = () => {
   const columns: ProColumns<AuditLog>[] = [
     {
-      title: 'Timestamp',
+      title: '时间戳',
       dataIndex: 'timestamp',
       valueType: 'dateRange',
       render: (_, record) => formatTimestamp(record.timestamp),
       width: 180,
     },
     {
-      title: 'Role',
+      title: '角色',
       dataIndex: 'role',
       valueEnum: Object.fromEntries(
         Object.entries(ROLE_DISPLAY_NAMES).map(([k, v]) => [k, v]),
@@ -33,25 +40,25 @@ const AuditPage: React.FC = () => {
       width: 100,
     },
     {
-      title: 'Action',
+      title: '动作',
       dataIndex: 'action',
       ellipsis: true,
     },
     {
-      title: 'Detail',
+      title: '详情',
       dataIndex: 'detail',
       ellipsis: true,
       search: false,
     },
     {
-      title: 'Risk Level',
+      title: '风险等级',
       dataIndex: 'risk_level',
-      valueEnum: { low: 'Low', medium: 'Medium', high: 'High', critical: 'Critical' },
-      render: (_, record) => <Tag color={RISK_COLOR[record.risk_level]}>{record.risk_level}</Tag>,
+      valueEnum: { low: '低', medium: '中', high: '高', critical: '严重' },
+      render: (_, record) => <Tag color={RISK_COLOR[record.risk_level]}>{RISK_LABEL[record.risk_level] || record.risk_level}</Tag>,
       width: 100,
     },
     {
-      title: 'Task ID',
+      title: '任务 ID',
       dataIndex: 'task_id',
       search: false,
       render: (_, record) => record.task_id ? record.task_id.slice(0, 8) + '...' : '-',
@@ -61,7 +68,7 @@ const AuditPage: React.FC = () => {
 
   return (
     <ProTable<AuditLog>
-      headerTitle="Audit Logs"
+      headerTitle="审计日志"
       rowKey="id"
       columns={columns}
       request={async (params) => {

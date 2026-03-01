@@ -209,7 +209,7 @@ const TaskDetail: React.FC = () => {
     <div>
       <Space style={{ marginBottom: 16 }}>
         <Button icon={<ArrowLeftOutlined />} onClick={() => navigate('/tasks')}>
-          Back
+          返回
         </Button>
         {(task.status === 'running' || task.status === 'pending') && (
           <Button
@@ -217,11 +217,11 @@ const TaskDetail: React.FC = () => {
             icon={<StopOutlined />}
             onClick={async () => {
               await cancelTask.mutateAsync(task.id);
-              message.success('Task cancelled');
+              message.success('任务已取消');
             }}
             loading={cancelTask.isPending}
           >
-            Cancel Task
+            取消任务
           </Button>
         )}
         {task.status === 'failed' && (
@@ -270,7 +270,7 @@ const TaskDetail: React.FC = () => {
                   header={
                     <Space>
                       <Tag color={STATUS_COLOR[displayStatus]}>
-                        {isPendingGate ? 'waiting approval' : displayStatus}
+                        {isPendingGate ? '等待审批' : STATUS_COLOR[displayStatus] === 'processing' ? '运行中' : STATUS_COLOR[displayStatus] === 'success' ? '已完成' : STATUS_COLOR[displayStatus] === 'error' ? '失败' : STATUS_COLOR[displayStatus] === 'warning' ? '已取消/已跳过' : displayStatus}
                       </Tag>
                       <span>{STAGE_DISPLAY[stage.stage_name] || stage.stage_name}</span>
                       <span style={{ color: '#999' }}>
@@ -363,10 +363,10 @@ const TaskDetail: React.FC = () => {
                             <Tag color="red">失败: {String((stage.output_structured as Record<string, unknown>).tests_failed)}</Tag>
                           )}
                           {(stage.output_structured as Record<string, unknown>).issues_critical != null && Number((stage.output_structured as Record<string, unknown>).issues_critical) > 0 && (
-                            <Tag color="red">Critical: {String((stage.output_structured as Record<string, unknown>).issues_critical)}</Tag>
+                            <Tag color="red">严重缺陷: {String((stage.output_structured as Record<string, unknown>).issues_critical)}</Tag>
                           )}
                           {(stage.output_structured as Record<string, unknown>).issues_major != null && Number((stage.output_structured as Record<string, unknown>).issues_major) > 0 && (
-                            <Tag color="orange">Major: {String((stage.output_structured as Record<string, unknown>).issues_major)}</Tag>
+                            <Tag color="orange">主要缺陷: {String((stage.output_structured as Record<string, unknown>).issues_major)}</Tag>
                           )}
                           {stage.output_structured.artifacts && stage.output_structured.artifacts.length > 0 && (
                             <Tag>{stage.output_structured.artifacts.length} 文件</Tag>
@@ -455,28 +455,30 @@ const TaskDetail: React.FC = () => {
         </Card>
       )}
 
-      <Card title="Task Details" style={{ marginBottom: 16 }}>
+      <Card title="任务详情" style={{ marginBottom: 16 }}>
         <Descriptions column={2}>
           <Descriptions.Item label="ID">{task.id}</Descriptions.Item>
-          <Descriptions.Item label="Status">
-            <Tag color={STATUS_COLOR[task.status]}>{task.status}</Tag>
+          <Descriptions.Item label="状态">
+            <Tag color={STATUS_COLOR[task.status]}>
+              {task.status === 'pending' ? '待处理' : task.status === 'running' ? '运行中' : task.status === 'completed' ? '已完成' : task.status === 'failed' ? '失败' : '已取消'}
+            </Tag>
           </Descriptions.Item>
-          <Descriptions.Item label="Template">{task.template_name || '-'}</Descriptions.Item>
-          <Descriptions.Item label="Project">{task.project_name || '-'}</Descriptions.Item>
+          <Descriptions.Item label="模板">{task.template_name || '-'}</Descriptions.Item>
+          <Descriptions.Item label="项目">{task.project_name || '-'}</Descriptions.Item>
           {task.target_branch && (
-            <Descriptions.Item label="Target Branch">
+            <Descriptions.Item label="目标分支">
               <Tag icon={<CodeOutlined />}>{task.target_branch}</Tag>
             </Descriptions.Item>
           )}
-          <Descriptions.Item label="Created At">{formatTimestamp(task.created_at)}</Descriptions.Item>
-          <Descriptions.Item label="Completed At">{task.completed_at ? formatTimestamp(task.completed_at) : '-'}</Descriptions.Item>
-          <Descriptions.Item label="Duration">{duration != null ? formatDuration(duration) : '-'}</Descriptions.Item>
-          <Descriptions.Item label="Total Tokens">{formatTokens(task.total_tokens)}</Descriptions.Item>
-          <Descriptions.Item label="Total Cost">{formatCost(task.total_cost_rmb)}</Descriptions.Item>
+          <Descriptions.Item label="创建时间">{formatTimestamp(task.created_at)}</Descriptions.Item>
+          <Descriptions.Item label="完成时间">{task.completed_at ? formatTimestamp(task.completed_at) : '-'}</Descriptions.Item>
+          <Descriptions.Item label="耗时">{duration != null ? formatDuration(duration) : '-'}</Descriptions.Item>
+          <Descriptions.Item label="总 Tokens">{formatTokens(task.total_tokens)}</Descriptions.Item>
+          <Descriptions.Item label="总成本">{formatCost(task.total_cost_rmb)}</Descriptions.Item>
         </Descriptions>
       </Card>
 
-      <Card title="Description">
+      <Card title="任务描述">
         <ExpandableReport content={task.description || '-'} maxHeight={320} />
       </Card>
     </div>

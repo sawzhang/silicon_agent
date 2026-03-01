@@ -53,6 +53,44 @@ async def test_read_directory_returns_listing(tmp_path: Path):
     assert "- usage.md" in result
 
 
+@pytest.mark.asyncio
+async def test_invalid_tool_arguments_returns_error(tmp_path: Path):
+    runner = _make_runner(tmp_path)
+    result = await runner._execute_tool(
+        {"name": "write", "arguments": json.dumps([{"path": "a.txt", "content": "x"}])}
+    )
+    assert "Invalid arguments for tool write" in result
+    assert "Arguments must decode to a JSON object" in result
+    assert "Expected format:" in result
+    assert '"path":"' in result
+    assert '"content":"' in result
+    assert "function.arguments" in result
+
+
+@pytest.mark.asyncio
+async def test_invalid_tool_arguments_with_bad_json_is_actionable(tmp_path: Path):
+    runner = _make_runner(tmp_path)
+    result = await runner._execute_tool(
+        {"name": "write", "arguments": '{"path":"a.txt"'}
+    )
+    assert "Invalid arguments for tool write" in result
+    assert "JSON decode error:" in result
+    assert "Expected format:" in result
+    assert '"content":"' in result
+    assert "split content and retry" in result
+
+
+@pytest.mark.asyncio
+async def test_read_with_bad_json_arguments_returns_validation_error(tmp_path: Path):
+    runner = _make_runner(tmp_path)
+    result = await runner._execute_tool(
+        {"name": "read", "arguments": '{"path":"docs"'}
+    )
+    assert "Invalid arguments for tool read" in result
+    assert "JSON decode error:" in result
+    assert "function.arguments" in result
+
+
 def test_infer_tool_status_treats_read_errors_as_failed():
     assert infer_tool_status("Error reading file: [Errno 21] Is a directory") == "failed"
     assert infer_tool_status("Error: File not found: package.json") == "failed"

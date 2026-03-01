@@ -14,7 +14,7 @@ const KPIPage: React.FC = () => {
 
   return (
     <div>
-      <Title level={4} style={{ marginBottom: 16 }}>KPI Dashboard</Title>
+      <Title level={4} style={{ marginBottom: 16 }}>KPI 监控仪表盘</Title>
 
       {summaryLoading ? (
         <Spin size="large" style={{ display: 'block', margin: '40px auto' }} />
@@ -22,32 +22,32 @@ const KPIPage: React.FC = () => {
         <Row gutter={[16, 16]} style={{ marginBottom: 24 }}>
           <Col xs={12} sm={8} md={6}>
             <Card size="small">
-              <Statistic title="Total Tasks" value={summary.total_tasks} />
+              <Statistic title="任务总数" value={summary.total_tasks} />
             </Card>
           </Col>
           <Col xs={12} sm={8} md={6}>
             <Card size="small">
-              <Statistic title="Completed" value={summary.completed_tasks} />
+              <Statistic title="已完成" value={summary.completed_tasks} />
             </Card>
           </Col>
           <Col xs={12} sm={8} md={6}>
             <Card size="small">
-              <Statistic title="Success Rate" value={summary.success_rate} suffix="%" />
+              <Statistic title="成功率" value={summary.success_rate} suffix="%" />
             </Card>
           </Col>
           <Col xs={12} sm={8} md={6}>
             <Card size="small">
-              <Statistic title="Total Tokens" value={summary.total_tokens} />
+              <Statistic title="总计 Tokens" value={summary.total_tokens} />
             </Card>
           </Col>
           <Col xs={12} sm={8} md={6}>
             <Card size="small">
-              <Statistic title="Total Cost" value={summary.total_cost_rmb} prefix="¥" precision={2} />
+              <Statistic title="总成本" value={summary.total_cost_rmb} prefix="¥" precision={2} />
             </Card>
           </Col>
           <Col xs={12} sm={8} md={6}>
             <Card size="small">
-              <Statistic title="Avg Duration" value={summary.avg_duration_minutes} suffix="min" precision={1} />
+              <Statistic title="平均耗时" value={summary.avg_duration_minutes} suffix="分钟" precision={1} />
             </Card>
           </Col>
           {summary.metrics.length > 0 && summary.metrics.map((m) => (
@@ -57,11 +57,11 @@ const KPIPage: React.FC = () => {
           ))}
         </Row>
       ) : (
-        <Empty description="No KPI data available" style={{ marginBottom: 24 }} />
+        <Empty description="暂无 KPI 数据" style={{ marginBottom: 24 }} />
       )}
 
       <Card
-        title="Time Series"
+        title="时序数据"
         extra={
           <Select
             value={selectedMetric}
@@ -76,7 +76,7 @@ const KPIPage: React.FC = () => {
         ) : timeseries && timeseries.data.length > 0 ? (
           <KPIChart data={timeseries} height={400} />
         ) : (
-          <Empty description="No time series data" />
+          <Empty description="暂无时序数据" />
         )}
       </Card>
     </div>

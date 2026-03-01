@@ -40,10 +40,10 @@ const ProjectList: React.FC = () => {
     setSyncingIds((prev) => new Set(prev).add(projectId));
     try {
       const result = await syncProject(projectId);
-      message.success(`Synced: ${result.tech_stack.join(', ') || 'no tech detected'}`);
+      message.success(`同步成功：${result.tech_stack.join(', ') || '未检测到技术栈'}`);
       actionRef.current?.reload();
     } catch (err: any) {
-      message.error(err?.response?.data?.detail || 'Sync failed');
+      message.error(err?.response?.data?.detail || '同步失败');
     } finally {
       setSyncingIds((prev) => {
         const next = new Set(prev);
@@ -55,18 +55,18 @@ const ProjectList: React.FC = () => {
 
   const columns: ProColumns<Project>[] = [
     {
-      title: 'Name',
+      title: '名称',
       dataIndex: 'display_name',
       ellipsis: true,
     },
     {
-      title: 'Code',
+      title: '标识代码',
       dataIndex: 'name',
       width: 160,
       search: false,
     },
     {
-      title: 'Repo',
+      title: '代码库地址',
       dataIndex: 'repo_url',
       ellipsis: true,
       search: false,
@@ -80,7 +80,7 @@ const ProjectList: React.FC = () => {
         ),
     },
     {
-      title: 'Tech Stack',
+      title: '技术栈',
       dataIndex: 'tech_stack',
       width: 220,
       search: false,
@@ -98,32 +98,32 @@ const ProjectList: React.FC = () => {
         ),
     },
     {
-      title: 'Branch',
+      title: '分支',
       dataIndex: 'branch',
       width: 100,
       search: false,
     },
     {
-      title: 'Status',
+      title: '状态',
       dataIndex: 'status',
       width: 100,
-      valueEnum: { active: 'Active', archived: 'Archived' },
-      render: (_, record) => <Tag color={STATUS_COLOR[record.status]}>{record.status}</Tag>,
+      valueEnum: { active: '活跃', archived: '已归档' },
+      render: (_, record) => <Tag color={STATUS_COLOR[record.status]}>{record.status === 'active' ? '活跃' : '已归档'}</Tag>,
     },
     {
-      title: 'Last Synced',
+      title: '最后同步',
       dataIndex: 'last_synced_at',
       width: 160,
       search: false,
       render: (_, record) => record.last_synced_at ? formatTimestamp(record.last_synced_at) : '-',
     },
     {
-      title: 'Action',
+      title: '操作',
       width: 120,
       search: false,
       render: (_, record) => (
         <Space size="small">
-          <Tooltip title={record.repo_url ? 'Sync repo info' : 'No repo URL configured'}>
+          <Tooltip title={record.repo_url ? '同步代码库信息' : '未配置代码库地址'}>
             <Button
               type="link"
               icon={<SyncOutlined spin={syncingIds.has(record.id)} />}
@@ -133,10 +133,10 @@ const ProjectList: React.FC = () => {
             />
           </Tooltip>
           <Popconfirm
-            title="Delete this project?"
+            title="确认删除此项目？"
             onConfirm={async () => {
               await deleteProject.mutateAsync(record.id);
-              message.success('Project deleted');
+              message.success('项目已删除');
               actionRef.current?.reload();
             }}
           >
@@ -150,7 +150,7 @@ const ProjectList: React.FC = () => {
   return (
     <>
       <ProTable<Project>
-        headerTitle="Projects"
+        headerTitle="项目管理"
         actionRef={actionRef}
         rowKey="id"
         columns={columns}
@@ -164,13 +164,13 @@ const ProjectList: React.FC = () => {
         }}
         toolBarRender={() => [
           <Button key="create" type="primary" icon={<PlusOutlined />} onClick={() => setCreateOpen(true)}>
-            New Project
+            新建项目
           </Button>,
         ]}
         pagination={{ defaultPageSize: 20 }}
       />
       <ModalForm
-        title="Create Project"
+        title="新建项目"
         open={createOpen}
         onOpenChange={setCreateOpen}
         submitter={{
@@ -187,20 +187,20 @@ const ProjectList: React.FC = () => {
               branch: values.branch || 'main',
               description: values.description || undefined,
             });
-            message.success('Project created');
+            message.success('项目创建成功');
             actionRef.current?.reload();
             return true;
           } catch (err: any) {
-            message.error(err?.response?.data?.detail || 'Failed to create project');
+            message.error(err?.response?.data?.detail || '项目创建失败');
             return false;
           }
         }}
       >
-        <ProFormText name="name" label="Project Code" placeholder="e.g. silicon-agent" rules={[{ required: true }]} />
-        <ProFormText name="display_name" label="Display Name" placeholder="e.g. Silicon Agent" rules={[{ required: true }]} />
-        <ProFormText name="repo_url" label="Repository URL" placeholder="https://github.com/org/repo" />
-        <ProFormText name="branch" label="Branch" initialValue="main" />
-        <ProFormTextArea name="description" label="Description" />
+        <ProFormText name="name" label="项目标识" placeholder="例如：silicon-agent" rules={[{ required: true }]} />
+        <ProFormText name="display_name" label="显示名称" placeholder="例如：Silicon Agent" rules={[{ required: true }]} />
+        <ProFormText name="repo_url" label="代码库地址" placeholder="https://github.com/org/repo" />
+        <ProFormText name="branch" label="目标分支" initialValue="main" />
+        <ProFormTextArea name="description" label="项目描述" />
       </ModalForm>
     </>
   );

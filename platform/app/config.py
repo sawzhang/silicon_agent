@@ -83,6 +83,8 @@ class Settings(BaseSettings):
     SANDBOX_MAX_CONCURRENT: int = 4
     SANDBOX_WORKSPACE_BASE_DIR: str = "/tmp/silicon_agent/tasks"
     SANDBOX_FALLBACK_MODE: str = "graceful"
+    SANDBOX_DUMP_MODEL_API_RESPONSE: bool = True
+    SANDBOX_MODEL_API_RAW_LOG_HOST_DIR: str = "/tmp/silicon_agent/model_api_logs"
 
     # Memory & compression configuration
     MEMORY_ENABLED: bool = True

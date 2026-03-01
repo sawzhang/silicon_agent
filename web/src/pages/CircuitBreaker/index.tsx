@@ -16,10 +16,10 @@ const CircuitBreakerPage: React.FC = () => {
 
   const handleStopAll = () => {
     Modal.confirm({
-      title: 'Stop All Agents',
+      title: '停止所有 Agent',
       icon: <ExclamationCircleOutlined />,
-      content: 'Are you sure you want to stop all agents? This will halt all running tasks.',
-      okText: 'Stop All',
+      content: '确定要停止所有 Agent 吗？这将中断所有正在运行的任务。',
+      okText: '全部停止',
       okType: 'danger',
       onOk: async () => {
         setStopAllLoading(true);
@@ -29,9 +29,9 @@ const CircuitBreakerPage: React.FC = () => {
               .filter((role) => agents[role].status !== 'stopped')
               .map((role) => stopAgent(role)),
           );
-          message.success('All agents stopped');
+          message.success('所有 Agent 已停止');
         } catch {
-          message.error('Failed to stop some agents');
+          message.error('部分 Agent 停止失败');
         } finally {
           setStopAllLoading(false);
         }
@@ -46,21 +46,21 @@ const CircuitBreakerPage: React.FC = () => {
           .filter((role) => agents[role].status === 'stopped')
           .map((role) => startAgent(role)),
       );
-      message.success('All agents started');
+      message.success('所有 Agent 已启动');
     } catch {
-      message.error('Failed to start some agents');
+      message.error('部分 Agent 启动失败');
     }
   };
 
   return (
     <div>
-      <Title level={4}>Circuit Breaker Control</Title>
+      <Title level={4}>止损控制台</Title>
 
       {errorCount > 0 && (
         <Alert
           type="error"
-          message={`${errorCount} agent(s) in error state`}
-          description="Check agent logs for details and resolve errors before restarting."
+          message={`检测到 ${errorCount} 个 Agent 处于异常状态`}
+          description="请检查 Agent 运行日志，在解决报错后重新启动。"
           showIcon
           style={{ marginBottom: 16 }}
         />
@@ -69,22 +69,22 @@ const CircuitBreakerPage: React.FC = () => {
       <Row gutter={[16, 16]} style={{ marginBottom: 24 }}>
         <Col xs={12} sm={8}>
           <Card size="small">
-            <Statistic title="Active Agents" value={activeCount} suffix={`/ ${AGENT_ROLES.length}`} />
+            <Statistic title="活跃 Agent" value={activeCount} suffix={`/ ${AGENT_ROLES.length}`} />
           </Card>
         </Col>
         <Col xs={12} sm={8}>
           <Card size="small">
-            <Statistic title="Error Agents" value={errorCount} valueStyle={errorCount > 0 ? { color: '#cf1322' } : undefined} />
+            <Statistic title="异常 Agent" value={errorCount} valueStyle={errorCount > 0 ? { color: '#cf1322' } : undefined} />
           </Card>
         </Col>
         <Col xs={24} sm={8}>
           <Card size="small">
             <Space>
               <Button danger type="primary" icon={<StopOutlined />} onClick={handleStopAll} loading={stopAllLoading}>
-                Stop All
+                全部停止
               </Button>
               <Button type="primary" icon={<CheckCircleOutlined />} onClick={handleStartAll}>
-                Start All
+                全部启动
               </Button>
             </Space>
           </Card>
@@ -108,12 +108,12 @@ const CircuitBreakerPage: React.FC = () => {
                 }
                 extra={
                   isActive ? (
-                    <Button size="small" danger onClick={() => stopAgent(role.key).then(() => message.success(`${role.name} stopped`))}>
-                      Stop
+                    <Button size="small" danger onClick={() => stopAgent(role.key).then(() => message.success(`${role.name} 已停止`))}>
+                      停止
                     </Button>
                   ) : (
-                    <Button size="small" type="primary" onClick={() => startAgent(role.key).then(() => message.success(`${role.name} started`))}>
-                      Start
+                    <Button size="small" type="primary" onClick={() => startAgent(role.key).then(() => message.success(`${role.name} 已启动`))}>
+                      启动
                     </Button>
                   )
                 }
@@ -122,7 +122,7 @@ const CircuitBreakerPage: React.FC = () => {
                   <Alert type="error" message={agent.error_message} style={{ marginBottom: 8 }} />
                 )}
                 <Text type="secondary" style={{ fontSize: 12 }}>
-                  Model: {agent.model}
+                  模型：{agent.model}
                 </Text>
               </Card>
             </Col>

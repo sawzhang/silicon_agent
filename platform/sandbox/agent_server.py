@@ -15,6 +15,7 @@ import logging
 import os
 import sys
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -33,11 +34,29 @@ except ImportError:
     logger.error("SkillKit not available in container — cannot execute agent stages")
     sys.exit(1)
 
+try:
+    from sandbox.tool_policy import (
+        DEFAULT_FALLBACK_CORE_TOOLS,
+        DEFAULT_FALLBACK_TOOL_ARGUMENT_HINTS,
+        ToolExecutionPolicyMixin,
+        discover_tool_catalog,
+        sanitize_requested_tools,
+    )
+except ImportError:
+    from tool_policy import (  # type: ignore[no-redef]
+        DEFAULT_FALLBACK_CORE_TOOLS,
+        DEFAULT_FALLBACK_TOOL_ARGUMENT_HINTS,
+        ToolExecutionPolicyMixin,
+        discover_tool_catalog,
+        sanitize_requested_tools,
+    )
+
 
 # ---------------------------------------------------------------------------
 # Sandboxed runner with tool filtering (mirrors platform SandboxedAgentRunner)
 # ---------------------------------------------------------------------------
-_ALL_TOOLS = {"read", "write", "execute", "execute_script", "skill"}
+_ALL_TOOLS: set[str] = set()
+_TOOL_ARGUMENT_HINTS: dict[str, str] = {}
 
 
 def _normalize_openai_base_url(base_url: str | None) -> str:
@@ -75,7 +94,30 @@ def _hydrate_skillkit_env_from_llm_env() -> list[str]:
     return applied
 
 
-class ContainerAgentRunner(AgentRunner):
+def _create_tool_probe_runner():
+    skill_dirs = []
+    shared = Path("/skills/shared")
+    if shared.is_dir():
+        skill_dirs.append(shared)
+    return AgentRunner.create(
+        skill_dirs=skill_dirs,
+        system_prompt="",
+        enable_tools=True,
+        load_context_files=False,
+        max_turns=1,
+    )
+
+
+_ALL_TOOLS, _TOOL_ARGUMENT_HINTS = discover_tool_catalog(
+    create_probe_runner=_create_tool_probe_runner,
+    fallback_core_tools=DEFAULT_FALLBACK_CORE_TOOLS,
+    fallback_hints=DEFAULT_FALLBACK_TOOL_ARGUMENT_HINTS,
+    logger=logger,
+    warning_message="Failed to discover sandbox tool catalog from SkillKit; fallback to defaults",
+)
+
+
+class ContainerAgentRunner(ToolExecutionPolicyMixin, AgentRunner):
     """AgentRunner with tool filtering and cwd injection, running inside the container."""
 
     def __init__(
@@ -88,45 +130,164 @@ class ContainerAgentRunner(AgentRunner):
         super().__init__(*args, **kwargs)
         self.default_cwd = default_cwd
         self.allowed_tools = allowed_tools or _ALL_TOOLS
+        self._tool_argument_hints = _TOOL_ARGUMENT_HINTS
         self.tool_calls_log: list[dict[str, Any]] = []
+        # Default enabled for incident forensics; set SANDBOX_DUMP_MODEL_API_RESPONSE=false to disable.
+        raw_dump_flag = os.environ.get("SANDBOX_DUMP_MODEL_API_RESPONSE", "true")
+        self.dump_model_api_response = raw_dump_flag.strip().lower() == "true"
+        self.model_api_raw_log_path = os.environ.get(
+            "SANDBOX_MODEL_API_RAW_LOG_PATH",
+            "/workspace/.agent_logs/model_api_raw_responses.jsonl",
+        )
 
     def get_tools(self):
         tools = super().get_tools()
         return [t for t in tools if t["function"]["name"] in self.allowed_tools]
 
-    async def _execute_tool(self, tool_call, on_output=None):
-        name = tool_call.get("name", "")
-        started = time.monotonic()
-
-        # Inject default cwd for execution tools
-        if self.default_cwd and name in ("execute", "execute_script"):
-            args = json.loads(tool_call.get("arguments", "{}"))
-            if not args.get("cwd"):
-                args["cwd"] = self.default_cwd
-                tool_call = {**tool_call, "arguments": json.dumps(args)}
-
-        # Block disallowed tools
-        if name not in self.allowed_tools:
-            return f"Error: {name} is not allowed for this role"
-
-        result = await super()._execute_tool(tool_call, on_output)
-
-        elapsed_ms = round((time.monotonic() - started) * 1000, 2)
-        args = json.loads(tool_call.get("arguments", "{}"))
+    def _append_tool_call_log(
+        self,
+        *,
+        tool_name: str,
+        args: dict[str, Any],
+        started_at: float,
+        result_preview: str,
+        status: str,
+    ) -> None:
+        elapsed_ms = round((time.monotonic() - started_at) * 1000, 2)
         self.tool_calls_log.append(
             {
-                "tool_name": name,
+                "tool_name": tool_name,
                 "args": args,
                 "duration_ms": elapsed_ms,
-                "result_preview": str(result)[:500] if result else "",
-                "status": (
-                    "failed"
-                    if str(result).startswith(("Error:", "Exit code:"))
-                    else "success"
-                ),
+                "result_preview": result_preview[:500],
+                "status": status,
             }
         )
 
+    @staticmethod
+    def _to_jsonable(value: Any) -> Any:
+        if hasattr(value, "model_dump"):
+            with contextlib.suppress(Exception):
+                return value.model_dump(mode="json")
+            with contextlib.suppress(Exception):
+                return value.model_dump()
+        if hasattr(value, "to_dict"):
+            with contextlib.suppress(Exception):
+                return value.to_dict()
+        with contextlib.suppress(Exception):
+            json.dumps(value, ensure_ascii=False)
+            return value
+        return json.loads(json.dumps(value, ensure_ascii=False, default=str))
+
+    def _append_model_api_raw_log(self, *, request_kwargs: dict[str, Any], response_obj: Any) -> None:
+        if not self.dump_model_api_response:
+            return
+        try:
+            path = Path(self.model_api_raw_log_path)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            payload = {
+                "ts_utc": datetime.now(timezone.utc).isoformat(),
+                "model": self.config.model,
+                "llm_base_url": (
+                    self.config.base_url
+                    or os.environ.get("OPENAI_BASE_URL")
+                    or os.environ.get("LLM_BASE_URL")
+                    or ""
+                ),
+                "request": self._to_jsonable(request_kwargs),
+                "response": self._to_jsonable(response_obj),
+            }
+            with path.open("a", encoding="utf-8") as f:
+                f.write(json.dumps(payload, ensure_ascii=False))
+                f.write("\n")
+        except Exception:
+            logger.exception("Failed to write raw model API response log")
+
+    async def _call_llm(self, messages):
+        """Intercept raw model API responses from SkillKit -> LLM_BASE_URL."""
+        client = getattr(self, "client", None)
+        completions = (
+            getattr(getattr(getattr(client, "chat", None), "completions", None), "create", None)
+            if client is not None
+            else None
+        )
+        if completions is None:
+            return await super()._call_llm(messages)
+
+        async def _wrapped_create(*args, **kwargs):
+            raw_response = await original_create(*args, **kwargs)
+            self._append_model_api_raw_log(
+                request_kwargs=dict(kwargs),
+                response_obj=raw_response,
+            )
+            return raw_response
+
+        original_create = completions
+        self.client.chat.completions.create = _wrapped_create
+        try:
+            return await super()._call_llm(messages)
+        finally:
+            self.client.chat.completions.create = original_create
+
+    async def _execute_tool_base(self, tool_call, on_output=None) -> str:
+        return await super()._execute_tool(tool_call, on_output)
+
+    async def _execute_tool(self, tool_call, on_output=None):
+        return await self._execute_tool_with_policy(tool_call, on_output=on_output)
+
+    def _on_tool_validation_error(
+        self,
+        *,
+        tool_name: str,
+        args: dict[str, Any],
+        error_msg: str,
+        started_at: float,
+    ) -> str:
+        self._append_tool_call_log(
+            tool_name=tool_name,
+            args=args,
+            started_at=started_at,
+            result_preview=error_msg,
+            status="failed",
+        )
+        return error_msg
+
+    def _on_tool_disallowed(
+        self,
+        *,
+        tool_name: str,
+        args: dict[str, Any],
+        error_msg: str,
+        started_at: float,
+    ) -> str:
+        self._append_tool_call_log(
+            tool_name=tool_name,
+            args=args,
+            started_at=started_at,
+            result_preview=error_msg,
+            status="failed",
+        )
+        return error_msg
+
+    def _on_tool_result(
+        self,
+        *,
+        tool_name: str,
+        args: dict[str, Any],
+        result: str,
+        started_at: float,
+    ) -> str:
+        self._append_tool_call_log(
+            tool_name=tool_name,
+            args=args,
+            started_at=started_at,
+            result_preview=str(result) if result else "",
+            status=(
+                "failed"
+                if str(result).startswith(("Error:", "Exit code:"))
+                else "success"
+            ),
+        )
         return result
 
 
@@ -137,9 +298,18 @@ def _parse_request_body(body: dict[str, Any]) -> dict[str, Any]:
     system_prompt = str(body.get("system_prompt", ""))
     user_prompt = str(body.get("user_prompt", ""))
     model = body.get("model")
+    temperature_raw = body.get("temperature")
+    temperature = float(temperature_raw) if temperature_raw is not None else None
+    max_tokens_raw = body.get("max_tokens")
+    max_tokens = int(max_tokens_raw) if max_tokens_raw is not None else None
     max_turns = int(body.get("max_turns", 20) or 20)
     enable_tools = bool(body.get("enable_tools", True))
-    allowed_tools = set(body.get("allowed_tools", list(_ALL_TOOLS)))
+    requested_tools = set(body.get("allowed_tools", list(_ALL_TOOLS)))
+    allowed_tools, unknown_tools = sanitize_requested_tools(requested_tools, _ALL_TOOLS)
+    if unknown_tools:
+        logger.warning("Ignoring unknown allowed_tools entries: %s", unknown_tools)
+    if not allowed_tools:
+        allowed_tools = set(_ALL_TOOLS)
     skill_dirs_raw = body.get("skill_dirs", [])
     workdir = str(body.get("workdir", "/workspace") or "/workspace")
     timeout = int(body.get("timeout", 300) or 300)
@@ -148,6 +318,8 @@ def _parse_request_body(body: dict[str, Any]) -> dict[str, Any]:
         "system_prompt": system_prompt,
         "user_prompt": user_prompt,
         "model": model,
+        "temperature": temperature,
+        "max_tokens": max_tokens,
         "max_turns": max_turns,
         "enable_tools": enable_tools,
         "allowed_tools": allowed_tools,
@@ -170,6 +342,12 @@ def _create_runner(parsed: dict[str, Any]) -> ContainerAgentRunner:
         # SkillKit's AgentConfig.from_env already sets model internally.
         # Override after creation to avoid duplicate keyword collisions.
         base.config.model = parsed["model"]
+    if parsed["temperature"] is not None:
+        # Keep runtime override handling consistent with model override.
+        base.config.temperature = parsed["temperature"]
+    if parsed["max_tokens"] is not None:
+        # Keep runtime override handling consistent with model override.
+        base.config.max_tokens = parsed["max_tokens"]
     runner = ContainerAgentRunner(
         engine=base.engine,
         config=base.config,
@@ -332,8 +510,10 @@ async def handle_execute(request: web.Request) -> web.Response:
 
     parsed = _parse_request_body(body)
     logger.info(
-        "Executing stage: model=%s max_turns=%d tools=%s workdir=%s timeout=%ds",
+        "Executing stage: model=%s temperature=%s max_tokens=%s max_turns=%d tools=%s workdir=%s timeout=%ds",
         parsed["model"] or "default",
+        parsed["temperature"],
+        parsed["max_tokens"],
         parsed["max_turns"],
         sorted(parsed["allowed_tools"]),
         parsed["workdir"],
@@ -400,8 +580,10 @@ async def handle_execute_stream(request: web.Request) -> web.StreamResponse:
 
     parsed = _parse_request_body(body)
     logger.info(
-        "Executing stage stream: model=%s max_turns=%d tools=%s workdir=%s timeout=%ds",
+        "Executing stage stream: model=%s temperature=%s max_tokens=%s max_turns=%d tools=%s workdir=%s timeout=%ds",
         parsed["model"] or "default",
+        parsed["temperature"],
+        parsed["max_tokens"],
         parsed["max_turns"],
         sorted(parsed["allowed_tools"]),
         parsed["workdir"],

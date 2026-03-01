@@ -25,8 +25,10 @@ import httpx
 
 from app.config import settings
 from app.integration.skillkit_env import build_sandbox_llm_env
+from app.worker.agents import get_all_tools
 
 logger = logging.getLogger(__name__)
+_MODEL_API_LOG_MOUNT_DIR = "/model_api_logs"
 
 # Semaphore to limit concurrent containers
 _concurrency_sem: Optional[asyncio.Semaphore] = None
@@ -156,6 +158,7 @@ class SandboxManager:
             container_name=container_name,
             image=resolved_image,
             workspace=workspace,
+            task_id=task_id,
         )
 
         logger.info("Creating sandbox container: %s (image=%s)", container_name, resolved_image)
@@ -221,6 +224,8 @@ class SandboxManager:
         system_prompt: str,
         user_prompt: str,
         model: Optional[str] = None,
+        temperature: Optional[float] = None,
+        max_tokens: Optional[int] = None,
         max_turns: int = 20,
         enable_tools: bool = True,
         allowed_tools: Optional[list[str]] = None,
@@ -238,17 +243,23 @@ class SandboxManager:
             "system_prompt": system_prompt,
             "user_prompt": user_prompt,
             "model": model,
+            "temperature": temperature,
+            "max_tokens": max_tokens,
             "max_turns": max_turns,
             "enable_tools": enable_tools,
-            "allowed_tools": allowed_tools or list(_ALL_TOOLS),
+            "allowed_tools": allowed_tools or sorted(get_all_tools()),
             "skill_dirs": skill_dirs or ["/skills/shared"],
             "workdir": workdir,
             "timeout": timeout,
         }
 
         logger.info(
-            "Sending stage to sandbox %s (model=%s, timeout=%ds)",
-            info.container_name, model or "default", timeout,
+            "Sending stage to sandbox %s (model=%s, temperature=%s, max_tokens=%s, timeout=%ds)",
+            info.container_name,
+            model or "default",
+            temperature,
+            max_tokens,
+            timeout,
         )
 
         request_timeout = httpx.Timeout(timeout + 30, connect=10)
@@ -390,6 +401,7 @@ class SandboxManager:
         container_name: str,
         image: str,
         workspace: str,
+        task_id: str,
     ) -> list[str]:
         """Build the docker run command with security constraints."""
         parts = [
@@ -412,6 +424,26 @@ class SandboxManager:
             "--mount",
             f"type=bind,src={workspace},dst=/workspace",
         ]
+        capture_model_api_raw = bool(settings.SANDBOX_DUMP_MODEL_API_RESPONSE)
+        container_raw_log_path: str | None = None
+        if capture_model_api_raw:
+            host_log_dir = Path(settings.SANDBOX_MODEL_API_RAW_LOG_HOST_DIR).expanduser()
+            try:
+                host_log_dir.mkdir(parents=True, exist_ok=True)
+                parts.extend(
+                    [
+                        "--mount",
+                        f"type=bind,src={host_log_dir},dst={_MODEL_API_LOG_MOUNT_DIR}",
+                    ]
+                )
+                container_raw_log_path = f"{_MODEL_API_LOG_MOUNT_DIR}/{task_id}.jsonl"
+            except Exception:
+                logger.warning(
+                    "Failed to prepare model API raw log mount directory: %s",
+                    host_log_dir,
+                    exc_info=True,
+                )
+                capture_model_api_raw = False
 
         if settings.SANDBOX_READONLY_ROOT:
             parts.append("--read-only")
@@ -430,6 +462,14 @@ class SandboxManager:
         )
         for key, value in llm_env.items():
             parts.extend(["-e", f"{key}={value}"])
+        parts.extend(
+            [
+                "-e",
+                f"SANDBOX_DUMP_MODEL_API_RESPONSE={'true' if capture_model_api_raw else 'false'}",
+            ]
+        )
+        if capture_model_api_raw and container_raw_log_path:
+            parts.extend(["-e", f"SANDBOX_MODEL_API_RAW_LOG_PATH={container_raw_log_path}"])
 
         parts.append(image)
 
@@ -503,11 +543,6 @@ class SandboxManager:
         if rc != 0:
             logger.warning("Failed to remove container %s: %s", container_name, err)
 
-
-# ---------------------------------------------------------------------------
-# All tools constant (kept in sync with agents.py ROLE_TOOLS)
-# ---------------------------------------------------------------------------
-_ALL_TOOLS = {"read", "write", "execute", "execute_script", "skill"}
 
 # ---------------------------------------------------------------------------
 # Module-level singleton

@@ -9,6 +9,12 @@ from typing import Any
 
 from app.config import settings
 from app.worker.prompts import SYSTEM_PROMPTS
+from sandbox.tool_policy import (
+    DEFAULT_FALLBACK_CORE_TOOLS,
+    DEFAULT_FALLBACK_TOOL_ARGUMENT_HINTS,
+    ToolExecutionPolicyMixin,
+    discover_tool_catalog,
+)
 
 try:
     from skillkit import AgentRunner
@@ -40,7 +46,8 @@ ROLE_TOOLS: dict[str, set[str]] = {
     "smoke":        {"read", "execute", "skill"},
     "doc":          {"read", "write", "skill"},
 }
-_ALL_TOOLS = {"read", "write", "execute", "execute_script", "skill"}
+_ALL_TOOLS: set[str] = set()
+_TOOL_ARGUMENT_HINTS: dict[str, str] = {}
 
 # ---------------------------------------------------------------------------
 # Skills configuration: each role loads shared + role-specific skill dirs
@@ -83,15 +90,68 @@ def _get_skill_dirs(role: str, extra_skill_dirs: list[str] | None = None) -> lis
     return deduped
 
 
+def _create_tool_probe_runner():
+    if not SKILLKIT_AVAILABLE:
+        raise RuntimeError("SkillKit unavailable")
+    return AgentRunner.create(
+        skill_dirs=_get_skill_dirs("coding"),
+        system_prompt=SYSTEM_PROMPTS.get("coding", ""),
+        enable_tools=True,
+        load_context_files=False,
+        max_turns=1,
+    )
+
+
+def _refresh_tool_catalog() -> None:
+    """Refresh dynamic tool catalog and argument hints from SkillKit source of truth."""
+    global _ALL_TOOLS, _TOOL_ARGUMENT_HINTS
+    _ALL_TOOLS, _TOOL_ARGUMENT_HINTS = discover_tool_catalog(
+        create_probe_runner=_create_tool_probe_runner,
+        fallback_core_tools=DEFAULT_FALLBACK_CORE_TOOLS,
+        fallback_hints=DEFAULT_FALLBACK_TOOL_ARGUMENT_HINTS,
+        logger=logger,
+        warning_message="Failed to discover tool schemas from SkillKit; fallback to defaults",
+    )
+
+
+def get_all_tools() -> set[str]:
+    return set(_ALL_TOOLS)
+
+
+def validate_role_tools_or_raise(*, fail_on_unknown: bool = True) -> None:
+    unknown_by_role: dict[str, list[str]] = {}
+    for role, tools in ROLE_TOOLS.items():
+        unknown = sorted(tool for tool in tools if tool not in _ALL_TOOLS)
+        if unknown:
+            unknown_by_role[role] = unknown
+    if not unknown_by_role:
+        return
+    message = (
+        "ROLE_TOOLS contains unknown tool names. "
+        f"known={sorted(_ALL_TOOLS)} unknown_by_role={unknown_by_role}"
+    )
+    if fail_on_unknown:
+        raise RuntimeError(message)
+    logger.warning(message)
+
+
+_refresh_tool_catalog()
+validate_role_tools_or_raise(fail_on_unknown=True)
+
+
 def _build_runtime_signature(
     *,
     model: str | None,
+    temperature: float | None,
+    max_tokens: int | None,
     max_turns: int | None,
     skill_dirs: list[Path],
     system_prompt_append: str | None,
 ) -> tuple:
     return (
         model or "",
+        temperature,
+        max_tokens,
         max_turns,
         tuple(str(p) for p in skill_dirs),
         (system_prompt_append or "").strip(),
@@ -128,6 +188,8 @@ def _create_or_refresh_runner(
     task_id: str,
     enable_tools: bool,
     model: str | None,
+    temperature: float | None,
+    max_tokens: int | None,
     max_turns: int | None,
     extra_skill_dirs: list[str] | None,
     system_prompt_append: str | None,
@@ -137,6 +199,8 @@ def _create_or_refresh_runner(
     normalized_prompt_append = _normalize_prompt_append(system_prompt_append)
     signature = _build_runtime_signature(
         model=model,
+        temperature=temperature,
+        max_tokens=max_tokens,
         max_turns=effective_max_turns,
         skill_dirs=skill_dirs,
         system_prompt_append=normalized_prompt_append,
@@ -156,6 +220,8 @@ def _create_or_refresh_runner(
         task_id,
         enable_tools=enable_tools,
         model=model,
+        temperature=temperature,
+        max_tokens=max_tokens,
         max_turns=effective_max_turns,
         skill_dirs=skill_dirs,
         system_prompt_append=normalized_prompt_append,
@@ -169,7 +235,7 @@ def _create_or_refresh_runner(
 _BaseRunner = AgentRunner if SKILLKIT_AVAILABLE else object
 
 
-class SandboxedAgentRunner(_BaseRunner):  # type: ignore[misc]
+class SandboxedAgentRunner(ToolExecutionPolicyMixin, _BaseRunner):  # type: ignore[misc]
     """AgentRunner with per-task working directory and role-based tool filtering."""
 
     def __init__(self, *args, default_cwd: str | None = None,
@@ -177,6 +243,7 @@ class SandboxedAgentRunner(_BaseRunner):  # type: ignore[misc]
         super().__init__(*args, **kwargs)
         self.default_cwd = default_cwd
         self.allowed_tools = allowed_tools or _ALL_TOOLS
+        self._tool_argument_hints = _TOOL_ARGUMENT_HINTS
 
     def _resolve_workspace_path(self, path: str) -> tuple[str, str | None]:
         """Resolve a possibly-relative path into task workspace safely."""
@@ -213,38 +280,40 @@ class SandboxedAgentRunner(_BaseRunner):  # type: ignore[misc]
                  if t["function"]["name"] in self.allowed_tools]
         return tools
 
-    async def _execute_tool(self, tool_call, on_output=None):
-        name = tool_call.get("name", "")
-        args: dict[str, Any] = {}
-        if self.default_cwd and name in ("execute", "execute_script", "read", "write"):
-            args = json.loads(tool_call.get("arguments", "{}"))
-
-        # Inject default cwd for execution tools
-        if self.default_cwd and name in ("execute", "execute_script"):
-            if not args.get("cwd"):
-                args["cwd"] = self.default_cwd
-                tool_call = {**tool_call, "arguments": json.dumps(args)}
-
-        # Resolve read/write relative paths into task workspace.
-        if self.default_cwd and name in ("read", "write"):
-            path = str(args.get("path") or "")
-            resolved_path, error = self._resolve_workspace_path(path)
-            if error:
-                return error
-            if resolved_path != path:
-                args["path"] = resolved_path
-                tool_call = {**tool_call, "arguments": json.dumps(args)}
-
-            # Doc role has no `execute`; support directory probing via `read`.
-            if name == "read":
-                target = Path(resolved_path)
-                if target.exists() and target.is_dir():
-                    return self._format_directory_listing(target, path or resolved_path)
-
-        # Block tools not in whitelist (belt-and-suspenders)
-        if name not in self.allowed_tools:
-            return f"Error: {name} is not allowed for this role"
+    async def _execute_tool_base(self, tool_call, on_output=None) -> str:
         return await super()._execute_tool(tool_call, on_output)
+
+    async def _execute_tool(self, tool_call, on_output=None):
+        return await self._execute_tool_with_policy(tool_call, on_output=on_output)
+
+    def _preprocess_validated_tool_call(
+        self,
+        *,
+        tool_name: str,
+        args: dict[str, Any],
+        tool_call: dict[str, Any],
+    ) -> tuple[dict[str, Any], dict[str, Any], str | None, str | None]:
+        if not self.default_cwd or tool_name not in ("read", "write"):
+            return tool_call, args, None, None
+
+        path = str(args.get("path") or "")
+        resolved_path, error = self._resolve_workspace_path(path)
+        if error:
+            return tool_call, args, error, None
+
+        if resolved_path != path:
+            args = dict(args)
+            args["path"] = resolved_path
+            tool_call = {**tool_call, "arguments": json.dumps(args, ensure_ascii=False)}
+
+        # Doc role has no `execute`; support directory probing via `read`.
+        if tool_name == "read" and resolved_path:
+            target = Path(resolved_path)
+            if target.exists() and target.is_dir():
+                listing = self._format_directory_listing(target, path or resolved_path)
+                return tool_call, args, None, listing
+
+        return tool_call, args, None, None
 
 
 def resolve_model_for_role(role: str, stage_model: str | None = None) -> str | None:
@@ -265,6 +334,8 @@ def resolve_model_for_role(role: str, stage_model: str | None = None) -> str | N
 def _create_runner(
     role: str, task_id: str, *, enable_tools: bool = True,
     model: str | None = None,
+    temperature: float | None = None,
+    max_tokens: int | None = None,
     max_turns: int | None = None,
     skill_dirs: list[Path] | None = None,
     system_prompt_append: str | None = None,
@@ -303,6 +374,12 @@ def _create_runner(
         # SkillKit's AgentConfig.from_env already sets model internally.
         # Override after creation to avoid duplicate keyword collisions.
         base.config.model = model
+    if temperature is not None:
+        # Keep runtime override handling consistent with model override.
+        base.config.temperature = temperature
+    if max_tokens is not None:
+        # Keep runtime override handling consistent with model override.
+        base.config.max_tokens = max_tokens
 
     # Disable MiniMax-specific reasoning_split for non-MiniMax models (e.g. Gemini).
     # SkillKit defaults enable_reasoning=True which injects extra_body={"reasoning_split": True}
@@ -317,14 +394,18 @@ def _create_runner(
         allowed_tools=allowed,
     )
     configured_model = getattr(runner.config, "model", None)
+    configured_temperature = getattr(runner.config, "temperature", None)
+    configured_max_tokens = getattr(runner.config, "max_tokens", None)
     logger.info(
         "Created SandboxedAgentRunner for role=%s task=%s requested_model=%s "
-        "effective_model=%s max_turns=%s "
+        "effective_model=%s temperature=%s max_tokens=%s max_turns=%s "
         "skill_dirs=%s tools=%s enable_tools=%s cwd=%s",
         role,
         task_id,
         model or "default",
         configured_model or "default",
+        configured_temperature,
+        configured_max_tokens,
         effective_max_turns,
         [str(p) for p in effective_skill_dirs],
         sorted(allowed),
@@ -336,6 +417,8 @@ def _create_runner(
 
 def get_agent(
     role: str, task_id: str, *, model: str | None = None,
+    temperature: float | None = None,
+    max_tokens: int | None = None,
     max_turns: int | None = None,
     extra_skill_dirs: list[str] | None = None,
     system_prompt_append: str | None = None,
@@ -349,6 +432,8 @@ def get_agent(
         task_id=task_id,
         enable_tools=True,
         model=resolved_model,
+        temperature=temperature,
+        max_tokens=max_tokens,
         max_turns=max_turns,
         extra_skill_dirs=extra_skill_dirs,
         system_prompt_append=system_prompt_append,
@@ -357,6 +442,8 @@ def get_agent(
 
 def get_agent_text_only(
     role: str, task_id: str, *, model: str | None = None,
+    temperature: float | None = None,
+    max_tokens: int | None = None,
     max_turns: int | None = None,
     extra_skill_dirs: list[str] | None = None,
     system_prompt_append: str | None = None,
@@ -374,6 +461,8 @@ def get_agent_text_only(
         task_id=task_id,
         enable_tools=False,
         model=resolved_model,
+        temperature=temperature,
+        max_tokens=max_tokens,
         max_turns=max_turns,
         extra_skill_dirs=extra_skill_dirs,
         system_prompt_append=system_prompt_append,

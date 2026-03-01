@@ -46,7 +46,7 @@ const CockpitPage: React.FC = () => {
     setCancellingId(id);
     try {
       await cancelTask.mutateAsync(id);
-      message.success('Task cancelled');
+      message.success('任务已取消');
     } finally {
       setCancellingId(null);
     }
@@ -56,7 +56,7 @@ const CockpitPage: React.FC = () => {
     setRetryingId(id);
     try {
       await retryTask.mutateAsync(id);
-      message.success('Task resubmitted');
+      message.success('任务已重新提交');
     } finally {
       setRetryingId(null);
     }
@@ -64,7 +64,7 @@ const CockpitPage: React.FC = () => {
 
   const runningColumns: ColumnsType<CockpitTaskItem> = [
     {
-      title: 'Title',
+      title: '标题',
       dataIndex: 'title',
       key: 'title',
       ellipsis: true,
@@ -72,28 +72,28 @@ const CockpitPage: React.FC = () => {
         <a onClick={() => navigate(`/tasks/${record.id}`)}>{text}</a>
       ),
     },
-    { title: 'Project', dataIndex: 'project_name', key: 'project_name', width: 120, render: (v: string | null) => v ?? '-' },
+    { title: '项目', dataIndex: 'project_name', key: 'project_name', width: 120, render: (v: string | null) => v ?? '-' },
     {
-      title: 'Current Stage',
+      title: '当前阶段',
       dataIndex: 'current_stage',
       key: 'current_stage',
       width: 130,
       render: (v: string | null) => v ? <Tag color="processing">{v}</Tag> : '-',
     },
     {
-      title: 'Tokens',
+      title: 'Tokens 消耗',
       dataIndex: 'total_tokens',
       key: 'total_tokens',
       width: 100,
       render: (v: number) => formatTokens(v),
     },
     {
-      title: '',
+      title: '操作',
       key: 'action',
       width: 80,
       render: (_: unknown, record) => (
-        <Popconfirm title="Cancel this task?" onConfirm={() => handleCancel(record.id)}>
-          <Button size="small" danger loading={cancellingId === record.id}>Cancel</Button>
+        <Popconfirm title="确认取消此任务？" onConfirm={() => handleCancel(record.id)}>
+          <Button size="small" danger loading={cancellingId === record.id}>取消</Button>
         </Popconfirm>
       ),
     },
@@ -101,7 +101,7 @@ const CockpitPage: React.FC = () => {
 
   const failedColumns: ColumnsType<CockpitTaskItem> = [
     {
-      title: 'Title',
+      title: '标题',
       dataIndex: 'title',
       key: 'title',
       ellipsis: true,
@@ -110,29 +110,29 @@ const CockpitPage: React.FC = () => {
       ),
     },
     {
-      title: 'Error',
+      title: '错误信息',
       dataIndex: 'error_message',
       key: 'error_message',
       ellipsis: true,
       render: (v: string | null) => v ? <Text type="danger">{v}</Text> : '-',
     },
     {
-      title: 'Cost',
+      title: '成本',
       dataIndex: 'total_cost_rmb',
       key: 'total_cost_rmb',
       width: 90,
       render: (v: number) => formatCost(v),
     },
     {
-      title: '',
+      title: '操作',
       key: 'action',
       width: 140,
       render: (_: unknown, record) => (
         <Space>
-          <Popconfirm title="Retry this task?" onConfirm={() => handleRetry(record.id)}>
-            <Button size="small" type="primary" loading={retryingId === record.id}>Retry</Button>
+          <Popconfirm title="确认重试此任务？" onConfirm={() => handleRetry(record.id)}>
+            <Button size="small" type="primary" loading={retryingId === record.id}>重试</Button>
           </Popconfirm>
-          <Button size="small" onClick={() => navigate(`/tasks/${record.id}`)}>View</Button>
+          <Button size="small" onClick={() => navigate(`/tasks/${record.id}`)}>查看</Button>
         </Space>
       ),
     },
@@ -140,7 +140,7 @@ const CockpitPage: React.FC = () => {
 
   const completedColumns: ColumnsType<CockpitTaskItem> = [
     {
-      title: 'Title',
+      title: '标题',
       dataIndex: 'title',
       key: 'title',
       ellipsis: true,
@@ -149,21 +149,21 @@ const CockpitPage: React.FC = () => {
       ),
     },
     {
-      title: 'Completed',
+      title: '完成时间',
       dataIndex: 'completed_at',
       key: 'completed_at',
       width: 120,
       render: (v: string | null) => v ? formatRelativeTime(v) : '-',
     },
     {
-      title: 'Tokens',
+      title: 'Tokens 消耗',
       dataIndex: 'total_tokens',
       key: 'total_tokens',
       width: 100,
       render: (v: number) => formatTokens(v),
     },
     {
-      title: 'Cost',
+      title: '成本',
       dataIndex: 'total_cost_rmb',
       key: 'total_cost_rmb',
       width: 90,
@@ -173,7 +173,7 @@ const CockpitPage: React.FC = () => {
 
   return (
     <div>
-      <Title level={4} style={{ marginBottom: 16 }}>Developer Cockpit</Title>
+      <Title level={4} style={{ marginBottom: 16 }}>指挥台</Title>
 
       {isLoading ? (
         <Spin size="large" style={{ display: 'block', margin: '40px auto' }} />
@@ -183,7 +183,7 @@ const CockpitPage: React.FC = () => {
             <Col xs={12} sm={6}>
               <Card size="small">
                 <Statistic
-                  title="Pending Gates"
+                  title="待处理审批"
                   value={data.pending_gates_count}
                   valueStyle={data.pending_gates_count > 0 ? { color: '#fa8c16' } : undefined}
                 />
@@ -192,7 +192,7 @@ const CockpitPage: React.FC = () => {
             <Col xs={12} sm={6}>
               <Card size="small">
                 <Statistic
-                  title="Running Tasks"
+                  title="运行中任务"
                   value={data.running_tasks_count}
                   valueStyle={{ color: '#1890ff' }}
                 />
@@ -201,7 +201,7 @@ const CockpitPage: React.FC = () => {
             <Col xs={12} sm={6}>
               <Card size="small">
                 <Statistic
-                  title="Failed Today"
+                  title="今日失败任务"
                   value={data.failed_tasks_today}
                   valueStyle={data.failed_tasks_today > 0 ? { color: '#cf1322' } : undefined}
                 />
@@ -210,7 +210,7 @@ const CockpitPage: React.FC = () => {
             <Col xs={12} sm={6}>
               <Card size="small">
                 <Statistic
-                  title="Completed Today"
+                  title="今日已完成"
                   value={data.completed_tasks_today}
                   valueStyle={{ color: '#3f8600' }}
                 />
@@ -220,7 +220,7 @@ const CockpitPage: React.FC = () => {
 
           {/* Pending Gates */}
           <Card
-            title={<Space>Pending Gates <Tag color="orange">{data.pending_gates_count}</Tag></Space>}
+            title={<Space>待处理审批 <Tag color="orange">{data.pending_gates_count}</Tag></Space>}
             style={{ marginBottom: 24 }}
           >
             {data.pending_gates.length > 0 ? (
@@ -237,13 +237,13 @@ const CockpitPage: React.FC = () => {
                 ))}
               </Row>
             ) : (
-              <Empty description="No pending gates" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+              <Empty description="暂无待处理审批" image={Empty.PRESENTED_IMAGE_SIMPLE} />
             )}
           </Card>
 
           {/* Running Tasks */}
           <Card
-            title={<Space>Running Tasks <Tag color="blue">{data.running_tasks_count}</Tag></Space>}
+            title={<Space>运行中任务 <Tag color="blue">{data.running_tasks_count}</Tag></Space>}
             style={{ marginBottom: 24 }}
           >
             {data.running_tasks.length > 0 ? (
@@ -255,14 +255,14 @@ const CockpitPage: React.FC = () => {
                 size="small"
               />
             ) : (
-              <Empty description="No running tasks" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+              <Empty description="暂无运行中任务" image={Empty.PRESENTED_IMAGE_SIMPLE} />
             )}
           </Card>
 
           {/* Failed Tasks */}
           {data.failed_tasks.length > 0 && (
             <Card
-              title={<Space>Failed Tasks <Tag color="red">{data.failed_tasks_today}</Tag></Space>}
+              title={<Space>失败任务 <Tag color="red">{data.failed_tasks_today}</Tag></Space>}
               style={{ marginBottom: 24 }}
             >
               <Table<CockpitTaskItem>
@@ -277,7 +277,7 @@ const CockpitPage: React.FC = () => {
 
           {/* Recent Completed */}
           <Card
-            title="Recent Completed"
+            title="近期完成的任务"
             style={{ marginBottom: 24 }}
           >
             {data.recent_completed.length > 0 ? (
@@ -289,12 +289,12 @@ const CockpitPage: React.FC = () => {
                 size="small"
               />
             ) : (
-              <Empty description="No completed tasks yet" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+              <Empty description="暂无已完成的任务" image={Empty.PRESENTED_IMAGE_SIMPLE} />
             )}
           </Card>
         </>
       ) : (
-        <Empty description="Unable to load cockpit data" />
+        <Empty description="无法加载指挥台数据" />
       )}
     </div>
   );
