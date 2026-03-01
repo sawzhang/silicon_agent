@@ -4,6 +4,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from typing import List, Optional
+from urllib.parse import urlparse
 
 import httpx
 
@@ -63,7 +64,15 @@ class LLMClient:
         }
 
         url = f"{self._base_url}/v1/chat/completions"
-        logger.debug("LLM request: model=%s, messages=%d", model, len(messages))
+        parsed = urlparse(url)
+        logger.debug(
+            "LLM request: model=%s messages=%d endpoint=%s://%s%s",
+            model,
+            len(messages),
+            parsed.scheme,
+            parsed.netloc,
+            parsed.path,
+        )
 
         response = await self._client.post(url, json=payload)
         response.raise_for_status()

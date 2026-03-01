@@ -40,12 +40,18 @@ async def lifespan(app: FastAPI):
         llm_api_key=settings.LLM_API_KEY,
         llm_base_url=settings.LLM_BASE_URL,
         llm_model=settings.LLM_MODEL,
+        override=True,
     )
     if applied_env:
         logger.info(
             "Hydrated SkillKit compatibility env from LLM settings: %s",
             sorted(applied_env.keys()),
         )
+    logger.info(
+        "Effective LLM endpoints: LLM_BASE_URL=%s OPENAI_BASE_URL=%s",
+        settings.LLM_BASE_URL,
+        os.environ.get("OPENAI_BASE_URL", ""),
+    )
 
     # Seed default agents and templates
     async with async_session_factory() as session:

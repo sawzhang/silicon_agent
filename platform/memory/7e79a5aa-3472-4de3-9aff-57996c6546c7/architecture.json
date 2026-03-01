@@ -1,0 +1,89 @@
+[
+  {
+    "id": "a523c188-e50b-40eb-9efe-bbd55add53ed",
+    "content": "选定 Spring Boot 2.7.x 等明确支持 JDK 8 的版本可避免兼容性问题且保持长期维护性",
+    "source_task_id": "868492aa-e6c3-4dc3-af13-1489083aad8b",
+    "source_task_title": "创建Spring Boot项目并配置JDK8",
+    "created_at": "2026-02-28T10:12:48.538811+00:00",
+    "confidence": 0.87,
+    "tags": [
+      "spring-boot",
+      "jdk8",
+      "versioning"
+    ]
+  },
+  {
+    "id": "754d55d6-a3ee-4ebf-b79b-49033f5c9917",
+    "content": "使用 spring-boot-starter-web 提供嵌入式容器和 JSON 支持，配合 Spring MVC 统一暴露健康检查与问候类接口",
+    "source_task_id": "868492aa-e6c3-4dc3-af13-1489083aad8b",
+    "source_task_title": "创建Spring Boot项目并配置JDK8",
+    "created_at": "2026-02-28T10:12:48.538823+00:00",
+    "confidence": 0.72,
+    "tags": [
+      "spring-boot",
+      "starter-web"
+    ]
+  },
+  {
+    "id": "64e353ed-edb8-4af9-8272-0e384490475d",
+    "content": "在 Maven 或 Gradle 构建中显式配置 Java 编译参数（source/target/compatibility）以确保即便本地 JDK 高于 8，生成字节码仍符合 Java 1.8",
+    "source_task_id": "868492aa-e6c3-4dc3-af13-1489083aad8b",
+    "source_task_title": "创建Spring Boot项目并配置JDK8",
+    "created_at": "2026-02-28T10:12:48.538835+00:00",
+    "confidence": 0.9,
+    "tags": [
+      "build",
+      "maven",
+      "gradle",
+      "jdk8"
+    ]
+  },
+  {
+    "id": "1ba3ea58-2703-4883-8222-b07120f7de1f",
+    "content": "依赖已有 Spring Boot/Spring MVC（`spring-boot-starter-web`）环境即可快速实现 REST 控制器，无需引入新技术栈",
+    "source_task_id": "89f5980a-fa59-48af-a002-d8632cb4bb44",
+    "source_task_title": "实现对外路由返回Hello World",
+    "created_at": "2026-03-01T05:24:07.313787+00:00",
+    "confidence": 0.9,
+    "tags": [
+      "Spring",
+      "Dependency"
+    ]
+  },
+  {
+    "id": "f51fba28-19b6-4367-9bc1-4f4b50f376ac",
+    "content": "在项目文档中记录 `/hello` 接口、使用说明、架构及变更日志，可帮助团队快速理解新功能",
+    "source_task_id": "89f5980a-fa59-48af-a002-d8632cb4bb44",
+    "source_task_title": "实现对外路由返回Hello World",
+    "created_at": "2026-03-01T05:24:07.313814+00:00",
+    "confidence": 0.85,
+    "tags": [
+      "Documentation",
+      "API"
+    ]
+  },
+  {
+    "id": "50cede01-41dd-4de7-bc65-e6fa97ca94cb",
+    "content": "使用 Spring Boot 2.7.x 配合 spring-boot-starter-web 和内嵌容器可快速搭建可启动并响应 /hello 请求的服务。",
+    "source_task_id": "36480951-c365-4ddd-af3a-7cb29bae534a",
+    "source_task_title": "验证Spring Boot应用启动并响应请求",
+    "created_at": "2026-03-01T05:36:10.310471+00:00",
+    "confidence": 0.74,
+    "tags": [
+      "spring",
+      "starter"
+    ]
+  },
+  {
+    "id": "6dfaf659-8406-40a1-a8b8-efe8d37e8d64",
+    "content": "在启动类中记录日志（如 log.info(“SpringHelloApplication has started successfully.”)）有助于验收阶段确认上下文初始化完成。",
+    "source_task_id": "36480951-c365-4ddd-af3a-7cb29bae534a",
+    "source_task_title": "验证Spring Boot应用启动并响应请求",
+    "created_at": "2026-03-01T05:36:10.310484+00:00",
+    "confidence": 0.61,
+    "tags": [
+      "logging",
+      "startup"
+    ]
+  }
+]

@@ -1,0 +1,88 @@
+[
+  {
+    "id": "2baf2218-3229-405b-8b4e-bfeba242b276",
+    "content": "在 pom.xml 中通过 maven-compiler-plugin 设置 <source>1.8</source> 和 <target>1.8</target> 并配合 spring-boot-maven-plugin 打包可确保兼容性与可执行 jar 生成",
+    "source_task_id": "868492aa-e6c3-4dc3-af13-1489083aad8b",
+    "source_task_title": "创建Spring Boot项目并配置JDK8",
+    "created_at": "2026-02-28T10:12:48.538847+00:00",
+    "confidence": 0.85,
+    "tags": [
+      "maven",
+      "compiler-plugin",
+      "jdk8"
+    ]
+  },
+  {
+    "id": "2a51e03b-ed72-46a5-87e2-f414be262c56",
+    "content": "控制器使用简单 DTO（如 HealthResponse、GreetingResponse）封装状态与消息，遵循 Java Bean 规范，并可在后续使用 Lombok 简化 getter/setter",
+    "source_task_id": "868492aa-e6c3-4dc3-af13-1489083aad8b",
+    "source_task_title": "创建Spring Boot项目并配置JDK8",
+    "created_at": "2026-02-28T10:12:48.538857+00:00",
+    "confidence": 0.78,
+    "tags": [
+      "dto",
+      "controller",
+      "lombok"
+    ]
+  },
+  {
+    "id": "5f345970-dd40-4458-a8f5-8d162279a5e2",
+    "content": "用 `@WebMvcTest` + MockMvc 模拟 `GET /hello`，断言 HTTP 200、Content-Type 及返回体确保控制器行为可控",
+    "source_task_id": "89f5980a-fa59-48af-a002-d8632cb4bb44",
+    "source_task_title": "实现对外路由返回Hello World",
+    "created_at": "2026-03-01T05:24:07.313831+00:00",
+    "confidence": 0.9,
+    "tags": [
+      "Testing",
+      "MockMvc"
+    ]
+  },
+  {
+    "id": "e27e49cf-02aa-4394-bb75-5c12cb0b3427",
+    "content": "验证 Accept 头为 `text/plain` 或 `application/json` 时内容协商一致，并确保 POST 到 GET 路径返回 405，防止非法方法访问",
+    "source_task_id": "89f5980a-fa59-48af-a002-d8632cb4bb44",
+    "source_task_title": "实现对外路由返回Hello World",
+    "created_at": "2026-03-01T05:24:07.313848+00:00",
+    "confidence": 0.85,
+    "tags": [
+      "Testing",
+      "ContentNegotiation"
+    ]
+  },
+  {
+    "id": "c605a4e7-5962-424d-9ca8-3eff7dd10b55",
+    "content": "在 Controller 里加入 LOGGER.info、Service 处理传入请求并返回 DTO，可形成可观察性更强的请求处理链。",
+    "source_task_id": "36480951-c365-4ddd-af3a-7cb29bae534a",
+    "source_task_title": "验证Spring Boot应用启动并响应请求",
+    "created_at": "2026-03-01T05:36:10.310496+00:00",
+    "confidence": 0.58,
+    "tags": [
+      "logging",
+      "mvc"
+    ]
+  },
+  {
+    "id": "30f11092-748d-4b56-87f6-8f019f15ca90",
+    "content": "通过 @WebMvcTest + MockMvc 验证 Controller 返回的 JSON 结构和状态码，以及对不支持的 Accept 或 HTTP 方法进行异常验证，形成标准测试模式。",
+    "source_task_id": "36480951-c365-4ddd-af3a-7cb29bae534a",
+    "source_task_title": "验证Spring Boot应用启动并响应请求",
+    "created_at": "2026-03-01T05:36:10.310509+00:00",
+    "confidence": 0.62,
+    "tags": [
+      "testing",
+      "mockmvc"
+    ]
+  },
+  {
+    "id": "106d3f59-3fac-449c-8091-b5d215972fc8",
+    "content": "使用 @SpringBootTest(webEnvironment = RANDOM_PORT) 配合 TestRestTemplate 验证端到端接口，确保上下文可启动并返回期望 JSON。",
+    "source_task_id": "36480951-c365-4ddd-af3a-7cb29bae534a",
+    "source_task_title": "验证Spring Boot应用启动并响应请求",
+    "created_at": "2026-03-01T05:36:10.310520+00:00",
+    "confidence": 0.65,
+    "tags": [
+      "testing",
+      "integration"
+    ]
+  }
+]
