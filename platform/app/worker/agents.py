@@ -40,14 +40,16 @@ ROLE_TOOLS: dict[str, set[str]] = {
     "smoke":        {"read", "execute", "skill"},
     "doc":          {"read", "write", "skill"},
 }
-_ALL_TOOLS = {"read", "write", "execute", "execute_script", "skill"}
-_TOOL_ARGUMENT_HINTS: dict[str, str] = {
+_FALLBACK_CORE_TOOLS = {"read", "write", "execute", "execute_script", "skill"}
+_FALLBACK_TOOL_ARGUMENT_HINTS: dict[str, str] = {
     "execute": '{"command":"<shell command>","cwd":"<optional path>"}',
     "execute_script": '{"script":"<shell script>","cwd":"<optional path>"}',
     "read": '{"path":"<file path>"}',
     "write": '{"path":"<file path>","content":"<file content>"}',
     "skill": '{"name":"<skill name>","arguments":"<optional string>"}',
 }
+_ALL_TOOLS: set[str] = set()
+_TOOL_ARGUMENT_HINTS: dict[str, str] = {}
 
 # ---------------------------------------------------------------------------
 # Skills configuration: each role loads shared + role-specific skill dirs
@@ -88,6 +90,96 @@ def _get_skill_dirs(role: str, extra_skill_dirs: list[str] | None = None) -> lis
         seen.add(key)
         deduped.append(item)
     return deduped
+
+
+def _discover_tool_schemas() -> dict[str, dict[str, Any]]:
+    """Discover current tool schemas from SkillKit runner.get_tools()."""
+    if not SKILLKIT_AVAILABLE:
+        return {}
+    try:
+        probe = AgentRunner.create(
+            skill_dirs=_get_skill_dirs("coding"),
+            system_prompt=SYSTEM_PROMPTS.get("coding", ""),
+            enable_tools=True,
+            load_context_files=False,
+            max_turns=1,
+        )
+        schemas: dict[str, dict[str, Any]] = {}
+        for tool in probe.get_tools():
+            if not isinstance(tool, dict):
+                continue
+            function_info = tool.get("function")
+            if not isinstance(function_info, dict):
+                continue
+            name = function_info.get("name")
+            parameters = function_info.get("parameters")
+            if isinstance(name, str) and isinstance(parameters, dict):
+                schemas[name] = parameters
+        return schemas
+    except Exception:
+        logger.warning("Failed to discover tool schemas from SkillKit; fallback to defaults", exc_info=True)
+        return {}
+
+
+def _schema_to_hint(parameters: dict[str, Any]) -> str:
+    properties = parameters.get("properties")
+    if not isinstance(properties, dict) or not properties:
+        return '{"...":"..."}'
+    example: dict[str, Any] = {}
+    for key, spec in properties.items():
+        if not isinstance(key, str):
+            continue
+        type_name = spec.get("type") if isinstance(spec, dict) else None
+        if type_name == "string":
+            example[key] = f"<{key}>"
+        elif type_name == "integer":
+            example[key] = 0
+        elif type_name == "number":
+            example[key] = 0
+        elif type_name == "boolean":
+            example[key] = False
+        elif type_name == "array":
+            example[key] = []
+        elif type_name == "object":
+            example[key] = {}
+        else:
+            example[key] = "<value>"
+    return json.dumps(example, ensure_ascii=False, separators=(",", ":"))
+
+
+def _refresh_tool_catalog() -> None:
+    """Refresh dynamic tool catalog and argument hints from SkillKit source of truth."""
+    global _ALL_TOOLS, _TOOL_ARGUMENT_HINTS
+    schemas = _discover_tool_schemas()
+    _ALL_TOOLS = set(_FALLBACK_CORE_TOOLS) | set(schemas.keys())
+    _TOOL_ARGUMENT_HINTS = dict(_FALLBACK_TOOL_ARGUMENT_HINTS)
+    for name, parameters in schemas.items():
+        _TOOL_ARGUMENT_HINTS[name] = _schema_to_hint(parameters)
+
+
+def get_all_tools() -> set[str]:
+    return set(_ALL_TOOLS)
+
+
+def validate_role_tools_or_raise(*, fail_on_unknown: bool = True) -> None:
+    unknown_by_role: dict[str, list[str]] = {}
+    for role, tools in ROLE_TOOLS.items():
+        unknown = sorted(tool for tool in tools if tool not in _ALL_TOOLS)
+        if unknown:
+            unknown_by_role[role] = unknown
+    if not unknown_by_role:
+        return
+    message = (
+        "ROLE_TOOLS contains unknown tool names. "
+        f"known={sorted(_ALL_TOOLS)} unknown_by_role={unknown_by_role}"
+    )
+    if fail_on_unknown:
+        raise RuntimeError(message)
+    logger.warning(message)
+
+
+_refresh_tool_catalog()
+validate_role_tools_or_raise(fail_on_unknown=True)
 
 
 def _build_runtime_signature(

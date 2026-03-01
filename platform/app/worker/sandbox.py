@@ -25,6 +25,7 @@ import httpx
 
 from app.config import settings
 from app.integration.skillkit_env import build_sandbox_llm_env
+from app.worker.agents import get_all_tools
 
 logger = logging.getLogger(__name__)
 _MODEL_API_LOG_MOUNT_DIR = "/model_api_logs"
@@ -246,7 +247,7 @@ class SandboxManager:
             "max_tokens": max_tokens,
             "max_turns": max_turns,
             "enable_tools": enable_tools,
-            "allowed_tools": allowed_tools or list(_ALL_TOOLS),
+            "allowed_tools": allowed_tools or sorted(get_all_tools()),
             "skill_dirs": skill_dirs or ["/skills/shared"],
             "workdir": workdir,
             "timeout": timeout,
@@ -542,11 +543,6 @@ class SandboxManager:
         if rc != 0:
             logger.warning("Failed to remove container %s: %s", container_name, err)
 
-
-# ---------------------------------------------------------------------------
-# All tools constant (kept in sync with agents.py ROLE_TOOLS)
-# ---------------------------------------------------------------------------
-_ALL_TOOLS = {"read", "write", "execute", "execute_script", "skill"}
 
 # ---------------------------------------------------------------------------
 # Module-level singleton

@@ -38,14 +38,16 @@ except ImportError:
 # ---------------------------------------------------------------------------
 # Sandboxed runner with tool filtering (mirrors platform SandboxedAgentRunner)
 # ---------------------------------------------------------------------------
-_ALL_TOOLS = {"read", "write", "execute", "execute_script", "skill"}
-_TOOL_ARGUMENT_HINTS: dict[str, str] = {
+_FALLBACK_CORE_TOOLS = {"read", "write", "execute", "execute_script", "skill"}
+_FALLBACK_TOOL_ARGUMENT_HINTS: dict[str, str] = {
     "execute": '{"command":"<shell command>","cwd":"<optional path>"}',
     "execute_script": '{"script":"<shell script>","cwd":"<optional path>"}',
     "read": '{"path":"<file path>"}',
     "write": '{"path":"<file path>","content":"<file content>"}',
     "skill": '{"name":"<skill name>","arguments":"<optional string>"}',
 }
+_ALL_TOOLS: set[str] = set()
+_TOOL_ARGUMENT_HINTS: dict[str, str] = {}
 
 
 def _normalize_openai_base_url(base_url: str | None) -> str:
@@ -81,6 +83,72 @@ def _hydrate_skillkit_env_from_llm_env() -> list[str]:
         applied.append("MINIMAX_MODEL")
 
     return applied
+
+
+def _schema_to_hint(parameters: dict[str, Any]) -> str:
+    properties = parameters.get("properties")
+    if not isinstance(properties, dict) or not properties:
+        return '{"...":"..."}'
+    example: dict[str, Any] = {}
+    for key, spec in properties.items():
+        if not isinstance(key, str):
+            continue
+        type_name = spec.get("type") if isinstance(spec, dict) else None
+        if type_name == "string":
+            example[key] = f"<{key}>"
+        elif type_name == "integer":
+            example[key] = 0
+        elif type_name == "number":
+            example[key] = 0
+        elif type_name == "boolean":
+            example[key] = False
+        elif type_name == "array":
+            example[key] = []
+        elif type_name == "object":
+            example[key] = {}
+        else:
+            example[key] = "<value>"
+    return json.dumps(example, ensure_ascii=False, separators=(",", ":"))
+
+
+def _discover_tool_catalog() -> tuple[set[str], dict[str, str]]:
+    try:
+        skill_dirs = []
+        shared = Path("/skills/shared")
+        if shared.is_dir():
+            skill_dirs.append(shared)
+        probe = AgentRunner.create(
+            skill_dirs=skill_dirs,
+            system_prompt="",
+            enable_tools=True,
+            load_context_files=False,
+            max_turns=1,
+        )
+        discovered_tools: set[str] = set()
+        discovered_hints: dict[str, str] = {}
+        for tool in probe.get_tools():
+            if not isinstance(tool, dict):
+                continue
+            function_info = tool.get("function")
+            if not isinstance(function_info, dict):
+                continue
+            name = function_info.get("name")
+            parameters = function_info.get("parameters")
+            if not isinstance(name, str):
+                continue
+            discovered_tools.add(name)
+            if isinstance(parameters, dict):
+                discovered_hints[name] = _schema_to_hint(parameters)
+        all_tools = set(_FALLBACK_CORE_TOOLS) | discovered_tools
+        hints = dict(_FALLBACK_TOOL_ARGUMENT_HINTS)
+        hints.update(discovered_hints)
+        return all_tools, hints
+    except Exception:
+        logger.warning("Failed to discover sandbox tool catalog from SkillKit; fallback to defaults", exc_info=True)
+        return set(_FALLBACK_CORE_TOOLS), dict(_FALLBACK_TOOL_ARGUMENT_HINTS)
+
+
+_ALL_TOOLS, _TOOL_ARGUMENT_HINTS = _discover_tool_catalog()
 
 
 def _build_invalid_tool_args_error(
@@ -308,7 +376,13 @@ def _parse_request_body(body: dict[str, Any]) -> dict[str, Any]:
     max_tokens = int(max_tokens_raw) if max_tokens_raw is not None else None
     max_turns = int(body.get("max_turns", 20) or 20)
     enable_tools = bool(body.get("enable_tools", True))
-    allowed_tools = set(body.get("allowed_tools", list(_ALL_TOOLS)))
+    requested_tools = set(body.get("allowed_tools", list(_ALL_TOOLS)))
+    unknown_tools = sorted(requested_tools - _ALL_TOOLS)
+    if unknown_tools:
+        logger.warning("Ignoring unknown allowed_tools entries: %s", unknown_tools)
+    allowed_tools = requested_tools & _ALL_TOOLS
+    if not allowed_tools:
+        allowed_tools = set(_ALL_TOOLS)
     skill_dirs_raw = body.get("skill_dirs", [])
     workdir = str(body.get("workdir", "/workspace") or "/workspace")
     timeout = int(body.get("timeout", 300) or 300)

@@ -1,6 +1,8 @@
 """Tests for the agent role tool whitelist configuration."""
 from types import SimpleNamespace
 
+import pytest
+
 from app.worker import agents as agents_mod
 from app.worker.agents import ROLE_TOOLS, _ALL_TOOLS
 
@@ -11,12 +13,12 @@ def test_role_tools_all_valid():
         assert tools.issubset(_ALL_TOOLS), f"Role {role} has unknown tools: {tools - _ALL_TOOLS}"
 
 
-def test_coding_has_all_tools():
-    assert ROLE_TOOLS["coding"] == _ALL_TOOLS
+def test_coding_has_core_tools():
+    assert {"read", "write", "execute", "execute_script", "skill"}.issubset(ROLE_TOOLS["coding"])
 
 
-def test_test_has_all_tools():
-    assert ROLE_TOOLS["test"] == _ALL_TOOLS
+def test_test_has_core_tools():
+    assert {"read", "write", "execute", "execute_script", "skill"}.issubset(ROLE_TOOLS["test"])
 
 
 def test_spec_no_execute():
@@ -46,6 +48,13 @@ def test_orchestrator_no_write():
     tools = ROLE_TOOLS["orchestrator"]
     assert "write" not in tools
     assert "execute_script" not in tools
+
+
+def test_validate_role_tools_raises_on_unknown(monkeypatch):
+    monkeypatch.setattr(agents_mod, "_ALL_TOOLS", {"read"})
+    monkeypatch.setattr(agents_mod, "ROLE_TOOLS", {"coding": {"read", "write"}})
+    with pytest.raises(RuntimeError):
+        agents_mod.validate_role_tools_or_raise(fail_on_unknown=True)
 
 
 def test_create_runner_does_not_pass_model_to_agentrunner(monkeypatch, tmp_path):

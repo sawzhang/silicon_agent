@@ -24,6 +24,7 @@ from app.services.skill_sync_service import sync_skills_from_filesystem
 from app.services.template_service import TemplateService
 from app.websocket.manager import ws_manager
 from app.worker import start_worker, stop_worker
+from app.worker.agents import validate_role_tools_or_raise
 
 setup_logging(debug=settings.DEBUG)
 logger = logging.getLogger(__name__)
@@ -64,6 +65,9 @@ async def lifespan(app: FastAPI):
     # Sync filesystem skill definitions → DB
     async with async_session_factory() as session:
         await sync_skills_from_filesystem(session)
+
+    logger.info("Validating role tool policy against discovered SkillKit tools...")
+    validate_role_tools_or_raise(fail_on_unknown=True)
 
     logger.info("Initializing SkillKit bridge...")
     await init_bridge(use_skillkit=settings.SKILLKIT_ENABLED)

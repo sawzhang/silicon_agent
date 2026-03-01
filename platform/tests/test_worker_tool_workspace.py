@@ -62,7 +62,8 @@ async def test_invalid_tool_arguments_returns_error(tmp_path: Path):
     assert "Invalid arguments for tool write" in result
     assert "Arguments must decode to a JSON object" in result
     assert "Expected format:" in result
-    assert '"path":"<file path>"' in result
+    assert '"path":"' in result
+    assert '"content":"' in result
     assert "function.arguments" in result
 
 
@@ -75,7 +76,7 @@ async def test_invalid_tool_arguments_with_bad_json_is_actionable(tmp_path: Path
     assert "Invalid arguments for tool write" in result
     assert "JSON decode error:" in result
     assert "Expected format:" in result
-    assert '"content":"<file content>"' in result
+    assert '"content":"' in result
     assert "split content and retry" in result
 
 
