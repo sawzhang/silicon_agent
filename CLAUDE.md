@@ -125,8 +125,11 @@ async def test_example(client):  # client is httpx.AsyncClient against ASGI app
 
 | Scope | Threshold | Current |
 |-------|-----------|---------|
-| Overall (`app/`) | **70%** (CI enforced via `--cov-fail-under=70`) | ~73% |
+| Overall (`app/`) | **80%** (CI enforced via `--cov-fail-under=80`) | ~81% |
 | `worker/engine.py` | **95%** | 95% |
+
+Key services at 100%: `kpi_service`, `gate_service`, `task_service`, `template_service`,
+`project_service`, `audit_service`, `circuit_breaker_service`, `task_log_service`, `prompts`.
 
 Run with coverage locally:
 ```bash
@@ -377,9 +380,9 @@ When implementing a new feature:
 
 **Coverage targets to maintain**:
 - `worker/engine.py` must stay ≥ 95%
-- Overall `app/` must stay ≥ 70% (CI blocks merge if below)
+- Overall `app/` must stay ≥ 80% (CI blocks merge if below)
 
 **CI checks required before merge** (branch protection enforced):
 - `backend-lint` — ruff check on `app/` and `tests/`
-- `backend-test` — full pytest suite with `--cov-fail-under=70`
+- `backend-test` — full pytest suite with `--cov-fail-under=80`
 - `frontend-check` — TypeScript type check + build
