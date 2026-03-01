@@ -1,6 +1,8 @@
 """Shared test fixtures for the agent platform."""
 import os
+import shutil
 import tempfile
+from pathlib import Path
 from typing import AsyncGenerator
 
 import pytest_asyncio
@@ -27,6 +29,12 @@ settings.SKILLKIT_ENABLED = False
 settings.MEMORY_ENABLED = True
 settings.MEMORY_COMPRESSION_ENABLED = False
 settings.DEBUG = False  # suppress SQL echo in tests
+
+# Redirect ProjectMemoryStore writes to a temp dir so engine tests never pollute
+# the source tree (platform/memory/) and memory tests always start with a clean slate.
+_MEMORY_TEMP_DIR = Path(tempfile.mkdtemp(prefix="test_memory_"))
+import app.worker.memory as _mem_mod  # noqa: E402
+_mem_mod._MEMORY_ROOT = _MEMORY_TEMP_DIR
 
 # Now create a test engine and patch the session module
 _test_engine = create_async_engine(
@@ -77,6 +85,7 @@ async def setup_db():
             os.remove(path)
         except FileNotFoundError:
             pass
+    shutil.rmtree(_MEMORY_TEMP_DIR, ignore_errors=True)
 
 
 @pytest_asyncio.fixture
