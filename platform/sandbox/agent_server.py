@@ -170,22 +170,59 @@ class ContainerAgentRunner(AgentRunner):
     async def _execute_tool(self, tool_call, on_output=None):
         name = tool_call.get("name", "")
         started = time.monotonic()
+        args: dict[str, Any] = {}
+
+        raw_args = tool_call.get("arguments", "{}")
+        try:
+            if isinstance(raw_args, dict):
+                parsed_args: Any = raw_args
+            elif isinstance(raw_args, str):
+                parsed_args = json.loads(raw_args or "{}")
+            else:
+                parsed_args = {}
+            if not isinstance(parsed_args, dict):
+                raise TypeError(
+                    f"Invalid arguments for tool {name}: expected JSON object, got {type(parsed_args).__name__}"
+                )
+            args = parsed_args
+        except Exception as exc:
+            error_msg = f"Error: Invalid arguments for tool {name}: {exc}"
+            elapsed_ms = round((time.monotonic() - started) * 1000, 2)
+            self.tool_calls_log.append(
+                {
+                    "tool_name": name,
+                    "args": {},
+                    "duration_ms": elapsed_ms,
+                    "result_preview": error_msg[:500],
+                    "status": "failed",
+                }
+            )
+            return error_msg
 
         # Inject default cwd for execution tools
         if self.default_cwd and name in ("execute", "execute_script"):
-            args = json.loads(tool_call.get("arguments", "{}"))
             if not args.get("cwd"):
                 args["cwd"] = self.default_cwd
-                tool_call = {**tool_call, "arguments": json.dumps(args)}
+        tool_call = {**tool_call, "arguments": json.dumps(args, ensure_ascii=False)}
 
         # Block disallowed tools
         if name not in self.allowed_tools:
-            return f"Error: {name} is not allowed for this role"
+            error_msg = f"Error: {name} is not allowed for this role"
+            elapsed_ms = round((time.monotonic() - started) * 1000, 2)
+            self.tool_calls_log.append(
+                {
+                    "tool_name": name,
+                    "args": args,
+                    "duration_ms": elapsed_ms,
+                    "result_preview": error_msg[:500],
+                    "status": "failed",
+                }
+            )
+            return error_msg
 
         result = await super()._execute_tool(tool_call, on_output)
 
         elapsed_ms = round((time.monotonic() - started) * 1000, 2)
-        args = json.loads(tool_call.get("arguments", "{}"))
         self.tool_calls_log.append(
             {
                 "tool_name": name,

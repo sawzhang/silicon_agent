@@ -53,6 +53,16 @@ async def test_read_directory_returns_listing(tmp_path: Path):
     assert "- usage.md" in result
 
 
+@pytest.mark.asyncio
+async def test_invalid_tool_arguments_returns_error(tmp_path: Path):
+    runner = _make_runner(tmp_path)
+    result = await runner._execute_tool(
+        {"name": "write", "arguments": json.dumps([{"path": "a.txt", "content": "x"}])}
+    )
+    assert "Invalid arguments for tool write" in result
+    assert "expected JSON object" in result
+
+
 def test_infer_tool_status_treats_read_errors_as_failed():
     assert infer_tool_status("Error reading file: [Errno 21] Is a directory") == "failed"
     assert infer_tool_status("Error: File not found: package.json") == "failed"

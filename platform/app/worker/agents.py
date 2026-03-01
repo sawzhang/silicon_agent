@@ -226,14 +226,27 @@ class SandboxedAgentRunner(_BaseRunner):  # type: ignore[misc]
     async def _execute_tool(self, tool_call, on_output=None):
         name = tool_call.get("name", "")
         args: dict[str, Any] = {}
-        if self.default_cwd and name in ("execute", "execute_script", "read", "write"):
-            args = json.loads(tool_call.get("arguments", "{}"))
+        raw_args = tool_call.get("arguments", "{}")
+        try:
+            if isinstance(raw_args, dict):
+                parsed_args: Any = raw_args
+            elif isinstance(raw_args, str):
+                parsed_args = json.loads(raw_args or "{}")
+            else:
+                parsed_args = {}
+            if not isinstance(parsed_args, dict):
+                raise TypeError(
+                    f"Invalid arguments for tool {name}: expected JSON object, got {type(parsed_args).__name__}"
+                )
+            args = parsed_args
+        except Exception as exc:
+            return f"Error: Invalid arguments for tool {name}: {exc}"
 
         # Inject default cwd for execution tools
         if self.default_cwd and name in ("execute", "execute_script"):
             if not args.get("cwd"):
                 args["cwd"] = self.default_cwd
-                tool_call = {**tool_call, "arguments": json.dumps(args)}
+        tool_call = {**tool_call, "arguments": json.dumps(args, ensure_ascii=False)}
 
         # Resolve read/write relative paths into task workspace.
         if self.default_cwd and name in ("read", "write"):
