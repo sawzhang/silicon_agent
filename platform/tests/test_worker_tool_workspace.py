@@ -60,7 +60,23 @@ async def test_invalid_tool_arguments_returns_error(tmp_path: Path):
         {"name": "write", "arguments": json.dumps([{"path": "a.txt", "content": "x"}])}
     )
     assert "Invalid arguments for tool write" in result
-    assert "expected JSON object" in result
+    assert "Arguments must decode to a JSON object" in result
+    assert "Expected format:" in result
+    assert '"path":"<file path>"' in result
+    assert "function.arguments" in result
+
+
+@pytest.mark.asyncio
+async def test_invalid_tool_arguments_with_bad_json_is_actionable(tmp_path: Path):
+    runner = _make_runner(tmp_path)
+    result = await runner._execute_tool(
+        {"name": "write", "arguments": '{"path":"a.txt"'}
+    )
+    assert "Invalid arguments for tool write" in result
+    assert "JSON decode error:" in result
+    assert "Expected format:" in result
+    assert '"content":"<file content>"' in result
+    assert "split content and retry" in result
 
 
 def test_infer_tool_status_treats_read_errors_as_failed():

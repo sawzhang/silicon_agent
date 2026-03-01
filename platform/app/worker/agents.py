@@ -41,6 +41,13 @@ ROLE_TOOLS: dict[str, set[str]] = {
     "doc":          {"read", "write", "skill"},
 }
 _ALL_TOOLS = {"read", "write", "execute", "execute_script", "skill"}
+_TOOL_ARGUMENT_HINTS: dict[str, str] = {
+    "execute": '{"command":"<shell command>","cwd":"<optional path>"}',
+    "execute_script": '{"script":"<shell script>","cwd":"<optional path>"}',
+    "read": '{"path":"<file path>"}',
+    "write": '{"path":"<file path>","content":"<file content>"}',
+    "skill": '{"name":"<skill name>","arguments":"<optional string>"}',
+}
 
 # ---------------------------------------------------------------------------
 # Skills configuration: each role loads shared + role-specific skill dirs
@@ -111,6 +118,33 @@ def _resolve_max_turns(role: str, override: int | None) -> int:
 def _normalize_prompt_append(value: str | None) -> str | None:
     text = (value or "").strip()
     return text or None
+
+
+def _build_invalid_tool_args_error(
+    *,
+    tool_name: str,
+    raw_args: Any,
+    detail: str,
+    received_type: str | None = None,
+) -> str:
+    expected = _TOOL_ARGUMENT_HINTS.get(tool_name, '{"...":"..."}')
+    if isinstance(raw_args, str):
+        preview = raw_args
+    else:
+        preview = json.dumps(raw_args, ensure_ascii=False, default=str)
+    preview = preview.replace("\n", "\\n")
+    if len(preview) > 160:
+        preview = f"{preview[:160]}..."
+    type_hint = f"Received type: {received_type}. " if received_type else ""
+    return (
+        f"Error: Invalid arguments for tool {tool_name}. "
+        f"{detail}. "
+        f"{type_hint}"
+        f"Expected format: {expected}. "
+        "Please resend this tool call with a valid JSON object in function.arguments. "
+        "If arguments were truncated, split content and retry. "
+        f"arguments_preview={preview}"
+    )
 
 
 def _runner_signature(runner: "SandboxedAgentRunner") -> tuple | None:
@@ -227,20 +261,30 @@ class SandboxedAgentRunner(_BaseRunner):  # type: ignore[misc]
         name = tool_call.get("name", "")
         args: dict[str, Any] = {}
         raw_args = tool_call.get("arguments", "{}")
-        try:
-            if isinstance(raw_args, dict):
-                parsed_args: Any = raw_args
-            elif isinstance(raw_args, str):
+        if isinstance(raw_args, dict):
+            parsed_args: Any = raw_args
+        elif isinstance(raw_args, str):
+            try:
                 parsed_args = json.loads(raw_args or "{}")
-            else:
-                parsed_args = {}
-            if not isinstance(parsed_args, dict):
-                raise TypeError(
-                    f"Invalid arguments for tool {name}: expected JSON object, got {type(parsed_args).__name__}"
+            except json.JSONDecodeError as exc:
+                return _build_invalid_tool_args_error(
+                    tool_name=name,
+                    raw_args=raw_args,
+                    detail=(
+                        "JSON decode error: "
+                        f"{exc.msg} at line {exc.lineno}, column {exc.colno}"
+                    ),
                 )
-            args = parsed_args
-        except Exception as exc:
-            return f"Error: Invalid arguments for tool {name}: {exc}"
+        else:
+            parsed_args = raw_args
+        if not isinstance(parsed_args, dict):
+            return _build_invalid_tool_args_error(
+                tool_name=name,
+                raw_args=raw_args,
+                detail="Arguments must decode to a JSON object",
+                received_type=type(parsed_args).__name__,
+            )
+        args = parsed_args
 
         # Inject default cwd for execution tools
         if self.default_cwd and name in ("execute", "execute_script"):
