@@ -888,8 +888,6 @@ def test_parse_stage_defs_no_template():
 
 def test_group_stages_by_order_no_template():
     """No template → stages each in own single-element group."""
-    import json
-
     task = _make_task()
     task.template = None
     stages = [_make_stage(stage_name="parse"), _make_stage(stage_name="coding")]
@@ -1094,7 +1092,6 @@ async def test_cleanup_runtime_resources_tmp_workspace_removed(monkeypatch, tmp_
     import shutil
 
     rmtree_calls = []
-    real_rmtree = shutil.rmtree
 
     def _fake_rmtree(p, ignore_errors=False):
         rmtree_calls.append(str(p))
@@ -2021,13 +2018,6 @@ async def test_handle_gate_cancelled_via_is_cancelled(monkeypatch):
 # ═══════════════════════════════════════════════════════════════════════
 
 @pytest.mark.asyncio
-async def test_prune_stale_worktrees_disabled(monkeypatch):
-    """WORKTREE_ENABLED=False → early return, nothing happens."""
-    monkeypatch.setattr(engine.settings, "WORKTREE_ENABLED", False)
-    await engine._prune_stale_worktrees()  # no error
-
-
-@pytest.mark.asyncio
 async def test_prune_stale_worktrees_with_repo_local_path(monkeypatch):
     """WORKTREE_ENABLED=True, project with repo_local_path → prune called."""
     monkeypatch.setattr(engine.settings, "WORKTREE_ENABLED", True)
@@ -2075,7 +2065,7 @@ async def test_prune_stale_worktrees_exception(monkeypatch):
     @contextlib.asynccontextmanager
     async def _fail_session():
         raise RuntimeError("DB down")
-        yield  # noqa: unreachable
+        yield  # pragma: no cover
 
     monkeypatch.setattr(engine, "async_session_factory", _fail_session)
     await engine._prune_stale_worktrees()  # must not raise
@@ -2087,7 +2077,6 @@ async def test_prune_stale_worktrees_with_repo_url_and_managed_path(monkeypatch)
     monkeypatch.setattr(engine.settings, "WORKTREE_ENABLED", True)
 
     import contextlib
-    from pathlib import Path
 
     cleaned_calls = []
 
@@ -2256,9 +2245,6 @@ async def test_setup_worktree_exception(monkeypatch):
         target_branch=None,
     ))
     monkeypatch.setattr(engine, "Path", lambda p: type("P", (), {"exists": lambda self: True})())
-
-    import pathlib
-    orig_path = pathlib.Path
 
     class _FakePath:
         def __init__(self, p):
@@ -2675,7 +2661,6 @@ async def test_cleanup_runtime_resources_workspace_exception(monkeypatch, tmp_pa
     monkeypatch.setattr(engine, "shutil", shutil_mod)
 
     # Create workspace inside expected path hierarchy
-    import tempfile
     task_root = tmp_path / "silicon_agent" / "tasks"
     task_root.mkdir(parents=True)
     fake_workspace = task_root / "task-999"
@@ -3284,7 +3269,6 @@ async def test_check_interactive_planning_gate_refresh_exception(monkeypatch):
             # Polling loop refreshes raise
             raise RuntimeError("refresh failed")
         # First refresh (gate creation) succeeds via original session refresh
-        from sqlalchemy import inspect as sa_inspect
         # Do a no-op (gate already has an id from commit)
 
     async with async_session_factory() as session:
@@ -3475,7 +3459,7 @@ async def test_maybe_insert_dynamic_gate_cancellation(monkeypatch):
 # ═══════════════════════════════════════════════════════════════════════
 
 @pytest.mark.asyncio
-async def test_handle_gate_with_retry_revised(monkeypatch):
+async def test_handle_gate_with_retry_revised_updates_prior_outputs(monkeypatch):
     """Gate returns 'revised' → re-execute stage, update prior_outputs, return new output."""
     call_count = [0]
 
@@ -3543,28 +3527,6 @@ async def test_handle_gate_with_retry_rejected_with_retry(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_handle_gate_with_retry_rejected_exhausted(monkeypatch):
-    """Gate rejected, no retries left → fail task, return None."""
-    monkeypatch.setattr(engine, "_handle_gate", AsyncMock(return_value={"result": "rejected", "comment": "no", "retry_count": 0}))
-    monkeypatch.setattr(engine, "_fail_task", AsyncMock())
-
-    task = _make_task()
-    stage = _make_stage(stage_name="coding")
-    session = SimpleNamespace(commit=AsyncMock())
-
-    from app.worker.compressor import CompressionResult
-    compression = CompressionResult()
-
-    gate_def = {"type": "human_approve", "max_retries": 0}
-    result = await engine._handle_gate_with_retry(
-        session, task, stage, gate_def, "output", 0,
-        [], compression, None, None, {}, "/tmp/ws", None,
-    )
-    assert result is None
-    engine._fail_task.assert_awaited_once()
-
-
-@pytest.mark.asyncio
 async def test_handle_gate_with_retry_timeout(monkeypatch):
     """Gate returns 'timeout' → fail task, return None."""
     monkeypatch.setattr(engine, "_handle_gate", AsyncMock(return_value={"result": "timeout", "comment": "", "retry_count": 0}))
@@ -3623,7 +3585,6 @@ async def test_handle_gate_existing_pending_gate(monkeypatch):
         )
         session.add(existing)
         await session.commit()
-        existing_id = existing.id
 
     async def _auto_approve_refresh(obj):
         if isinstance(obj, HumanGateModel):
@@ -3791,28 +3752,6 @@ async def test_handle_gate_refresh_exception(monkeypatch):
 # ═══════════════════════════════════════════════════════════════════════
 # Section 39: _route_decision additional paths
 # ═══════════════════════════════════════════════════════════════════════
-
-@pytest.mark.asyncio
-async def test_route_decision_disabled(monkeypatch):
-    """DYNAMIC_ROUTING_ENABLED=False → returns None immediately."""
-    monkeypatch.setattr(engine.settings, "DYNAMIC_ROUTING_ENABLED", False)
-    task = _make_task()
-    stage = _make_stage(stage_name="coding", output_summary="done")
-    session = SimpleNamespace()
-    result = await engine._route_decision(session, task, stage, {"options": []}, {})
-    assert result is None
-
-
-@pytest.mark.asyncio
-async def test_route_decision_no_options(monkeypatch):
-    """DYNAMIC_ROUTING_ENABLED=True but no options → returns None."""
-    monkeypatch.setattr(engine.settings, "DYNAMIC_ROUTING_ENABLED", True)
-    task = _make_task()
-    stage = _make_stage(stage_name="coding", output_summary="done")
-    session = SimpleNamespace()
-    result = await engine._route_decision(session, task, stage, {"options": []}, {})
-    assert result is None
-
 
 @pytest.mark.asyncio
 async def test_route_decision_invalid_decision(monkeypatch):
@@ -4935,7 +4874,7 @@ async def test_process_task_repo_context_from_project(monkeypatch):
     """task.project has repo_tree → _build_repo_context called."""
     _make_process_task_mocks(monkeypatch)
     monkeypatch.setattr(engine, "_is_cancelled", AsyncMock(return_value=False))
-    build_mock = lambda proj: "REPO_CONTEXT"
+    def build_mock(proj): return "REPO_CONTEXT"
     monkeypatch.setattr(engine, "_build_repo_context", build_mock)
     monkeypatch.setattr(engine, "_execute_single_stage", AsyncMock(return_value="output"))
     monkeypatch.setattr(engine, "_parse_gates", lambda t: {})
