@@ -6,7 +6,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 import pytest
-from sqlalchemy import select, update
+from sqlalchemy import select
 
 from app.db.session import async_session_factory
 from app.models.gate import HumanGateModel

@@ -361,7 +361,6 @@ async def test_gate_blocks_pipeline_then_resumes_on_approval(worker_pipeline, ga
     gate_appeared = await _wait_until(lambda: _gate_is_pending(task_id))
     if not gate_appeared:
         async with async_session_factory() as _ds:
-            from sqlalchemy.orm import selectinload as _sil
             _t = await _ds.get(TaskModel, task_id)
             _p = await _ds.get(TaskStageModel, f"{task_id}-parse")
             _tr = (await _ds.execute(
