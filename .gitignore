@@ -42,3 +42,4 @@ platform/memory/*/
 platform/.coverage
 platform/htmlcov/
 platform/coverage.xml
+platform/**/*.cover

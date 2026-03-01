@@ -1,0 +1,331 @@
+"""Tests for app/worker/prompts.py — build_user_prompt coverage."""
+from __future__ import annotations
+
+import pytest
+
+from app.worker.prompts import STAGE_INSTRUCTIONS, StageContext, build_user_prompt
+
+
+def _minimal_ctx(**overrides) -> StageContext:
+    """Return a StageContext with minimal required fields, optionally overridden."""
+    defaults = dict(
+        task_title="Test Task",
+        task_description=None,
+        stage_name="code",
+        agent_role="coding",
+        prior_outputs=[],
+    )
+    defaults.update(overrides)
+    return StageContext(**defaults)
+
+
+# ---------------------------------------------------------------------------
+# Minimal context — title only
+# ---------------------------------------------------------------------------
+
+def test_minimal_title_only():
+    ctx = _minimal_ctx()
+    result = build_user_prompt(ctx)
+    assert "Test Task" in result
+    assert "## 任务" in result
+    # Stage instruction for "code" should be present
+    assert STAGE_INSTRUCTIONS["code"] in result
+
+
+# ---------------------------------------------------------------------------
+# With description
+# ---------------------------------------------------------------------------
+
+def test_with_description():
+    ctx = _minimal_ctx(task_description="A detailed description of the task.")
+    result = build_user_prompt(ctx)
+    assert "A detailed description of the task." in result
+
+
+def test_without_description_no_empty_section():
+    ctx = _minimal_ctx(task_description=None)
+    result = build_user_prompt(ctx)
+    # No description appended when it is None
+    assert result.count("\n\n") < 5  # sanity: no runaway blank sections
+
+
+# ---------------------------------------------------------------------------
+# With repo_context
+# ---------------------------------------------------------------------------
+
+def test_with_repo_context():
+    ctx = _minimal_ctx(repo_context="Python 3.11 / FastAPI / SQLite\n./app/\n  main.py")
+    result = build_user_prompt(ctx)
+    assert "## 项目代码库信息" in result
+    assert "Python 3.11 / FastAPI" in result
+
+
+def test_without_repo_context():
+    ctx = _minimal_ctx(repo_context=None)
+    result = build_user_prompt(ctx)
+    assert "## 项目代码库信息" not in result
+
+
+# ---------------------------------------------------------------------------
+# With project_memory
+# ---------------------------------------------------------------------------
+
+def test_with_project_memory():
+    ctx = _minimal_ctx(project_memory="Previous task: added auth module.")
+    result = build_user_prompt(ctx)
+    assert "## 项目上下文（来自历史任务）" in result
+    assert "Previous task: added auth module." in result
+
+
+def test_without_project_memory():
+    ctx = _minimal_ctx(project_memory=None)
+    result = build_user_prompt(ctx)
+    assert "## 项目上下文（来自历史任务）" not in result
+
+
+# ---------------------------------------------------------------------------
+# With prior_outputs (raw)
+# ---------------------------------------------------------------------------
+
+def test_with_prior_outputs_raw():
+    prior = [
+        {"stage": "parse", "output": "Parsed requirements: ..."},
+        {"stage": "spec", "output": "Spec document: ..."},
+    ]
+    ctx = _minimal_ctx(prior_outputs=prior)
+    result = build_user_prompt(ctx)
+    assert "## 前序阶段产出" in result
+    assert "### parse 阶段输出" in result
+    assert "Parsed requirements:" in result
+    assert "### spec 阶段输出" in result
+    assert "Spec document:" in result
+
+
+def test_with_empty_prior_outputs():
+    ctx = _minimal_ctx(prior_outputs=[])
+    result = build_user_prompt(ctx)
+    assert "## 前序阶段产出" not in result
+
+
+# ---------------------------------------------------------------------------
+# With compressed_outputs (takes precedence over prior_outputs)
+# ---------------------------------------------------------------------------
+
+def test_compressed_outputs_take_precedence():
+    raw = [{"stage": "parse", "output": "RAW OUTPUT"}]
+    compressed = [{"stage": "parse", "output": "COMPRESSED OUTPUT"}]
+    ctx = _minimal_ctx(prior_outputs=raw, compressed_outputs=compressed)
+    result = build_user_prompt(ctx)
+    assert "COMPRESSED OUTPUT" in result
+    assert "RAW OUTPUT" not in result
+
+
+def test_compressed_outputs_empty_list_hides_section():
+    """An explicitly empty compressed_outputs list means no prior section."""
+    raw = [{"stage": "parse", "output": "RAW OUTPUT"}]
+    ctx = _minimal_ctx(prior_outputs=raw, compressed_outputs=[])
+    result = build_user_prompt(ctx)
+    # compressed_outputs=[] is not None, so it takes precedence — section absent
+    assert "## 前序阶段产出" not in result
+    assert "RAW OUTPUT" not in result
+
+
+def test_compressed_outputs_none_falls_back_to_prior():
+    raw = [{"stage": "parse", "output": "RAW OUTPUT"}]
+    ctx = _minimal_ctx(prior_outputs=raw, compressed_outputs=None)
+    result = build_user_prompt(ctx)
+    assert "RAW OUTPUT" in result
+
+
+# ---------------------------------------------------------------------------
+# With retry_context — basic fields
+# ---------------------------------------------------------------------------
+
+def test_retry_context_with_error():
+    ctx = _minimal_ctx(retry_context={"error": "TimeoutError: stage exceeded 300s"})
+    result = build_user_prompt(ctx)
+    assert "## ⚠ 重试上下文（上次执行失败）" in result
+    assert "**失败原因:** TimeoutError: stage exceeded 300s" in result
+    assert "请分析失败原因" in result
+
+
+def test_retry_context_with_lesson_and_suggestion():
+    ctx = _minimal_ctx(
+        retry_context={
+            "error": "SyntaxError",
+            "lesson": "Do not mix tabs and spaces",
+            "suggestion": "Use ruff to lint before returning",
+        }
+    )
+    result = build_user_prompt(ctx)
+    assert "**教训:** Do not mix tabs and spaces" in result
+    assert "**建议:** Use ruff to lint before returning" in result
+
+
+def test_retry_context_with_prior_output_short():
+    """Short prior_output (< 2000 chars) should appear verbatim."""
+    ctx = _minimal_ctx(retry_context={"prior_output": "Some previous output text."})
+    result = build_user_prompt(ctx)
+    assert "**上次部分输出:**" in result
+    assert "Some previous output text." in result
+    assert "已截断" not in result
+
+
+def test_retry_context_with_prior_output_long():
+    """prior_output > 2000 chars must be truncated with ellipsis marker."""
+    long_text = "x" * 2500
+    ctx = _minimal_ctx(retry_context={"prior_output": long_text})
+    result = build_user_prompt(ctx)
+    assert "**上次部分输出:**" in result
+    assert "...(已截断)" in result
+    # The truncated portion should be exactly 2000 "x" chars
+    assert "x" * 2000 in result
+    assert "x" * 2001 not in result
+
+
+def test_retry_context_empty_dict():
+    """An empty retry_context dict is falsy — no retry section is added."""
+    ctx = _minimal_ctx(retry_context={})
+    result = build_user_prompt(ctx)
+    # Empty dict is falsy in Python, so the retry block is skipped entirely
+    assert "## ⚠ 重试上下文（上次执行失败）" not in result
+
+
+def test_no_retry_context():
+    ctx = _minimal_ctx(retry_context=None)
+    result = build_user_prompt(ctx)
+    assert "## ⚠ 重试上下文" not in result
+
+
+# ---------------------------------------------------------------------------
+# With gate_rejection_context
+# ---------------------------------------------------------------------------
+
+def test_gate_rejection_context_with_comment_and_retry():
+    ctx = _minimal_ctx(
+        gate_rejection_context={"comment": "Needs more tests.", "retry": "2/3"}
+    )
+    result = build_user_prompt(ctx)
+    assert "## ⚠ Gate审批被拒绝 — 请根据反馈修改" in result
+    assert "**审批者反馈:** Needs more tests." in result
+    assert "**重试次数:** 2/3" in result
+    assert "请仔细阅读审批反馈" in result
+
+
+def test_gate_rejection_context_only_comment():
+    ctx = _minimal_ctx(gate_rejection_context={"comment": "Please revise the API design."})
+    result = build_user_prompt(ctx)
+    assert "**审批者反馈:** Please revise the API design." in result
+    # No retry_info → retry line absent
+    assert "**重试次数:**" not in result
+
+
+def test_gate_rejection_context_only_retry():
+    ctx = _minimal_ctx(gate_rejection_context={"retry": "1/3"})
+    result = build_user_prompt(ctx)
+    assert "**重试次数:** 1/3" in result
+    assert "**审批者反馈:**" not in result
+
+
+def test_gate_rejection_context_empty_dict():
+    """An empty gate_rejection_context dict is falsy — no gate section is added."""
+    ctx = _minimal_ctx(gate_rejection_context={})
+    result = build_user_prompt(ctx)
+    # Empty dict is falsy in Python, so the gate rejection block is skipped
+    assert "## ⚠ Gate审批被拒绝 — 请根据反馈修改" not in result
+
+
+def test_no_gate_rejection_context():
+    ctx = _minimal_ctx(gate_rejection_context=None)
+    result = build_user_prompt(ctx)
+    assert "## ⚠ Gate审批被拒绝" not in result
+
+
+# ---------------------------------------------------------------------------
+# With custom_instruction
+# ---------------------------------------------------------------------------
+
+def test_with_custom_instruction():
+    ctx = _minimal_ctx(custom_instruction="Output must be valid JSON only.")
+    result = build_user_prompt(ctx)
+    assert "## 附加指令" in result
+    assert "Output must be valid JSON only." in result
+
+
+def test_without_custom_instruction():
+    ctx = _minimal_ctx(custom_instruction=None)
+    result = build_user_prompt(ctx)
+    assert "## 附加指令" not in result
+
+
+# ---------------------------------------------------------------------------
+# Stage name → STAGE_INSTRUCTIONS lookup
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("stage_name", list(STAGE_INSTRUCTIONS.keys()))
+def test_known_stage_uses_stage_instructions(stage_name):
+    ctx = _minimal_ctx(stage_name=stage_name)
+    result = build_user_prompt(ctx)
+    assert STAGE_INSTRUCTIONS[stage_name] in result
+
+
+def test_unknown_stage_falls_back_to_default():
+    ctx = _minimal_ctx(stage_name="completely_unknown_stage")
+    result = build_user_prompt(ctx)
+    assert "请完成当前阶段的工作。" in result
+    assert "## 当前阶段: completely_unknown_stage" in result
+
+
+# ---------------------------------------------------------------------------
+# All sections combined
+# ---------------------------------------------------------------------------
+
+def test_all_sections_combined():
+    ctx = StageContext(
+        task_title="Big Combined Task",
+        task_description="Full description here.",
+        stage_name="review",
+        agent_role="review",
+        prior_outputs=[{"stage": "code", "output": "Code output text"}],
+        compressed_outputs=None,
+        project_memory="Memory from past tasks.",
+        repo_context="FastAPI project.",
+        retry_context={
+            "error": "RuntimeError",
+            "prior_output": "partial output",
+            "lesson": "check imports",
+            "suggestion": "fix the import path",
+        },
+        gate_rejection_context={"comment": "Needs refactor.", "retry": "3/3"},
+        custom_instruction="Focus on security issues.",
+    )
+    result = build_user_prompt(ctx)
+
+    # Task section
+    assert "## 任务" in result
+    assert "**Big Combined Task**" in result
+    assert "Full description here." in result
+    # Repo context
+    assert "## 项目代码库信息" in result
+    assert "FastAPI project." in result
+    # Project memory
+    assert "## 项目上下文（来自历史任务）" in result
+    assert "Memory from past tasks." in result
+    # Prior outputs
+    assert "## 前序阶段产出" in result
+    assert "Code output text" in result
+    # Retry context
+    assert "## ⚠ 重试上下文（上次执行失败）" in result
+    assert "**失败原因:** RuntimeError" in result
+    assert "**教训:** check imports" in result
+    assert "**建议:** fix the import path" in result
+    assert "**上次部分输出:**" in result
+    # Gate rejection context
+    assert "## ⚠ Gate审批被拒绝 — 请根据反馈修改" in result
+    assert "**审批者反馈:** Needs refactor." in result
+    # Stage instruction
+    assert "## 当前阶段: review" in result
+    assert STAGE_INSTRUCTIONS["review"] in result
+    # Custom instruction
+    assert "## 附加指令" in result
+    assert "Focus on security issues." in result
