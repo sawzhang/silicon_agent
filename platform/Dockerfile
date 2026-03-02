@@ -2,13 +2,15 @@ FROM python:3.11-slim AS base
 
 WORKDIR /app
 
-# Install system deps
+# Install system deps (git + openssh-client needed for private pip deps)
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    gcc libpq-dev \
+    gcc libpq-dev git openssh-client \
     && rm -rf /var/lib/apt/lists/*
 
 COPY pyproject.toml ./
-RUN pip install --no-cache-dir .
+
+# Use SSH mount to clone private dependencies during build
+RUN --mount=type=ssh pip install --no-cache-dir .
 
 # Copy application code
 COPY app/ ./app/
