@@ -1,0 +1,836 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Silicon Agent - Multi-Agent Context Flow</title>
+<style>
+  :root {
+    --bg: #0f1117;
+    --card: #1a1d27;
+    --border: #2a2d3a;
+    --accent-blue: #4f8ff7;
+    --accent-purple: #a78bfa;
+    --accent-green: #34d399;
+    --accent-orange: #fb923c;
+    --accent-red: #f87171;
+    --accent-cyan: #22d3ee;
+    --accent-yellow: #facc15;
+    --text: #e2e8f0;
+    --text-dim: #94a3b8;
+    --text-muted: #64748b;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    padding: 40px 20px;
+    min-height: 100vh;
+  }
+  .container { max-width: 1400px; margin: 0 auto; }
+
+  h1 {
+    text-align: center;
+    font-size: 28px;
+    font-weight: 700;
+    margin-bottom: 8px;
+    background: linear-gradient(135deg, var(--accent-blue), var(--accent-purple));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+  .subtitle {
+    text-align: center;
+    color: var(--text-dim);
+    font-size: 14px;
+    margin-bottom: 48px;
+  }
+
+  /* ── Section Headers ── */
+  .section-title {
+    font-size: 18px;
+    font-weight: 600;
+    margin: 48px 0 20px;
+    padding-left: 12px;
+    border-left: 3px solid var(--accent-blue);
+    color: var(--text);
+  }
+
+  /* ── Pipeline Flow ── */
+  .pipeline {
+    display: flex;
+    align-items: flex-start;
+    gap: 0;
+    overflow-x: auto;
+    padding: 20px 0;
+    position: relative;
+  }
+  .stage-wrapper {
+    display: flex;
+    align-items: flex-start;
+    flex-shrink: 0;
+  }
+  .stage-card {
+    width: 220px;
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 16px;
+    position: relative;
+  }
+  .stage-card.active { border-color: var(--accent-blue); box-shadow: 0 0 20px rgba(79,143,247,0.15); }
+  .stage-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 12px;
+  }
+  .stage-icon {
+    width: 32px; height: 32px;
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 14px;
+    font-weight: 700;
+    flex-shrink: 0;
+  }
+  .stage-icon.parse { background: rgba(79,143,247,0.2); color: var(--accent-blue); }
+  .stage-icon.code { background: rgba(52,211,153,0.2); color: var(--accent-green); }
+  .stage-icon.test { background: rgba(251,146,60,0.2); color: var(--accent-orange); }
+  .stage-icon.review { background: rgba(167,139,250,0.2); color: var(--accent-purple); }
+  .stage-name { font-weight: 600; font-size: 14px; }
+  .stage-role { font-size: 11px; color: var(--text-muted); }
+  .stage-outputs { margin-top: 8px; }
+  .output-item {
+    font-size: 11px;
+    color: var(--text-dim);
+    padding: 4px 8px;
+    background: rgba(255,255,255,0.03);
+    border-radius: 4px;
+    margin-top: 4px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .output-dot {
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+  .dot-blue { background: var(--accent-blue); }
+  .dot-green { background: var(--accent-green); }
+  .dot-purple { background: var(--accent-purple); }
+  .dot-orange { background: var(--accent-orange); }
+  .dot-cyan { background: var(--accent-cyan); }
+
+  /* Arrow between stages */
+  .arrow {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    width: 80px;
+    padding-top: 30px;
+    flex-shrink: 0;
+  }
+  .arrow-line {
+    width: 60px;
+    height: 2px;
+    background: linear-gradient(90deg, var(--accent-blue), var(--accent-purple));
+    position: relative;
+  }
+  .arrow-line::after {
+    content: '';
+    position: absolute;
+    right: -1px;
+    top: -4px;
+    border: 5px solid transparent;
+    border-left: 7px solid var(--accent-purple);
+  }
+  .arrow-label {
+    font-size: 9px;
+    color: var(--text-muted);
+    margin-top: 6px;
+    text-align: center;
+    line-height: 1.3;
+    white-space: nowrap;
+  }
+
+  /* ── Sliding Window ── */
+  .window-diagram {
+    display: flex;
+    gap: 12px;
+    margin: 20px 0;
+    flex-wrap: wrap;
+  }
+  .window-card {
+    flex: 1;
+    min-width: 280px;
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 20px;
+  }
+  .window-title {
+    font-size: 13px;
+    font-weight: 600;
+    margin-bottom: 12px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .level-bar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 8px 0;
+    font-size: 12px;
+  }
+  .level-tag {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: 600;
+    min-width: 32px;
+    text-align: center;
+  }
+  .level-tag.l2 { background: rgba(52,211,153,0.2); color: var(--accent-green); }
+  .level-tag.l1 { background: rgba(251,146,60,0.2); color: var(--accent-orange); }
+  .level-tag.l0 { background: rgba(248,113,113,0.2); color: var(--accent-red); }
+  .level-fill {
+    height: 6px;
+    border-radius: 3px;
+    flex: 1;
+  }
+  .fill-l2 { background: linear-gradient(90deg, var(--accent-green), rgba(52,211,153,0.3)); }
+  .fill-l1 { background: linear-gradient(90deg, var(--accent-orange), rgba(251,146,60,0.3)); width: 60%; }
+  .fill-l0 { background: linear-gradient(90deg, var(--accent-red), rgba(248,113,113,0.3)); width: 25%; }
+  .level-desc { color: var(--text-muted); font-size: 11px; min-width: 100px; }
+
+  /* ── Context Layers ── */
+  .layers {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+    gap: 16px;
+    margin: 20px 0;
+  }
+  .layer-card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 20px;
+    position: relative;
+    overflow: hidden;
+  }
+  .layer-card::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0;
+    width: 100%; height: 3px;
+  }
+  .layer-card.l1::before { background: linear-gradient(90deg, var(--accent-blue), transparent); }
+  .layer-card.l2::before { background: linear-gradient(90deg, var(--accent-green), transparent); }
+  .layer-card.l3::before { background: linear-gradient(90deg, var(--accent-purple), transparent); }
+  .layer-card.l4::before { background: linear-gradient(90deg, var(--accent-orange), transparent); }
+  .layer-card.l5::before { background: linear-gradient(90deg, var(--accent-red), transparent); }
+  .layer-card.l6::before { background: linear-gradient(90deg, var(--accent-cyan), transparent); }
+  .layer-num {
+    font-size: 11px;
+    font-weight: 700;
+    padding: 2px 8px;
+    border-radius: 10px;
+    display: inline-block;
+    margin-bottom: 8px;
+  }
+  .layer-card.l1 .layer-num { background: rgba(79,143,247,0.15); color: var(--accent-blue); }
+  .layer-card.l2 .layer-num { background: rgba(52,211,153,0.15); color: var(--accent-green); }
+  .layer-card.l3 .layer-num { background: rgba(167,139,250,0.15); color: var(--accent-purple); }
+  .layer-card.l4 .layer-num { background: rgba(251,146,60,0.15); color: var(--accent-orange); }
+  .layer-card.l5 .layer-num { background: rgba(248,113,113,0.15); color: var(--accent-red); }
+  .layer-card.l6 .layer-num { background: rgba(34,211,238,0.15); color: var(--accent-cyan); }
+  .layer-title { font-size: 15px; font-weight: 600; margin-bottom: 6px; }
+  .layer-desc { font-size: 12px; color: var(--text-dim); line-height: 1.6; }
+  .layer-detail {
+    font-size: 11px;
+    color: var(--text-muted);
+    margin-top: 10px;
+    padding-top: 10px;
+    border-top: 1px solid var(--border);
+    line-height: 1.5;
+  }
+  .layer-detail code {
+    background: rgba(255,255,255,0.06);
+    padding: 1px 5px;
+    border-radius: 3px;
+    font-family: 'SF Mono', Menlo, monospace;
+    font-size: 10px;
+  }
+
+  /* ── Prompt Assembly ── */
+  .prompt-assembly {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 24px;
+    margin: 20px 0;
+  }
+  .prompt-row {
+    display: flex;
+    align-items: stretch;
+    gap: 12px;
+    margin: 8px 0;
+  }
+  .prompt-order {
+    width: 28px; height: 28px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 12px;
+    font-weight: 700;
+    flex-shrink: 0;
+    margin-top: 2px;
+  }
+  .prompt-block {
+    flex: 1;
+    padding: 10px 14px;
+    border-radius: 8px;
+    font-size: 12px;
+    line-height: 1.5;
+  }
+  .po-1 .prompt-order { background: rgba(79,143,247,0.2); color: var(--accent-blue); }
+  .po-1 .prompt-block { background: rgba(79,143,247,0.06); border-left: 2px solid var(--accent-blue); }
+  .po-2 .prompt-order { background: rgba(34,211,238,0.2); color: var(--accent-cyan); }
+  .po-2 .prompt-block { background: rgba(34,211,238,0.06); border-left: 2px solid var(--accent-cyan); }
+  .po-3 .prompt-order { background: rgba(167,139,250,0.2); color: var(--accent-purple); }
+  .po-3 .prompt-block { background: rgba(167,139,250,0.06); border-left: 2px solid var(--accent-purple); }
+  .po-4 .prompt-order { background: rgba(52,211,153,0.2); color: var(--accent-green); }
+  .po-4 .prompt-block { background: rgba(52,211,153,0.06); border-left: 2px solid var(--accent-green); }
+  .po-5 .prompt-order { background: rgba(248,113,113,0.2); color: var(--accent-red); }
+  .po-5 .prompt-block { background: rgba(248,113,113,0.06); border-left: 2px solid var(--accent-red); }
+  .po-6 .prompt-order { background: rgba(251,146,60,0.2); color: var(--accent-orange); }
+  .po-6 .prompt-block { background: rgba(251,146,60,0.06); border-left: 2px solid var(--accent-orange); }
+  .po-7 .prompt-order { background: rgba(250,204,21,0.2); color: var(--accent-yellow); }
+  .po-7 .prompt-block { background: rgba(250,204,21,0.06); border-left: 2px solid var(--accent-yellow); }
+  .prompt-label { font-weight: 600; color: var(--text); }
+  .prompt-hint { color: var(--text-muted); font-size: 11px; }
+
+  /* ── Resume Flow ── */
+  .resume-flow {
+    display: flex;
+    align-items: center;
+    gap: 0;
+    margin: 20px 0;
+    overflow-x: auto;
+    padding: 10px 0;
+  }
+  .resume-step {
+    min-width: 160px;
+    padding: 14px;
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    text-align: center;
+    flex-shrink: 0;
+  }
+  .resume-step.completed { border-color: var(--accent-green); opacity: 0.7; }
+  .resume-step.failed { border-color: var(--accent-red); }
+  .resume-step.pending { border-color: var(--border); opacity: 0.5; }
+  .resume-step .step-status {
+    font-size: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 4px;
+  }
+  .resume-step.completed .step-status { color: var(--accent-green); }
+  .resume-step.failed .step-status { color: var(--accent-red); }
+  .resume-step.pending .step-status { color: var(--text-muted); }
+  .resume-step .step-name { font-size: 13px; font-weight: 600; }
+  .resume-step .step-detail { font-size: 10px; color: var(--text-muted); margin-top: 4px; }
+  .resume-arrow {
+    width: 40px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    color: var(--text-muted);
+    font-size: 18px;
+  }
+
+  /* ── Memory Table ── */
+  .memory-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 16px 0;
+    font-size: 12px;
+  }
+  .memory-table th {
+    text-align: left;
+    padding: 10px 14px;
+    background: rgba(255,255,255,0.03);
+    color: var(--text-dim);
+    font-weight: 600;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    border-bottom: 1px solid var(--border);
+  }
+  .memory-table td {
+    padding: 8px 14px;
+    border-bottom: 1px solid rgba(255,255,255,0.03);
+    color: var(--text-dim);
+  }
+  .check { color: var(--accent-green); }
+  .cross { color: var(--text-muted); opacity: 0.3; }
+
+  /* ── Footer ── */
+  .footer {
+    text-align: center;
+    margin-top: 60px;
+    padding-top: 20px;
+    border-top: 1px solid var(--border);
+    color: var(--text-muted);
+    font-size: 12px;
+  }
+</style>
+</head>
+<body>
+<div class="container">
+
+<h1>Silicon Agent Multi-Agent Context Flow</h1>
+<p class="subtitle">Orchestrator 如何在多阶段任务执行中保持上下文连贯性</p>
+
+<!-- ═══════════════════════════════════════════════════════
+     Section 1: Pipeline Overview
+     ═══════════════════════════════════════════════════════ -->
+<div class="section-title">1. 任务执行管线总览</div>
+
+<div class="pipeline">
+  <div class="stage-wrapper">
+    <div class="stage-card">
+      <div class="stage-header">
+        <div class="stage-icon parse">P</div>
+        <div><div class="stage-name">Parse</div><div class="stage-role">orchestrator</div></div>
+      </div>
+      <div class="stage-outputs">
+        <div class="output-item"><span class="output-dot dot-blue"></span>任务拆解 & 技术方案</div>
+        <div class="output-item"><span class="output-dot dot-green"></span>output_summary → DB</div>
+        <div class="output-item"><span class="output-dot dot-purple"></span>output_structured → DB</div>
+      </div>
+    </div>
+  </div>
+  <div class="arrow">
+    <div class="arrow-line"></div>
+    <div class="arrow-label">L2 全文<br/>传递</div>
+  </div>
+  <div class="stage-wrapper">
+    <div class="stage-card active">
+      <div class="stage-header">
+        <div class="stage-icon code">C</div>
+        <div><div class="stage-name">Code</div><div class="stage-role">coding</div></div>
+      </div>
+      <div class="stage-outputs">
+        <div class="output-item"><span class="output-dot dot-blue"></span>代码实现 + 工具调用</div>
+        <div class="output-item"><span class="output-dot dot-green"></span>output_summary → DB</div>
+        <div class="output-item"><span class="output-dot dot-purple"></span>files_modified, lines_changed</div>
+      </div>
+    </div>
+  </div>
+  <div class="arrow">
+    <div class="arrow-line"></div>
+    <div class="arrow-label">L2 全文<br/>传递</div>
+  </div>
+  <div class="stage-wrapper">
+    <div class="stage-card">
+      <div class="stage-header">
+        <div class="stage-icon test">T</div>
+        <div><div class="stage-name">Test</div><div class="stage-role">test</div></div>
+      </div>
+      <div class="stage-outputs">
+        <div class="output-item"><span class="output-dot dot-blue"></span>测试编写 & 执行</div>
+        <div class="output-item"><span class="output-dot dot-green"></span>output_summary → DB</div>
+        <div class="output-item"><span class="output-dot dot-purple"></span>tests_passed, coverage</div>
+      </div>
+    </div>
+  </div>
+  <div class="arrow">
+    <div class="arrow-line"></div>
+    <div class="arrow-label">L2 全文<br/>传递</div>
+  </div>
+  <div class="stage-wrapper">
+    <div class="stage-card">
+      <div class="stage-header">
+        <div class="stage-icon review">R</div>
+        <div><div class="stage-name">Review</div><div class="stage-role">review</div></div>
+      </div>
+      <div class="stage-outputs">
+        <div class="output-item"><span class="output-dot dot-blue"></span>代码审查 & 质量评估</div>
+        <div class="output-item"><span class="output-dot dot-green"></span>output_summary → DB</div>
+        <div class="output-item"><span class="output-dot dot-purple"></span>score, issues_found</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════
+     Section 2: 6 Context Layers
+     ═══════════════════════════════════════════════════════ -->
+<div class="section-title">2. 六层上下文保障机制</div>
+
+<div class="layers">
+  <div class="layer-card l1">
+    <div class="layer-num">Layer 1</div>
+    <div class="layer-title">prior_outputs 累积传递</div>
+    <div class="layer-desc">
+      每个 stage 完成后，原始输出追加到 <code>prior_outputs[]</code> 列表。
+      下一 stage 通过 <code>build_user_prompt()</code> 读取所有已完成阶段的输出并注入 prompt。
+    </div>
+    <div class="layer-detail">
+      <strong>关键设计：</strong>Agent 间无共享会话 — 每次 <code>runner.chat(prompt, reset=True)</code>
+      清空对话历史，所有跨阶段上下文靠 prompt 显式传递。
+    </div>
+  </div>
+
+  <div class="layer-card l2">
+    <div class="layer-num">Layer 2</div>
+    <div class="layer-title">滑动窗口压缩</div>
+    <div class="layer-desc">
+      按距离分级压缩：紧邻阶段看全文 (L2)，隔一阶段看摘要 (L1)，更远看一句话 (L0)。
+      模板可用 <code>context_from</code> 强制指定全文传递。
+    </div>
+    <div class="layer-detail">
+      <code>CompressionResult.build_prior_context(stage_index)</code> —
+      自动计算距离并选择压缩级别，平衡上下文完整性与 token 消耗。
+    </div>
+  </div>
+
+  <div class="layer-card l3">
+    <div class="layer-num">Layer 3</div>
+    <div class="layer-title">结构化产出提取</div>
+    <div class="layer-desc">
+      每个 stage 完成后，LLM 提取结构化 JSON（如 files_modified, tests_passed）。
+      驱动条件跳过、动态门控和路由决策。
+    </div>
+    <div class="layer-detail">
+      <code>extract_structured_output()</code> → <code>stage.output_structured</code> (DB JSON)。
+      结构化数据同时丰富 L0/L1 压缩摘要。
+    </div>
+  </div>
+
+  <div class="layer-card l4">
+    <div class="layer-num">Layer 4</div>
+    <div class="layer-title">项目级跨任务记忆</div>
+    <div class="layer-desc">
+      文件存储在 <code>memory/&lt;project_id&gt;/</code>，分 conventions / architecture / patterns / issues
+      四类，按角色过滤加载。
+    </div>
+    <div class="layer-detail">
+      任务完成后 LLM 从所有 stage 输出提取可复用知识写入记忆。
+      每个 stage 执行前加载最近 10 条相关记忆注入 prompt。
+    </div>
+  </div>
+
+  <div class="layer-card l5">
+    <div class="layer-num">Layer 5</div>
+    <div class="layer-title">失败重试上下文 (Ralph Loop V2)</div>
+    <div class="layer-desc">
+      stage 失败重试时，注入根因分析、教训、建议和上次部分输出（截断 2000 字符）。
+      教训同步写入项目记忆 issues 类别。
+    </div>
+    <div class="layer-detail">
+      若 <code>SKILL_REFLECTION_ENABLED</code>，调用 <code>generate_structured_reflection()</code>
+      进行 LLM 结构化反思，而非简单拼接错误信息。
+    </div>
+  </div>
+
+  <div class="layer-card l6">
+    <div class="layer-num">Layer 6</div>
+    <div class="layer-title">Gate 审批反馈回注</div>
+    <div class="layer-desc">
+      人工审批 Gate 被拒绝时，审批者 comment 作为 <code>gate_rejection_context</code>
+      注入重新执行的 stage prompt 中。
+    </div>
+    <div class="layer-detail">
+      格式：<code>## Gate审批被拒绝</code> + 重试次数 + 审批者反馈。
+      最多重试 3 次，每次都携带最新反馈。
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════
+     Section 3: Sliding Window Detail
+     ═══════════════════════════════════════════════════════ -->
+<div class="section-title">3. 滑动窗口压缩策略</div>
+
+<div class="window-diagram">
+  <div class="window-card">
+    <div class="window-title">以 4 阶段管线中 Review (stage 3) 的视角</div>
+    <div class="level-bar">
+      <span class="level-tag l0">L0</span>
+      <div class="level-fill fill-l0"></div>
+      <span class="level-desc">Parse (distance=2)</span>
+    </div>
+    <div class="level-bar">
+      <span class="level-tag l1">L1</span>
+      <div class="level-fill fill-l1"></div>
+      <span class="level-desc">Code (distance=1)</span>
+    </div>
+    <div class="level-bar">
+      <span class="level-tag l2">L2</span>
+      <div class="level-fill fill-l2"></div>
+      <span class="level-desc">Test (distance=0)</span>
+    </div>
+  </div>
+
+  <div class="window-card">
+    <div class="window-title">三级压缩对照</div>
+    <div class="level-bar">
+      <span class="level-tag l2">L2</span>
+      <span style="color:var(--accent-green); font-size:12px; font-weight:600;">全文</span>
+      <span style="color:var(--text-muted); font-size:11px;">— 无限制，原始输出</span>
+    </div>
+    <div class="level-bar">
+      <span class="level-tag l1">L1</span>
+      <span style="color:var(--accent-orange); font-size:12px; font-weight:600;">~500 tok</span>
+      <span style="color:var(--text-muted); font-size:11px;">— 要点摘要 + 结构化字段</span>
+    </div>
+    <div class="level-bar">
+      <span class="level-tag l0">L0</span>
+      <span style="color:var(--accent-red); font-size:12px; font-weight:600;">~100 tok</span>
+      <span style="color:var(--text-muted); font-size:11px;">— 一句话概括</span>
+    </div>
+    <div style="margin-top:12px; font-size:11px; color:var(--text-muted);">
+      <strong>覆盖机制：</strong>模板 <code>context_from: ["parse"]</code> 强制 L2 全文，忽略距离
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════
+     Section 4: Prompt Assembly
+     ═══════════════════════════════════════════════════════ -->
+<div class="section-title">4. Prompt 组装顺序 (build_user_prompt)</div>
+
+<div class="prompt-assembly">
+  <div class="prompt-row po-1">
+    <div class="prompt-order">1</div>
+    <div class="prompt-block">
+      <div class="prompt-label">Task Info</div>
+      <div class="prompt-hint">task.title + task.description — 任务标题与描述</div>
+    </div>
+  </div>
+  <div class="prompt-row po-2">
+    <div class="prompt-order">2</div>
+    <div class="prompt-block">
+      <div class="prompt-label">Repo Context</div>
+      <div class="prompt-hint">project.tech_stack + project.repo_tree — 技术栈和目录结构</div>
+    </div>
+  </div>
+  <div class="prompt-row po-3">
+    <div class="prompt-order">3</div>
+    <div class="prompt-block">
+      <div class="prompt-label">Project Memory</div>
+      <div class="prompt-hint">按角色过滤的跨任务记忆 (conventions / architecture / patterns / issues)</div>
+    </div>
+  </div>
+  <div class="prompt-row po-4">
+    <div class="prompt-order">4</div>
+    <div class="prompt-block">
+      <div class="prompt-label">## 前序阶段产出</div>
+      <div class="prompt-hint">compressed_outputs (L0/L1/L2) 或 raw prior_outputs — 核心上下文链</div>
+    </div>
+  </div>
+  <div class="prompt-row po-5">
+    <div class="prompt-order">5</div>
+    <div class="prompt-block">
+      <div class="prompt-label">## 重试上下文</div>
+      <div class="prompt-hint">失败原因 + 教训 + 建议 + 上次部分输出 (仅重试时注入)</div>
+    </div>
+  </div>
+  <div class="prompt-row po-6">
+    <div class="prompt-order">6</div>
+    <div class="prompt-block">
+      <div class="prompt-label">## Gate审批被拒绝</div>
+      <div class="prompt-hint">重试次数 + 审批者反馈 (仅 Gate 拒绝重试时注入)</div>
+    </div>
+  </div>
+  <div class="prompt-row po-7">
+    <div class="prompt-order">7</div>
+    <div class="prompt-block">
+      <div class="prompt-label">Stage Instruction + Custom Instruction</div>
+      <div class="prompt-hint">STAGE_INSTRUCTIONS[role] + 模板自定义指令 — 当前阶段的工作指令</div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════
+     Section 5: Resume from Failure
+     ═══════════════════════════════════════════════════════ -->
+<div class="section-title">5. 失败恢复：上下文重建</div>
+
+<div class="resume-flow">
+  <div class="resume-step completed">
+    <div class="step-status">completed</div>
+    <div class="step-name">Parse</div>
+    <div class="step-detail">从 DB 读取 output_summary<br/>重建 prior_outputs[0]<br/>重新压缩 → compression[0]</div>
+  </div>
+  <div class="resume-arrow">→</div>
+  <div class="resume-step completed">
+    <div class="step-status">completed</div>
+    <div class="step-name">Code</div>
+    <div class="step-detail">从 DB 读取 output_summary<br/>重建 prior_outputs[1]<br/>重新压缩 → compression[1]</div>
+  </div>
+  <div class="resume-arrow">→</div>
+  <div class="resume-step failed">
+    <div class="step-status">failed → re-execute</div>
+    <div class="step-name">Test</div>
+    <div class="step-detail">注入 retry_context:<br/>error_message + reflection<br/>+ 上次部分输出</div>
+  </div>
+  <div class="resume-arrow">→</div>
+  <div class="resume-step pending">
+    <div class="step-status">pending</div>
+    <div class="step-name">Review</div>
+    <div class="step-detail">等待前序完成</div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════
+     Section 6: Project Memory RBAC
+     ═══════════════════════════════════════════════════════ -->
+<div class="section-title">6. 项目记忆 — 角色访问控制</div>
+
+<div style="background:var(--card); border:1px solid var(--border); border-radius:12px; padding:20px; margin:20px 0;">
+  <table class="memory-table">
+    <thead>
+      <tr>
+        <th>角色</th>
+        <th>conventions</th>
+        <th>architecture</th>
+        <th>patterns</th>
+        <th>issues</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td style="font-weight:600; color:var(--accent-blue);">orchestrator</td>
+        <td class="check">&#10003;</td>
+        <td class="check">&#10003;</td>
+        <td class="check">&#10003;</td>
+        <td class="check">&#10003;</td>
+      </tr>
+      <tr>
+        <td style="font-weight:600; color:var(--accent-green);">coding</td>
+        <td class="check">&#10003;</td>
+        <td class="cross">&#10007;</td>
+        <td class="check">&#10003;</td>
+        <td class="check">&#10003;</td>
+      </tr>
+      <tr>
+        <td style="font-weight:600; color:var(--accent-orange);">test</td>
+        <td class="cross">&#10007;</td>
+        <td class="cross">&#10007;</td>
+        <td class="check">&#10003;</td>
+        <td class="check">&#10003;</td>
+      </tr>
+      <tr>
+        <td style="font-weight:600; color:var(--accent-purple);">review</td>
+        <td class="check">&#10003;</td>
+        <td class="check">&#10003;</td>
+        <td class="cross">&#10007;</td>
+        <td class="check">&#10003;</td>
+      </tr>
+      <tr>
+        <td style="font-weight:600; color:var(--text-dim);">spec / doc</td>
+        <td class="check">&#10003;</td>
+        <td class="check">&#10003;</td>
+        <td class="cross">&#10007;</td>
+        <td class="cross">&#10007;</td>
+      </tr>
+    </tbody>
+  </table>
+  <div style="font-size:11px; color:var(--text-muted); margin-top:12px;">
+    <strong>写入时机：</strong>任务完成后 LLM 从所有 stage 输出提取 → 各类别 &nbsp;|&nbsp;
+    失败重试反思 → issues 类别 &nbsp;|&nbsp;
+    <strong>读取：</strong>每个 stage 执行前加载最近 10 条
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════
+     Section 7: Data Flow Summary
+     ═══════════════════════════════════════════════════════ -->
+<div class="section-title">7. 数据存储与流转总览</div>
+
+<div style="background:var(--card); border:1px solid var(--border); border-radius:12px; padding:24px; margin:20px 0;">
+  <table class="memory-table">
+    <thead>
+      <tr>
+        <th>数据</th>
+        <th>写入方</th>
+        <th>读取方</th>
+        <th>存储位置</th>
+        <th>生命周期</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td style="color:var(--text);">Stage 原始输出</td>
+        <td>Executor</td>
+        <td>Engine → prior_outputs</td>
+        <td><code>task_stages.output_summary</code></td>
+        <td>任务级 (DB 持久)</td>
+      </tr>
+      <tr>
+        <td style="color:var(--text);">压缩输出 (L0/L1/L2)</td>
+        <td>Engine + Compressor</td>
+        <td>Engine → build_prior_context()</td>
+        <td>内存 (resume 时重建)</td>
+        <td>执行级 (内存)</td>
+      </tr>
+      <tr>
+        <td style="color:var(--text);">结构化产出</td>
+        <td>Executor + contracts</td>
+        <td>Engine → 条件/路由/门控</td>
+        <td><code>task_stages.output_structured</code></td>
+        <td>任务级 (DB 持久)</td>
+      </tr>
+      <tr>
+        <td style="color:var(--text);">项目记忆</td>
+        <td>memory_extractor</td>
+        <td>每个 stage 执行前</td>
+        <td><code>memory/&lt;project_id&gt;/</code></td>
+        <td>项目级 (文件持久)</td>
+      </tr>
+      <tr>
+        <td style="color:var(--text);">重试上下文</td>
+        <td>Engine</td>
+        <td>build_user_prompt()</td>
+        <td>瞬时 (DB error + LLM 反思)</td>
+        <td>单次重试</td>
+      </tr>
+      <tr>
+        <td style="color:var(--text);">Gate 反馈</td>
+        <td>Gate 审批者</td>
+        <td>_handle_gate_with_retry()</td>
+        <td><code>human_gates</code> 表</td>
+        <td>Gate 生命周期</td>
+      </tr>
+      <tr>
+        <td style="color:var(--text);">System Prompt</td>
+        <td>agents.py 创建时</td>
+        <td>AgentRunner 内部</td>
+        <td>内存 (per runner)</td>
+        <td>Runner 生命周期</td>
+      </tr>
+    </tbody>
+  </table>
+</div>
+
+<div class="footer">
+  Silicon Agent — Multi-Agent Context Preservation Architecture &nbsp;&bull;&nbsp; Generated 2026-03
+</div>
+
+</div>
+</body>
+</html>

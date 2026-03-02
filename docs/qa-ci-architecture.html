@@ -1,0 +1,1259 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Quality Assurance & CI Architecture</title>
+<style>
+  :root {
+    --bg: #0f1117;
+    --card: #1a1d27;
+    --card-hover: #1e2230;
+    --border: #2a2d3a;
+    --accent-blue: #4f8ff7;
+    --accent-purple: #a78bfa;
+    --accent-green: #34d399;
+    --accent-orange: #fb923c;
+    --accent-red: #f87171;
+    --accent-cyan: #22d3ee;
+    --accent-yellow: #facc15;
+    --accent-pink: #f472b6;
+    --text: #e2e8f0;
+    --text-dim: #94a3b8;
+    --text-muted: #64748b;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    padding: 40px 20px;
+  }
+  .container { max-width: 1440px; margin: 0 auto; }
+
+  h1 {
+    text-align: center; font-size: 28px; font-weight: 700; margin-bottom: 6px;
+    background: linear-gradient(135deg, var(--accent-green), var(--accent-cyan));
+    -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+  }
+  .subtitle { text-align: center; color: var(--text-dim); font-size: 14px; margin-bottom: 48px; }
+  .section-title {
+    font-size: 18px; font-weight: 600; margin: 52px 0 20px;
+    padding-left: 12px; border-left: 3px solid var(--accent-cyan); color: var(--text);
+  }
+  code {
+    background: rgba(255,255,255,0.06); padding: 1px 6px; border-radius: 3px;
+    font-family: 'SF Mono', Menlo, monospace; font-size: 11px;
+  }
+
+  /* ── Color Classes ── */
+  .c-blue { border-color: rgba(79,143,247,0.3); background: rgba(79,143,247,0.08); color: var(--accent-blue); }
+  .c-green { border-color: rgba(52,211,153,0.3); background: rgba(52,211,153,0.08); color: var(--accent-green); }
+  .c-purple { border-color: rgba(167,139,250,0.3); background: rgba(167,139,250,0.08); color: var(--accent-purple); }
+  .c-orange { border-color: rgba(251,146,60,0.3); background: rgba(251,146,60,0.08); color: var(--accent-orange); }
+  .c-red { border-color: rgba(248,113,113,0.3); background: rgba(248,113,113,0.08); color: var(--accent-red); }
+  .c-cyan { border-color: rgba(34,211,238,0.3); background: rgba(34,211,238,0.08); color: var(--accent-cyan); }
+  .c-yellow { border-color: rgba(250,204,21,0.3); background: rgba(250,204,21,0.08); color: var(--accent-yellow); }
+  .c-pink { border-color: rgba(244,114,182,0.3); background: rgba(244,114,182,0.08); color: var(--accent-pink); }
+  .c-dim { border-color: var(--border); background: rgba(255,255,255,0.03); color: var(--text-dim); }
+
+  .dot-blue { background: var(--accent-blue); box-shadow: 0 0 6px rgba(79,143,247,0.4); }
+  .dot-green { background: var(--accent-green); box-shadow: 0 0 6px rgba(52,211,153,0.4); }
+  .dot-purple { background: var(--accent-purple); box-shadow: 0 0 6px rgba(167,139,250,0.4); }
+  .dot-orange { background: var(--accent-orange); box-shadow: 0 0 6px rgba(251,146,60,0.4); }
+  .dot-red { background: var(--accent-red); box-shadow: 0 0 6px rgba(248,113,113,0.4); }
+  .dot-cyan { background: var(--accent-cyan); box-shadow: 0 0 6px rgba(34,211,238,0.4); }
+  .dot-yellow { background: var(--accent-yellow); box-shadow: 0 0 6px rgba(250,204,21,0.4); }
+  .dot-pink { background: var(--accent-pink); box-shadow: 0 0 6px rgba(244,114,182,0.4); }
+  .dot-dim { background: var(--text-muted); }
+
+  /* ── Pipeline Flow ── */
+  .pipeline {
+    display: flex; flex-direction: column; gap: 0; margin: 20px 0;
+    position: relative; padding-left: 30px;
+  }
+  .pipeline::before {
+    content: ''; position: absolute; left: 15px; top: 10px; bottom: 10px;
+    width: 2px; background: linear-gradient(180deg, var(--accent-green), var(--accent-cyan), var(--accent-purple), var(--accent-pink));
+  }
+  .pipe-stage {
+    display: flex; align-items: flex-start; gap: 14px;
+    padding: 10px 0; position: relative;
+  }
+  .pipe-dot {
+    width: 12px; height: 12px; border-radius: 50%;
+    flex-shrink: 0; margin-top: 4px; margin-left: -21px;
+    z-index: 1;
+  }
+  .pipe-content { flex: 1; }
+  .pipe-title { font-size: 14px; font-weight: 600; }
+  .pipe-desc { font-size: 11px; color: var(--text-muted); margin-top: 3px; line-height: 1.6; }
+
+  /* ── Overview Flow Diagram ── */
+  .flow-diagram {
+    display: flex; align-items: stretch; gap: 0; margin: 20px 0;
+    overflow-x: auto; padding-bottom: 10px;
+  }
+  .flow-node {
+    min-width: 140px; padding: 16px; border-radius: 12px;
+    border: 1px solid; text-align: center; flex-shrink: 0;
+    display: flex; flex-direction: column; justify-content: center; align-items: center; gap: 6px;
+  }
+  .flow-node .fn-icon { font-size: 24px; }
+  .flow-node .fn-label { font-size: 13px; font-weight: 600; }
+  .flow-node .fn-sub { font-size: 10px; opacity: 0.7; }
+  .flow-arrow {
+    display: flex; align-items: center; justify-content: center;
+    min-width: 40px; color: var(--text-muted); font-size: 20px; flex-shrink: 0;
+  }
+
+  /* ── Cards Grid ── */
+  .grid-2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(380px, 1fr)); gap: 16px; margin: 20px 0; }
+  .grid-3 { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; margin: 20px 0; }
+  .grid-4 { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; margin: 20px 0; }
+  .gcard {
+    background: var(--card); border: 1px solid var(--border); border-radius: 12px;
+    padding: 20px; transition: background 0.2s;
+  }
+  .gcard:hover { background: var(--card-hover); }
+  .gcard-title { font-size: 14px; font-weight: 600; margin-bottom: 10px; display: flex; align-items: center; gap: 8px; }
+  .gcard-body { font-size: 12px; color: var(--text-dim); line-height: 1.7; }
+  .gcard-body ul { padding-left: 16px; margin-top: 6px; }
+  .gcard-body li { margin-bottom: 3px; }
+
+  /* ── Loop Container ── */
+  .loop-container {
+    background: var(--card); border: 1px solid var(--border); border-radius: 14px;
+    padding: 28px; margin: 20px 0; position: relative; overflow: hidden;
+  }
+  .loop-container::before {
+    content: ''; position: absolute; top: 0; left: 0;
+    width: 100%; height: 3px;
+    background: linear-gradient(90deg, var(--accent-green), var(--accent-cyan), var(--accent-purple));
+  }
+  .loop-title {
+    font-size: 15px; font-weight: 700; margin-bottom: 20px;
+    display: flex; align-items: center; gap: 10px;
+  }
+  .loop-badge {
+    font-size: 10px; padding: 2px 8px; border-radius: 10px;
+    background: rgba(34,211,238,0.15); color: var(--accent-cyan);
+    font-weight: 600; letter-spacing: 0.5px;
+  }
+  .loop-flow {
+    display: flex; flex-direction: column; gap: 0; position: relative;
+    padding-left: 30px;
+  }
+  .loop-flow::before {
+    content: ''; position: absolute; left: 11px; top: 10px; bottom: 10px;
+    width: 2px; background: linear-gradient(180deg, var(--border), rgba(42,45,58,0.3));
+  }
+  .loop-step {
+    display: flex; align-items: flex-start; gap: 14px;
+    padding: 8px 0; position: relative;
+  }
+  .loop-dot {
+    width: 10px; height: 10px; border-radius: 50%;
+    flex-shrink: 0; margin-top: 4px; margin-left: -19px;
+    z-index: 1;
+  }
+  .loop-step-content { flex: 1; }
+  .loop-step-title { font-size: 13px; font-weight: 600; }
+  .loop-step-desc { font-size: 11px; color: var(--text-muted); margin-top: 2px; line-height: 1.5; }
+
+  /* ── Layer Stack ── */
+  .layer-stack {
+    display: flex; flex-direction: column; gap: 0; margin: 20px 0;
+    position: relative;
+  }
+  .layer-row {
+    display: flex; align-items: stretch; min-height: 64px;
+    position: relative;
+  }
+  .layer-label {
+    width: 180px; flex-shrink: 0;
+    display: flex; align-items: center; justify-content: flex-end;
+    padding-right: 20px; font-size: 12px; font-weight: 600;
+    position: relative;
+  }
+  .layer-label::after {
+    content: ''; position: absolute; right: 0; top: 0; bottom: 0;
+    width: 2px;
+  }
+  .layer-content {
+    flex: 1; padding: 12px 20px; border-bottom: 1px solid rgba(255,255,255,0.04);
+    display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  }
+  .lbox {
+    padding: 8px 14px; border-radius: 8px; font-size: 12px;
+    border: 1px solid; line-height: 1.5;
+  }
+  .lbox .lbox-title { font-weight: 600; font-size: 12px; }
+  .lbox .lbox-sub { font-size: 10px; opacity: 0.7; margin-top: 2px; }
+
+  .layer-connector {
+    width: 180px; display: flex; justify-content: flex-end; padding-right: 10px;
+    flex-shrink: 0;
+  }
+  .layer-connector .vline {
+    width: 2px; height: 20px; background: linear-gradient(180deg, var(--accent-green), var(--accent-cyan));
+    border-radius: 1px;
+  }
+
+  /* ── Table ── */
+  .qa-table {
+    width: 100%; border-collapse: collapse; margin: 20px 0;
+    font-size: 12px;
+  }
+  .qa-table th {
+    text-align: left; padding: 10px 14px; font-weight: 600;
+    background: rgba(79,143,247,0.08); border-bottom: 2px solid var(--border);
+    color: var(--accent-blue); font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px;
+  }
+  .qa-table td {
+    padding: 10px 14px; border-bottom: 1px solid var(--border);
+    color: var(--text-dim); vertical-align: top;
+  }
+  .qa-table tr:hover td { background: rgba(255,255,255,0.02); }
+
+  /* ── Tag / Badge ── */
+  .tag {
+    display: inline-block; padding: 2px 8px; border-radius: 4px;
+    font-size: 10px; font-weight: 600; letter-spacing: 0.3px;
+  }
+  .tag-green { background: rgba(52,211,153,0.15); color: var(--accent-green); }
+  .tag-blue { background: rgba(79,143,247,0.15); color: var(--accent-blue); }
+  .tag-orange { background: rgba(251,146,60,0.15); color: var(--accent-orange); }
+  .tag-red { background: rgba(248,113,113,0.15); color: var(--accent-red); }
+  .tag-purple { background: rgba(167,139,250,0.15); color: var(--accent-purple); }
+  .tag-cyan { background: rgba(34,211,238,0.15); color: var(--accent-cyan); }
+  .tag-yellow { background: rgba(250,204,21,0.15); color: var(--accent-yellow); }
+  .tag-pink { background: rgba(244,114,182,0.15); color: var(--accent-pink); }
+
+  /* ── Progress Bar ── */
+  .bar-container {
+    display: flex; align-items: center; gap: 10px;
+  }
+  .bar-track {
+    flex: 1; height: 8px; background: rgba(255,255,255,0.06); border-radius: 4px;
+    overflow: hidden;
+  }
+  .bar-fill {
+    height: 100%; border-radius: 4px; transition: width 0.3s;
+  }
+  .bar-label { font-size: 12px; font-weight: 600; min-width: 40px; text-align: right; }
+
+  /* ── ASCII Diagram ── */
+  .ascii {
+    background: var(--card); border: 1px solid var(--border); border-radius: 12px;
+    padding: 24px; margin: 20px 0; overflow-x: auto;
+    font-family: 'SF Mono', Menlo, Consolas, monospace;
+    font-size: 11px; line-height: 1.6; color: var(--text-dim);
+    white-space: pre;
+  }
+
+  /* ── Stat Row ── */
+  .stat-row {
+    display: flex; gap: 16px; margin: 20px 0; flex-wrap: wrap;
+  }
+  .stat-card {
+    flex: 1; min-width: 160px; background: var(--card); border: 1px solid var(--border);
+    border-radius: 12px; padding: 20px; text-align: center;
+  }
+  .stat-value { font-size: 28px; font-weight: 700; }
+  .stat-label { font-size: 11px; color: var(--text-muted); margin-top: 4px; }
+
+  /* ── Responsive ── */
+  @media (max-width: 768px) {
+    .flow-diagram { flex-direction: column; align-items: center; }
+    .flow-arrow { transform: rotate(90deg); min-width: auto; min-height: 30px; }
+    .layer-label { width: 120px; font-size: 10px; }
+    .grid-2, .grid-3, .grid-4 { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+<div class="container">
+
+  <h1>Quality Assurance & CI/CD Architecture</h1>
+  <p class="subtitle">silicon_agent 项目质量保障体系全景 — 从开发者本地到生产运行时的多层防线</p>
+
+  <!-- ════════════════════════════════════════════ -->
+  <!-- 1. Quality Gate 全景流 -->
+  <!-- ════════════════════════════════════════════ -->
+  <div class="section-title">1. Quality Gate 全景流</div>
+
+  <div class="flow-diagram">
+    <div class="flow-node c-green">
+      <div class="fn-icon">&#128187;</div>
+      <div class="fn-label">本地开发</div>
+      <div class="fn-sub">代码编写</div>
+    </div>
+    <div class="flow-arrow">&rarr;</div>
+    <div class="flow-node c-cyan">
+      <div class="fn-icon">&#128268;</div>
+      <div class="fn-label">Pre-commit</div>
+      <div class="fn-sub">4 hooks + ruff + smoke test</div>
+    </div>
+    <div class="flow-arrow">&rarr;</div>
+    <div class="flow-node c-blue">
+      <div class="fn-icon">&#128640;</div>
+      <div class="fn-label">Push / PR</div>
+      <div class="fn-sub">触发 CI</div>
+    </div>
+    <div class="flow-arrow">&rarr;</div>
+    <div class="flow-node c-purple">
+      <div class="fn-icon">&#9881;</div>
+      <div class="fn-label">CI Pipeline</div>
+      <div class="fn-sub">6 jobs 并行</div>
+    </div>
+    <div class="flow-arrow">&rarr;</div>
+    <div class="flow-node c-orange">
+      <div class="fn-icon">&#128274;</div>
+      <div class="fn-label">Branch Protection</div>
+      <div class="fn-sub">3 required checks</div>
+    </div>
+    <div class="flow-arrow">&rarr;</div>
+    <div class="flow-node c-green">
+      <div class="fn-icon">&#9989;</div>
+      <div class="fn-label">Merge to master</div>
+      <div class="fn-sub">合入主干</div>
+    </div>
+    <div class="flow-arrow">&rarr;</div>
+    <div class="flow-node c-pink">
+      <div class="fn-icon">&#128736;</div>
+      <div class="fn-label">E2E Smoke</div>
+      <div class="fn-sub">Docker + curl</div>
+    </div>
+    <div class="flow-arrow">&rarr;</div>
+    <div class="flow-node c-red">
+      <div class="fn-icon">&#128737;</div>
+      <div class="fn-label">运行时防线</div>
+      <div class="fn-sub">Circuit Breaker + Timeout</div>
+    </div>
+  </div>
+
+  <!-- ════════════════════════════════════════════ -->
+  <!-- 2. 统计概览 -->
+  <!-- ════════════════════════════════════════════ -->
+  <div class="section-title">2. 项目测试统计概览</div>
+
+  <div class="stat-row">
+    <div class="stat-card">
+      <div class="stat-value" style="color: var(--accent-cyan);">718+</div>
+      <div class="stat-label">测试用例</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-value" style="color: var(--accent-green);">58</div>
+      <div class="stat-label">测试文件</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-value" style="color: var(--accent-purple);">22K+</div>
+      <div class="stat-label">测试代码行数</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-value" style="color: var(--accent-orange);">81%</div>
+      <div class="stat-label">整体覆盖率</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-value" style="color: var(--accent-blue);">6</div>
+      <div class="stat-label">CI Jobs</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-value" style="color: var(--accent-pink);">3</div>
+      <div class="stat-label">Required Checks</div>
+    </div>
+  </div>
+
+  <!-- ════════════════════════════════════════════ -->
+  <!-- 3. Pre-commit Hooks -->
+  <!-- ════════════════════════════════════════════ -->
+  <div class="section-title">3. Pre-commit Hooks — 本地第一道防线</div>
+
+  <div class="loop-container">
+    <div class="loop-title">
+      <code>.pre-commit-config.yaml</code>
+      <span class="loop-badge">COMMIT GATE</span>
+    </div>
+    <div class="loop-flow">
+      <div class="loop-step">
+        <div class="loop-dot dot-green"></div>
+        <div class="loop-step-content">
+          <div class="loop-step-title" style="color: var(--accent-green);">trailing-whitespace</div>
+          <div class="loop-step-desc">自动去除行尾空白字符（<code>pre-commit/pre-commit-hooks v5.0.0</code>）</div>
+        </div>
+      </div>
+      <div class="loop-step">
+        <div class="loop-dot dot-green"></div>
+        <div class="loop-step-content">
+          <div class="loop-step-title" style="color: var(--accent-green);">end-of-file-fixer</div>
+          <div class="loop-step-desc">确保文件以换行符结尾</div>
+        </div>
+      </div>
+      <div class="loop-step">
+        <div class="loop-dot dot-cyan"></div>
+        <div class="loop-step-content">
+          <div class="loop-step-title" style="color: var(--accent-cyan);">check-yaml</div>
+          <div class="loop-step-desc">验证 YAML 文件语法正确性</div>
+        </div>
+      </div>
+      <div class="loop-step">
+        <div class="loop-dot dot-orange"></div>
+        <div class="loop-step-content">
+          <div class="loop-step-title" style="color: var(--accent-orange);">check-added-large-files</div>
+          <div class="loop-step-desc">阻止提交超过 <code>500KB</code> 的文件，防止仓库体积膨胀</div>
+        </div>
+      </div>
+      <div class="loop-step">
+        <div class="loop-dot dot-purple"></div>
+        <div class="loop-step-content">
+          <div class="loop-step-title" style="color: var(--accent-purple);">ruff --fix</div>
+          <div class="loop-step-desc">自动修复 Python 代码规范问题，作用范围：<code>^platform/</code>（<code>astral-sh/ruff-pre-commit v0.9.7</code>）</div>
+        </div>
+      </div>
+      <div class="loop-step">
+        <div class="loop-dot dot-blue"></div>
+        <div class="loop-step-content">
+          <div class="loop-step-title" style="color: var(--accent-blue);">pytest-fast (local hook)</div>
+          <div class="loop-step-desc">快速冒烟测试：运行 <code>test_tasks_api.py</code> + <code>test_schemas_common.py</code>（仅当 <code>^platform/app/</code> 文件变更时触发，<code>-x -q</code> 快速失败模式）</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ════════════════════════════════════════════ -->
+  <!-- 4. CI Pipeline 详解 -->
+  <!-- ════════════════════════════════════════════ -->
+  <div class="section-title">4. CI Pipeline — GitHub Actions 6 Jobs 架构</div>
+
+  <div class="ascii">                                    Push to master / PR to master
+                                              │
+                                              ▼
+                         ┌──────────────────────────────────────────┐
+                         │            CI Workflow (ci.yml)           │
+                         │  concurrency: ci-${{ github.ref }}       │
+                         │  cancel-in-progress: true                │
+                         └──────────────┬───────────────────────────┘
+                                        │
+                  ┌─────────────────────┼─────────────────────┐
+                  ▼                     ▼                     ▼
+      ┌───────────────────┐  ┌───────────────────┐  ┌───────────────────┐
+      │  changed-scope    │  │  pr-size-check    │  │   secret-scan     │
+      │  ─────────────    │  │  ──────────────   │  │   ───────────     │
+      │  dorny/paths-     │  │  git diff stats   │  │   TruffleHog      │
+      │  filter@v3        │  │  .py/.ts/.tsx/.js  │  │   v3.88.0         │
+      │                   │  │  /.jsx 行数统计    │  │   --only-verified │
+      │  outputs:         │  │                   │  │                   │
+      │   backend: bool   │  │  FAIL if          │  │   扫描已验证的     │
+      │   frontend: bool  │  │   diff > 1000行   │  │   密钥泄露         │
+      └────────┬──────────┘  └───────────────────┘  └───────────────────┘
+               │
+      ┌────────┴───────────────────────────┐
+      │                                    │
+      ▼ (if backend changed)               ▼ (if frontend changed)
+  ┌────────────────────┐  ┌────────────────────┐  ┌────────────────────┐
+  │  backend-lint      │  │  backend-test      │  │  frontend-check    │
+  │  ────────────      │  │  ────────────      │  │  ──────────────    │
+  │  Python 3.11       │  │  Python 3.11       │  │  Node.js 20        │
+  │  pip cache         │  │  pip cache         │  │  npm cache         │
+  │                    │  │                    │  │                    │
+  │  ruff check        │  │  pytest + coverage │  │  tsc --noEmit      │
+  │  app/ tests/       │  │  --cov-fail-       │  │  npm run build     │
+  │                    │  │   under=80         │  │  (tsc -b + vite)   │
+  │                    │  │  --reruns 2        │  │                    │
+  │  ┌──────────┐     │  │  PR coverage       │  │  TypeScript strict │
+  │  │ REQUIRED │     │  │   comment          │  │  + Vite bundling   │
+  │  └──────────┘     │  │  ┌──────────┐     │  │  ┌──────────┐     │
+  │                    │  │  │ REQUIRED │     │  │  │ REQUIRED │     │
+  └────────────────────┘  │  └──────────┘     │  │  └──────────┘     │
+                          │  Coverage HTML     │  └────────────────────┘
+                          │  artifact (30d)    │
+                          └────────────────────┘</div>
+
+  <div class="grid-2">
+    <div class="gcard">
+      <div class="gcard-title"><span class="tag tag-cyan">JOB 1</span> changed-scope</div>
+      <div class="gcard-body">
+        使用 <code>dorny/paths-filter@v3</code> 检测变更范围：
+        <ul>
+          <li><code>platform/**</code> → 输出 <code>backend: true</code></li>
+          <li><code>web/**</code> → 输出 <code>frontend: true</code></li>
+        </ul>
+        后续 lint/test/check jobs 根据此输出条件执行，<strong>避免无关代码触发全量 CI</strong>。
+      </div>
+    </div>
+    <div class="gcard">
+      <div class="gcard-title"><span class="tag tag-orange">JOB 2</span> pr-size-check</div>
+      <div class="gcard-body">
+        统计 PR 中 <code>.py/.ts/.tsx/.js/.jsx</code> 文件的增删行数（排除 <code>package-lock.json</code> 和 <code>uv.lock</code>）。
+        <ul>
+          <li>如果 diff 超过 <strong>1000 行</strong>，CI 直接失败</li>
+          <li>强制开发者拆分大型 PR，降低 review 复杂度</li>
+          <li>仅在 PR 触发时执行（push 不触发）</li>
+        </ul>
+      </div>
+    </div>
+    <div class="gcard">
+      <div class="gcard-title"><span class="tag tag-red">JOB 3</span> secret-scan</div>
+      <div class="gcard-body">
+        使用 <code>trufflesecurity/trufflehog@v3.88.0</code> 全量扫描代码库：
+        <ul>
+          <li><code>--only-verified</code>：只报告已验证可用的密钥</li>
+          <li><code>--results=verified,unknown</code>：包含未知状态的结果</li>
+          <li>防止 API Key / Token / Secret 意外提交</li>
+        </ul>
+      </div>
+    </div>
+    <div class="gcard">
+      <div class="gcard-title"><span class="tag tag-purple">JOB 4</span> backend-lint</div>
+      <div class="gcard-body">
+        Python 3.11 环境，pip 缓存基于 <code>pyproject.toml</code> hash。
+        <ul>
+          <li>安装依赖：<code>pip install .[dev]</code>（通过 SSH Agent 拉取私有 skillkit 包）</li>
+          <li>执行 <code>ruff check app/ tests/</code></li>
+          <li>规则：<code>target-version = "py311"</code>, <code>line-length = 100</code></li>
+          <li>关键规则：F811(重名函数), F401(未用导入), E731(lambda赋值)</li>
+        </ul>
+      </div>
+    </div>
+    <div class="gcard">
+      <div class="gcard-title"><span class="tag tag-green">JOB 5</span> backend-test</div>
+      <div class="gcard-body">
+        核心测试 job，覆盖率硬门槛：
+        <ul>
+          <li><code>pytest tests/ -v --tb=short</code></li>
+          <li><code>--reruns 2 --reruns-delay 1</code>：flaky 测试自动重试 2 次</li>
+          <li><code>--cov=app --cov-fail-under=80</code>：低于 80% 直接失败</li>
+          <li>输出：<code>term-missing</code> + <code>xml</code> + <code>html</code></li>
+          <li>PR 自动评论覆盖率报告 + 缺失行标注</li>
+          <li>HTML 覆盖率报告上传为 artifact（保留 30 天）</li>
+        </ul>
+      </div>
+    </div>
+    <div class="gcard">
+      <div class="gcard-title"><span class="tag tag-blue">JOB 6</span> frontend-check</div>
+      <div class="gcard-body">
+        Node.js 20 环境，npm 缓存基于 <code>package-lock.json</code> hash。
+        <ul>
+          <li><code>npm ci</code>：锁定版本安装</li>
+          <li><code>npx tsc --noEmit</code>：TypeScript strict 模式类型检查</li>
+          <li><code>npm run build</code> = <code>tsc -b && vite build</code>：完整生产构建</li>
+          <li>同时验证类型正确性 + 打包完整性</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <!-- ════════════════════════════════════════════ -->
+  <!-- 5. CI 缓存与并发策略 -->
+  <!-- ════════════════════════════════════════════ -->
+  <div class="section-title">5. CI 优化策略 — 缓存、并发与智能跳过</div>
+
+  <div class="grid-3">
+    <div class="gcard">
+      <div class="gcard-title" style="color: var(--accent-green);">&#128230; 依赖缓存</div>
+      <div class="gcard-body">
+        <strong>Backend:</strong> <code>actions/setup-python</code> 的 pip 缓存，key 基于 <code>platform/pyproject.toml</code> 内容 hash<br><br>
+        <strong>Frontend:</strong> <code>actions/setup-node</code> 的 npm 缓存，key 基于 <code>web/package-lock.json</code> 内容 hash<br><br>
+        缓存命中时节省 30-60s 安装时间
+      </div>
+    </div>
+    <div class="gcard">
+      <div class="gcard-title" style="color: var(--accent-cyan);">&#9889; 并发控制</div>
+      <div class="gcard-body">
+        <code>concurrency.group: ci-${{ github.ref }}</code><br><br>
+        <code>cancel-in-progress: true</code><br><br>
+        同一分支的新 push 会<strong>自动取消</strong>正在运行的旧 CI，避免资源浪费（适用于快速迭代的 force-push 场景）
+      </div>
+    </div>
+    <div class="gcard">
+      <div class="gcard-title" style="color: var(--accent-orange);">&#128269; 智能路径过滤</div>
+      <div class="gcard-body">
+        <code>dorny/paths-filter</code> 检测变更目录：<br><br>
+        仅 <code>web/</code> 变更 → 只跑 <code>frontend-check</code><br>
+        仅 <code>platform/</code> 变更 → 只跑 <code>backend-lint</code> + <code>backend-test</code><br>
+        两者都变更 → 全量执行<br><br>
+        <strong>典型节省：50% CI 时间</strong>
+      </div>
+    </div>
+  </div>
+
+  <!-- ════════════════════════════════════════════ -->
+  <!-- 6. 测试基础设施 -->
+  <!-- ════════════════════════════════════════════ -->
+  <div class="section-title">6. 测试基础设施 — conftest.py 深度解析</div>
+
+  <div class="loop-container">
+    <div class="loop-title">
+      <code>platform/tests/conftest.py</code>
+      <span class="loop-badge">SESSION SCOPE</span>
+    </div>
+    <div class="loop-flow">
+      <div class="loop-step">
+        <div class="loop-dot dot-cyan"></div>
+        <div class="loop-step-content">
+          <div class="loop-step-title" style="color: var(--accent-cyan);">环境变量覆写</div>
+          <div class="loop-step-desc">
+            在导入任何 app 模块前，通过 <code>os.environ</code> 设置测试环境：<br>
+            <code>WORKER_ENABLED=False</code> · <code>JWT_ENABLED=False</code> · <code>SKILLKIT_ENABLED=False</code><br>
+            <code>MEMORY_ENABLED=True</code> · <code>MEMORY_COMPRESSION_ENABLED=False</code> · <code>DEBUG=False</code>
+          </div>
+        </div>
+      </div>
+      <div class="loop-step">
+        <div class="loop-dot dot-blue"></div>
+        <div class="loop-step-content">
+          <div class="loop-step-title" style="color: var(--accent-blue);">SQLite WAL 模式数据库</div>
+          <div class="loop-step-desc">
+            使用<strong>文件级 SQLite</strong>（非内存），路径：<code>sqlite+aiosqlite:////{tempdir}/test_platform_{pid}.db</code><br>
+            启用 <strong>WAL (Write-Ahead Logging)</strong>：读写不互斥，解决并发测试死锁<br>
+            <code>busy_timeout=30000</code>（30s 写锁等待），<code>NullPool</code> 无连接复用
+          </div>
+        </div>
+      </div>
+      <div class="loop-step">
+        <div class="loop-dot dot-green"></div>
+        <div class="loop-step-content">
+          <div class="loop-step-title" style="color: var(--accent-green);">内存目录隔离</div>
+          <div class="loop-step-desc">
+            <code>_MEMORY_ROOT</code> 重定向到 <code>tempfile.mkdtemp(prefix="test_memory_")</code><br>
+            引擎测试不会写入 <code>platform/memory/</code> 生产目录
+          </div>
+        </div>
+      </div>
+      <div class="loop-step">
+        <div class="loop-dot dot-purple"></div>
+        <div class="loop-step-content">
+          <div class="loop-step-title" style="color: var(--accent-purple);">Session & Engine 猴子补丁</div>
+          <div class="loop-step-desc">
+            <code>app.db.session.engine</code> 和 <code>app.db.session.async_session_factory</code> 被替换为测试专用实例<br>
+            确保所有 app 内部代码使用测试数据库
+          </div>
+        </div>
+      </div>
+      <div class="loop-step">
+        <div class="loop-dot dot-orange"></div>
+        <div class="loop-step-content">
+          <div class="loop-step-title" style="color: var(--accent-orange);">setup_db fixture (session-scoped, autouse)</div>
+          <div class="loop-step-desc">
+            启动时：<code>init_db()</code> 创建全部表<br>
+            结束后：dispose engine + 清理 <code>*.db</code> / <code>*-wal</code> / <code>*-shm</code> + 移除临时 memory 目录
+          </div>
+        </div>
+      </div>
+      <div class="loop-step">
+        <div class="loop-dot dot-pink"></div>
+        <div class="loop-step-content">
+          <div class="loop-step-title" style="color: var(--accent-pink);">client fixture</div>
+          <div class="loop-step-desc">
+            <code>httpx.AsyncClient</code> + <code>ASGITransport</code> 直连 FastAPI app<br>
+            无需启动真实 HTTP 服务器，测试直接通过 ASGI 协议交互
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ════════════════════════════════════════════ -->
+  <!-- 7. 测试分类与覆盖率 -->
+  <!-- ════════════════════════════════════════════ -->
+  <div class="section-title">7. 测试分类与覆盖率目标</div>
+
+  <div class="grid-2">
+    <div class="gcard">
+      <div class="gcard-title" style="color: var(--accent-blue);">&#128203; 测试文件分类</div>
+      <div class="gcard-body">
+        <strong>API 端对端测试 (httpx.AsyncClient)</strong>
+        <ul>
+          <li>test_tasks_api, test_agents_api, test_gates_api ...</li>
+          <li>通过 client fixture 模拟 HTTP 请求，验证完整路由链路</li>
+        </ul>
+        <strong>服务单元测试 (AsyncMock session)</strong>
+        <ul>
+          <li>test_task_service(63), test_project_service(34), test_kpi_service(29) ...</li>
+          <li>直接构造 Service 实例，mock 数据库调用</li>
+        </ul>
+        <strong>引擎/Worker 测试 (monkeypatch + SimpleNamespace)</strong>
+        <ul>
+          <li>test_engine_stage_execution(61), test_engine_gates(32), test_engine_helpers(30) ...</li>
+          <li>模块级 patch + 轻量级 fake 对象</li>
+        </ul>
+      </div>
+    </div>
+    <div class="gcard">
+      <div class="gcard-title" style="color: var(--accent-green);">&#128200; 覆盖率目标</div>
+      <div class="gcard-body">
+        <div style="margin-bottom: 12px;">
+          <div style="display: flex; justify-content: space-between; margin-bottom: 4px;">
+            <span>整体 <code>app/</code></span>
+            <span style="color: var(--accent-green); font-weight: 600;">81% (CI 阈值: 80%)</span>
+          </div>
+          <div class="bar-container">
+            <div class="bar-track"><div class="bar-fill" style="width: 81%; background: linear-gradient(90deg, var(--accent-green), var(--accent-cyan));"></div></div>
+          </div>
+        </div>
+        <div style="margin-bottom: 12px;">
+          <div style="display: flex; justify-content: space-between; margin-bottom: 4px;">
+            <span><code>worker/engine.py</code></span>
+            <span style="color: var(--accent-cyan); font-weight: 600;">95% (目标: 95%)</span>
+          </div>
+          <div class="bar-container">
+            <div class="bar-track"><div class="bar-fill" style="width: 95%; background: linear-gradient(90deg, var(--accent-cyan), var(--accent-purple));"></div></div>
+          </div>
+        </div>
+        <div style="margin-bottom: 12px;">
+          <div style="display: flex; justify-content: space-between; margin-bottom: 4px;">
+            <span>核心服务 (kpi, gate, task...)</span>
+            <span style="color: var(--accent-purple); font-weight: 600;">100%</span>
+          </div>
+          <div class="bar-container">
+            <div class="bar-track"><div class="bar-fill" style="width: 100%; background: linear-gradient(90deg, var(--accent-purple), var(--accent-pink));"></div></div>
+          </div>
+        </div>
+        <div style="margin-top: 14px; padding: 10px; border-radius: 8px; background: rgba(248,113,113,0.08); border: 1px solid rgba(248,113,113,0.2);">
+          <strong style="color: var(--accent-red);">CI 硬门槛:</strong> <code>--cov-fail-under=80</code><br>
+          <span style="font-size: 11px;">低于 80% 的 PR 无法通过 backend-test job</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="section-title" style="margin-top: 30px;">PR 覆盖率报告机制</div>
+  <div class="loop-container">
+    <div class="loop-title">
+      <code>py-cov-action/python-coverage-comment-action@v3</code>
+      <span class="loop-badge">PR COMMENT</span>
+    </div>
+    <div class="loop-flow">
+      <div class="loop-step">
+        <div class="loop-dot dot-blue"></div>
+        <div class="loop-step-content">
+          <div class="loop-step-title" style="color: var(--accent-blue);">pytest 生成 coverage.xml</div>
+          <div class="loop-step-desc"><code>--cov-report=xml</code> 输出标准 Cobertura 格式</div>
+        </div>
+      </div>
+      <div class="loop-step">
+        <div class="loop-dot dot-green"></div>
+        <div class="loop-step-content">
+          <div class="loop-step-title" style="color: var(--accent-green);">Action 解析 + 发评论</div>
+          <div class="loop-step-desc">
+            阈值色彩：<span class="tag tag-green">&ge;80% GREEN</span> <span class="tag tag-orange">&ge;60% ORANGE</span> <span class="tag tag-red">&lt;60% RED</span><br>
+            逐文件展示覆盖率和缺失行号
+          </div>
+        </div>
+      </div>
+      <div class="loop-step">
+        <div class="loop-dot dot-purple"></div>
+        <div class="loop-step-content">
+          <div class="loop-step-title" style="color: var(--accent-purple);">缺失行内联标注</div>
+          <div class="loop-step-desc"><code>ANNOTATE_MISSING_LINES: true</code> + <code>ANNOTATION_TYPE: warning</code>，在 PR diff 中直接标注未覆盖的代码行</div>
+        </div>
+      </div>
+      <div class="loop-step">
+        <div class="loop-dot dot-orange"></div>
+        <div class="loop-step-content">
+          <div class="loop-step-title" style="color: var(--accent-orange);">Artifact 存档</div>
+          <div class="loop-step-desc"><code>htmlcov/</code> + <code>coverage.xml</code> 上传为 GitHub Actions artifact，保留 <strong>30 天</strong></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ════════════════════════════════════════════ -->
+  <!-- 8. 代码质量规则 -->
+  <!-- ════════════════════════════════════════════ -->
+  <div class="section-title">8. 代码质量规则 — Ruff & TypeScript</div>
+
+  <div class="grid-2">
+    <div class="gcard">
+      <div class="gcard-title"><span class="tag tag-purple">BACKEND</span> Ruff 规则</div>
+      <div class="gcard-body">
+        <table class="qa-table">
+          <tr><th>配置项</th><th>值</th></tr>
+          <tr><td><code>target-version</code></td><td>py311</td></tr>
+          <tr><td><code>line-length</code></td><td>100</td></tr>
+          <tr><td>F401</td><td>未使用的 import</td></tr>
+          <tr><td>F811</td><td>同名函数覆盖（测试中极易踩坑）</td></tr>
+          <tr><td>E731</td><td>禁止 <code>f = lambda x: x</code> 赋值</td></tr>
+          <tr><td>Pre-commit</td><td><code>--fix</code> 自动修复</td></tr>
+          <tr><td>CI</td><td>仅检查不自动修复</td></tr>
+        </table>
+      </div>
+    </div>
+    <div class="gcard">
+      <div class="gcard-title"><span class="tag tag-blue">FRONTEND</span> TypeScript Strict</div>
+      <div class="gcard-body">
+        <table class="qa-table">
+          <tr><th>配置项</th><th>效果</th></tr>
+          <tr><td><code>strict: true</code></td><td>启用全部严格类型检查</td></tr>
+          <tr><td><code>strictNullChecks</code></td><td>禁止隐式 null/undefined</td></tr>
+          <tr><td><code>noImplicitAny</code></td><td>所有类型必须显式或可推断</td></tr>
+          <tr><td><code>strictFunctionTypes</code></td><td>函数参数逆变检查</td></tr>
+          <tr><td><code>noFallthroughCasesInSwitch</code></td><td>switch 必须 break/return</td></tr>
+          <tr><td><code>isolatedModules</code></td><td>确保每个文件可独立编译</td></tr>
+          <tr><td><code>target</code></td><td>ES2020 + DOM</td></tr>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- ════════════════════════════════════════════ -->
+  <!-- 9. E2E 冒烟测试 -->
+  <!-- ════════════════════════════════════════════ -->
+  <div class="section-title">9. E2E Smoke Test — Docker Compose 全栈验证</div>
+
+  <div class="loop-container">
+    <div class="loop-title">
+      <code>.github/workflows/e2e.yml</code>
+      <span class="loop-badge">POST-MERGE</span>
+      <span class="loop-badge" style="background: rgba(248,113,113,0.15); color: var(--accent-red);">TIMEOUT 10min</span>
+    </div>
+    <div class="loop-flow">
+      <div class="loop-step">
+        <div class="loop-dot dot-blue"></div>
+        <div class="loop-step-content">
+          <div class="loop-step-title" style="color: var(--accent-blue);">Docker Compose Build</div>
+          <div class="loop-step-desc"><code>DOCKER_BUILDKIT=1 docker compose build --ssh default</code>（SSH 用于拉取私有依赖）</div>
+        </div>
+      </div>
+      <div class="loop-step">
+        <div class="loop-dot dot-green"></div>
+        <div class="loop-step-content">
+          <div class="loop-step-title" style="color: var(--accent-green);">启动服务栈</div>
+          <div class="loop-step-desc">
+            <code>docker compose up -d --wait</code><br>
+            3 个服务：<span class="tag tag-blue">app (FastAPI)</span> <span class="tag tag-green">PostgreSQL 16</span> <span class="tag tag-orange">Redis 7</span>
+          </div>
+        </div>
+      </div>
+      <div class="loop-step">
+        <div class="loop-dot dot-cyan"></div>
+        <div class="loop-step-content">
+          <div class="loop-step-title" style="color: var(--accent-cyan);">Health Check 轮询</div>
+          <div class="loop-step-desc">每 2s 检查 <code>/health</code>，最多重试 30 次（60s 超时）。PostgreSQL/Redis 各有独立 healthcheck（<code>pg_isready</code> / <code>redis-cli ping</code>）</div>
+        </div>
+      </div>
+      <div class="loop-step">
+        <div class="loop-dot dot-purple"></div>
+        <div class="loop-step-content">
+          <div class="loop-step-title" style="color: var(--accent-purple);">5 个端点冒烟测试</div>
+          <div class="loop-step-desc">
+            <code>curl -sf /health</code> · <code>/api/v1/agents</code> · <code>/api/v1/templates</code> · <code>/api/v1/tasks</code> · <code>/api/v1/projects</code><br>
+            全部期望 HTTP 200，结果写入 <code>$GITHUB_STEP_SUMMARY</code>
+          </div>
+        </div>
+      </div>
+      <div class="loop-step">
+        <div class="loop-dot dot-red"></div>
+        <div class="loop-step-content">
+          <div class="loop-step-title" style="color: var(--accent-red);">失败处理</div>
+          <div class="loop-step-desc">
+            失败时：dump 最近 100 行容器日志用于排查<br>
+            始终执行：<code>docker compose down -v</code> 清理容器和 volume
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ════════════════════════════════════════════ -->
+  <!-- 10. Docker 多层镜像 -->
+  <!-- ════════════════════════════════════════════ -->
+  <div class="section-title">10. Docker 镜像分层体系 — 从 Base 到 Sandbox</div>
+
+  <div class="layer-stack">
+    <div class="layer-row">
+      <div class="layer-label" style="color: var(--accent-red);">Production<br>App</div>
+      <div class="layer-content">
+        <div class="lbox c-red">
+          <div class="lbox-title">Dockerfile</div>
+          <div class="lbox-sub">python:3.11-slim + app/ + uvicorn</div>
+        </div>
+        <div class="lbox c-dim">
+          <div class="lbox-title">服务：FastAPI + PostgreSQL + Redis</div>
+          <div class="lbox-sub">docker-compose.yml 编排</div>
+        </div>
+      </div>
+    </div>
+    <div class="layer-row">
+      <div class="layer-label" style="color: var(--accent-blue);">Sandbox<br>Base</div>
+      <div class="layer-content">
+        <div class="lbox c-blue">
+          <div class="lbox-title">Dockerfile.base</div>
+          <div class="lbox-sub">python:3.11-slim + git + curl + agent_server.py</div>
+        </div>
+        <div class="lbox c-dim">
+          <div class="lbox-title">非 root 用户: agent (UID 1000)</div>
+          <div class="lbox-sub">tool_policy.py + skills/</div>
+        </div>
+      </div>
+    </div>
+    <div class="layer-row">
+      <div class="layer-label" style="color: var(--accent-orange);">Sandbox<br>Coding</div>
+      <div class="layer-content">
+        <div class="lbox c-orange">
+          <div class="lbox-title">Dockerfile.coding (extends base)</div>
+          <div class="lbox-sub">+ build-essential + nodejs + npm</div>
+        </div>
+        <div class="lbox c-dim">
+          <div class="lbox-title">Python: pytest, ruff, black, mypy, httpx ...</div>
+          <div class="lbox-sub">Node.js: typescript, prettier, eslint</div>
+        </div>
+      </div>
+    </div>
+    <div class="layer-row">
+      <div class="layer-label" style="color: var(--accent-purple);">Sandbox<br>Test</div>
+      <div class="layer-content">
+        <div class="lbox c-purple">
+          <div class="lbox-title">Dockerfile.test (extends coding)</div>
+          <div class="lbox-sub">+ Playwright (Chromium) + Selenium</div>
+        </div>
+        <div class="lbox c-dim">
+          <div class="lbox-title">pytest-asyncio, pytest-cov, coverage</div>
+          <div class="lbox-sub">requests-mock, responses</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ════════════════════════════════════════════ -->
+  <!-- 11. 自动迁移系统 -->
+  <!-- ════════════════════════════════════════════ -->
+  <div class="section-title">11. 自动迁移系统 — 零 Alembic 的 Schema 演进</div>
+
+  <div class="loop-container">
+    <div class="loop-title">
+      <code>platform/app/db/init_db.py → _add_missing_columns()</code>
+      <span class="loop-badge">STARTUP</span>
+    </div>
+    <div class="loop-flow">
+      <div class="loop-step">
+        <div class="loop-dot dot-cyan"></div>
+        <div class="loop-step-content">
+          <div class="loop-step-title" style="color: var(--accent-cyan);">1. 创建新表</div>
+          <div class="loop-step-desc"><code>Base.metadata.create_all(connection)</code> — 检测 metadata 中定义但 DB 中不存在的表，自动 CREATE TABLE</div>
+        </div>
+      </div>
+      <div class="loop-step">
+        <div class="loop-dot dot-blue"></div>
+        <div class="loop-step-content">
+          <div class="loop-step-title" style="color: var(--accent-blue);">2. 遍历所有注册 Model</div>
+          <div class="loop-step-desc">遍历 <code>Base.metadata.tables</code>，对每张表使用 <code>inspect(connection)</code> 获取现有列名集合</div>
+        </div>
+      </div>
+      <div class="loop-step">
+        <div class="loop-dot dot-green"></div>
+        <div class="loop-step-content">
+          <div class="loop-step-title" style="color: var(--accent-green);">3. 差异检测</div>
+          <div class="loop-step-desc">对比 Model 列定义 vs DB 实际列，找出<strong>缺失列</strong></div>
+        </div>
+      </div>
+      <div class="loop-step">
+        <div class="loop-dot dot-orange"></div>
+        <div class="loop-step-content">
+          <div class="loop-step-title" style="color: var(--accent-orange);">4. ALTER TABLE ADD COLUMN</div>
+          <div class="loop-step-desc">
+            编译列类型 → 构造 DDL → 执行<br>
+            优先使用 <code>server_default</code>（SQL 字面量），其次 <code>default</code>（Python 值）
+          </div>
+        </div>
+      </div>
+      <div class="loop-step">
+        <div class="loop-dot dot-purple"></div>
+        <div class="loop-step-content">
+          <div class="loop-step-title" style="color: var(--accent-purple);">5. Backfill 回填</div>
+          <div class="loop-step-desc">
+            <code>UPDATE {table} SET {col} = :val WHERE {col} IS NULL</code><br>
+            仅对 Python-level scalar default 执行，确保存量数据也有正确的默认值
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div style="padding: 16px; border-radius: 10px; background: rgba(250,204,21,0.06); border: 1px solid rgba(250,204,21,0.2); margin-top: 16px;">
+    <strong style="color: var(--accent-yellow);">注册模型列表 (12):</strong>
+    <div style="margin-top: 8px; font-size: 12px; color: var(--text-dim); display: flex; flex-wrap: wrap; gap: 8px;">
+      <span class="tag tag-blue">agent</span>
+      <span class="tag tag-green">task</span>
+      <span class="tag tag-purple">skill</span>
+      <span class="tag tag-orange">gate</span>
+      <span class="tag tag-cyan">kpi</span>
+      <span class="tag tag-red">audit</span>
+      <span class="tag tag-yellow">template</span>
+      <span class="tag tag-pink">project</span>
+      <span class="tag tag-blue">task_log</span>
+      <span class="tag tag-green">skill_feedback</span>
+      <span class="tag tag-purple">trigger</span>
+      <span class="tag tag-orange">integration</span>
+    </div>
+  </div>
+
+  <!-- ════════════════════════════════════════════ -->
+  <!-- 12. 运行时安全防线 -->
+  <!-- ════════════════════════════════════════════ -->
+  <div class="section-title">12. 运行时安全防线 — Circuit Breaker & 多级保护</div>
+
+  <div class="grid-2">
+    <div class="gcard">
+      <div class="gcard-title" style="color: var(--accent-red);">&#128737; Circuit Breaker (熔断器)</div>
+      <div class="gcard-body">
+        <strong>触发条件（任一满足即熔断）：</strong>
+        <ul>
+          <li>单任务 Token 消耗 &gt; <code>200,000</code> tokens</li>
+          <li>单任务成本 &gt; <code>&yen;50</code> RMB</li>
+        </ul>
+        <strong>执行流程：</strong>
+        <ul>
+          <li>每个 stage 执行完毕后调用 <code>_check_circuit_breaker()</code></li>
+          <li>记录 <code>CircuitBreakerModel</code>（level, status, triggered_by）</li>
+          <li>WebSocket 广播 <code>CB_TRIGGERED</code> 事件到前端</li>
+          <li>释放 Agent 资源：<code>close_agents_for_task()</code></li>
+          <li>标记任务失败：<code>_fail_task()</code></li>
+        </ul>
+        <strong>检查点（4 处）：</strong>
+        <ul>
+          <li>resume path (L1086)</li>
+          <li>sequential stage (L1152)</li>
+          <li>parallel stage group (L1240)</li>
+          <li>graph-based stage (L1344)</li>
+        </ul>
+      </div>
+    </div>
+    <div class="gcard">
+      <div class="gcard-title" style="color: var(--accent-orange);">&#9201; Timeout 多级超时</div>
+      <div class="gcard-body">
+        <strong>任务级超时：</strong>
+        <ul>
+          <li><code>WORKER_TASK_TIMEOUT = 1800s</code> (30分钟)</li>
+          <li><code>asyncio.wait_for(_process_task(), timeout)</code></li>
+          <li>超时则 fail task + close agents</li>
+        </ul>
+        <strong>Stage 级超时：</strong>
+        <ul>
+          <li><code>WORKER_STAGE_TIMEOUT = 300s</code> (默认)</li>
+          <li>模板中可为每个 stage 单独配置 <code>timeout</code></li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <div class="grid-3" style="margin-top: 0;">
+    <div class="gcard">
+      <div class="gcard-title" style="color: var(--accent-purple);">&#128270; 故障分类引擎</div>
+      <div class="gcard-body">
+        <code>worker/failure.py</code> 基于正则匹配：
+        <ul>
+          <li><span class="tag tag-cyan">TRANSIENT</span> 超时/网络 → 自动重试</li>
+          <li><span class="tag tag-orange">TOOL_ERROR</span> 无效 JSON → 文本模式重试</li>
+          <li><span class="tag tag-red">RESOURCE</span> 熔断/配额 → 终止</li>
+          <li><span class="tag tag-purple">SEMANTIC</span> 逻辑错误 → 重试+上下文</li>
+          <li><span class="tag tag-yellow">GATE_REJECTED</span> 人工拒绝 → 终止</li>
+        </ul>
+      </div>
+    </div>
+    <div class="gcard">
+      <div class="gcard-title" style="color: var(--accent-blue);">&#128272; 中间件防护栈</div>
+      <div class="gcard-body">
+        <ul>
+          <li><strong>RequestLoggingMiddleware</strong><br>记录 method, path, status, duration + 关联 ID</li>
+          <li><strong>ErrorHandlerMiddleware</strong><br>捕获未处理异常 → 500 + 脱敏消息（非 DEBUG 模式）</li>
+          <li><strong>JWTAuthMiddleware</strong><br>JWT 认证（<code>JWT_ENABLED=True</code> 时）<br>豁免路径: /health, /docs, /ws ...</li>
+        </ul>
+      </div>
+    </div>
+    <div class="gcard">
+      <div class="gcard-title" style="color: var(--accent-green);">&#128274; 原子任务获取</div>
+      <div class="gcard-body">
+        防止多 Worker 竞争同一任务：
+        <ul>
+          <li>步骤1: <code>SELECT</code> 查找 pending 任务</li>
+          <li>步骤2: <code>UPDATE WHERE status='pending'</code> 原子声明</li>
+          <li>两步法确保只有一个 Worker 能成功 claim</li>
+          <li>状态流转: <code>pending → claimed → running</code></li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <!-- ════════════════════════════════════════════ -->
+  <!-- 13. Flaky 测试处理 -->
+  <!-- ════════════════════════════════════════════ -->
+  <div class="section-title">13. Flaky 测试处理与已知问题</div>
+
+  <div class="grid-2">
+    <div class="gcard">
+      <div class="gcard-title" style="color: var(--accent-yellow);">&#128260; CI Flaky 重试</div>
+      <div class="gcard-body">
+        <code>pytest-rerunfailures</code> 在 CI 中启用：
+        <ul>
+          <li><code>--reruns 2</code>：失败用例最多重试 2 次</li>
+          <li><code>--reruns-delay 1</code>：重试间隔 1 秒</li>
+          <li>仅在 CI 环境启用，本地不重试</li>
+          <li>典型场景：SQLite 并发写冲突、异步时序问题</li>
+        </ul>
+      </div>
+    </div>
+    <div class="gcard">
+      <div class="gcard-title" style="color: var(--accent-red);">&#9888; 已知 Python 3.13 覆盖率 Bug</div>
+      <div class="gcard-body">
+        <code>coverage.py 7.x</code> + Python 3.13 的 <code>sys.monitoring</code>：
+        <ul>
+          <li>协程 await 恢复后丢失 trace 上下文</li>
+          <li>表现：await 后的代码行不被追踪（但实际执行）</li>
+          <li><strong>解决方案</strong>：服务单元测试使用 <code>AsyncMock</code> session（同步完成 await）</li>
+          <li>CI 使用 Python 3.11 不受影响</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <!-- ════════════════════════════════════════════ -->
+  <!-- 14. 测试关键 Gotchas -->
+  <!-- ════════════════════════════════════════════ -->
+  <div class="section-title">14. 测试编写关键 Gotchas</div>
+
+  <table class="qa-table">
+    <thead>
+      <tr>
+        <th style="width: 200px;">问题</th>
+        <th style="width: 240px;">错误做法</th>
+        <th>正确做法</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td style="color: var(--accent-red);"><code>sys.modules</code> mock</td>
+        <td><code>sys.modules["x"] = fake</code> + <code>pop()</code> in finally</td>
+        <td><code>monkeypatch.setitem(sys.modules, "x", fake)</code> — pytest 自动恢复</td>
+      </tr>
+      <tr>
+        <td style="color: var(--accent-orange);">重名测试函数 (F811)</td>
+        <td>同文件两个 <code>def test_foo()</code></td>
+        <td>每个测试函数名唯一，第二个会 shadow 第一个（静默跳过）</td>
+      </tr>
+      <tr>
+        <td style="color: var(--accent-yellow);">Lambda 赋值 (E731)</td>
+        <td><code>f = lambda x: x</code></td>
+        <td><code>def f(x): return x</code></td>
+      </tr>
+      <tr>
+        <td style="color: var(--accent-purple);">session.refresh</td>
+        <td>Mock 只允许一次调用</td>
+        <td>Gate 创建调 1 次 + 轮询循环再调，mock 需允许多次</td>
+      </tr>
+      <tr>
+        <td style="color: var(--accent-blue);">_sort_stages 返回 []</td>
+        <td>不提供 stage 对象</td>
+        <td>至少提供 1 个 dummy stage，否则 _process_task 直接 early-exit</td>
+      </tr>
+      <tr>
+        <td style="color: var(--accent-cyan);">Coverage 异步丢失</td>
+        <td>真实 DB session 的 await</td>
+        <td>单元测试用 AsyncMock session 使 await 同步完成</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <!-- ════════════════════════════════════════════ -->
+  <!-- 15. 完整数据流 ASCII 图 -->
+  <!-- ════════════════════════════════════════════ -->
+  <div class="section-title">15. 完整质量保障数据流</div>
+
+  <div class="ascii">
+  ┌─────────────────────────────────────────────────────────────────────────────────────┐
+  │                           DEVELOPER LOCAL ENVIRONMENT                               │
+  │                                                                                     │
+  │  ┌──────────────┐     ┌──────────────────────────────────────────────────┐          │
+  │  │  Code Editor  │────▶│              pre-commit hooks                   │          │
+  │  │  (Write Code) │     │                                                 │          │
+  │  └──────────────┘     │  ┌───────────┐ ┌───────────┐ ┌──────────────┐  │          │
+  │                        │  │ whitespace│ │ yaml check│ │ large-file   │  │          │
+  │                        │  │ + EOF fix │ │           │ │ check 500KB  │  │          │
+  │                        │  └───────────┘ └───────────┘ └──────────────┘  │          │
+  │                        │  ┌───────────────┐  ┌───────────────────────┐  │          │
+  │                        │  │ ruff --fix    │  │ pytest-fast (smoke)   │  │          │
+  │                        │  │ (platform/)   │  │ 2 critical test files │  │          │
+  │                        │  └───────────────┘  └───────────────────────┘  │          │
+  │                        └──────────────────────────────────────────────────┘          │
+  │                                          │ ✅ PASS                                  │
+  │                                          ▼                                          │
+  │                                    git commit                                       │
+  └─────────────────────────────────────────┬───────────────────────────────────────────┘
+                                            │ git push
+                                            ▼
+  ┌─────────────────────────────────────────────────────────────────────────────────────┐
+  │                          GITHUB ACTIONS CI (ci.yml)                                 │
+  │                     concurrency: cancel-in-progress: true                           │
+  │                                                                                     │
+  │  ┌───────────────┐   ┌────────────────┐   ┌────────────────┐                       │
+  │  │ changed-scope │   │ pr-size-check  │   │  secret-scan   │      Always Run       │
+  │  │ paths-filter  │   │ diff > 1000? ✘ │   │  TruffleHog    │                       │
+  │  └───────┬───────┘   └────────────────┘   └────────────────┘                       │
+  │           │                                                                         │
+  │     ┌─────┴──────────────────────┐                                                  │
+  │     │ backend?       frontend?   │                                                  │
+  │     ▼                ▼           │                                                  │
+  │  ┌──────────┐  ┌──────────┐  ┌──────────────┐                                     │
+  │  │ backend  │  │ backend  │  │ frontend     │        ┌──────────────────────┐       │
+  │  │ -lint    │  │ -test    │  │ -check       │        │  Branch Protection   │       │
+  │  │          │  │          │  │              │        │  ──────────────────  │       │
+  │  │ ruff     │  │ 718 tests│  │ tsc --noEmit │───────▶│  3 REQUIRED CHECKS  │       │
+  │  │ check    │  │ cov ≥80% │  │ vite build   │        │  ✅ backend-lint     │       │
+  │  │          │  │ reruns 2 │  │              │        │  ✅ backend-test     │       │
+  │  │ REQUIRED │  │ REQUIRED │  │ REQUIRED     │        │  ✅ frontend-check   │       │
+  │  └──────────┘  └────┬─────┘  └──────────────┘        └──────────┬───────────┘       │
+  │                      │                                           │                   │
+  │                      ▼                                           │                   │
+  │             ┌─────────────────┐                                  │                   │
+  │             │ Coverage Report │                                  │                   │
+  │             │ PR Comment +    │                                  │                   │
+  │             │ Line Annotation │                                  │                   │
+  │             │ Artifact (30d)  │                                  │                   │
+  │             └─────────────────┘                                  │                   │
+  └──────────────────────────────────────────────────────────────────┼───────────────────┘
+                                                                     │ ✅ ALL PASS
+                                                                     ▼
+  ┌─────────────────────────────────────────────────────────────────────────────────────┐
+  │                              MERGE TO MASTER                                        │
+  │                                                                                     │
+  │  Triggers: E2E Smoke Test (e2e.yml)                                                │
+  │  ┌─────────────────────────────────────────────────────┐                           │
+  │  │  Docker Compose: app + PostgreSQL 16 + Redis 7      │                           │
+  │  │  Health check polling (30 retries × 2s = 60s max)   │                           │
+  │  │  5 curl smoke tests: /health, /agents, /templates,  │                           │
+  │  │    /tasks, /projects → all expect HTTP 200           │                           │
+  │  │  Failure: dump 100 lines container logs              │                           │
+  │  │  Always: docker compose down -v                      │                           │
+  │  └─────────────────────────────────────────────────────┘                           │
+  └─────────────────────────────────────────────────────────────────────────────────────┘
+                                            │
+                                            ▼
+  ┌─────────────────────────────────────────────────────────────────────────────────────┐
+  │                          RUNTIME SAFETY (Production)                                │
+  │                                                                                     │
+  │  ┌──────────────────┐  ┌──────────────────┐  ┌──────────────────────────┐          │
+  │  │ Circuit Breaker  │  │ Multi-level      │  │ Failure Classification   │          │
+  │  │ ──────────────── │  │ Timeout          │  │ ──────────────────────── │          │
+  │  │ 200K tokens/task │  │ ──────────────── │  │ TRANSIENT → auto retry  │          │
+  │  │ ¥50 RMB/task     │  │ Task: 1800s     │  │ TOOL_ERROR → text mode  │          │
+  │  │ 4 check points   │  │ Stage: 300s     │  │ RESOURCE → terminate    │          │
+  │  │ WS: CB_TRIGGERED │  │ Configurable    │  │ SEMANTIC → retry+ctx    │          │
+  │  └──────────────────┘  └──────────────────┘  └──────────────────────────┘          │
+  │                                                                                     │
+  │  ┌──────────────────┐  ┌──────────────────┐  ┌──────────────────────────┐          │
+  │  │ Middleware Stack  │  │ Atomic Task      │  │ Auto-Migration          │          │
+  │  │ ──────────────── │  │ Claiming         │  │ ──────────────────────── │          │
+  │  │ JWT Auth         │  │ ──────────────── │  │ _add_missing_columns()  │          │
+  │  │ Error Handler    │  │ SELECT → UPDATE  │  │ ALTER TABLE + backfill  │          │
+  │  │ Request Logger   │  │ WHERE pending    │  │ On every startup        │          │
+  │  └──────────────────┘  └──────────────────┘  └──────────────────────────┘          │
+  └─────────────────────────────────────────────────────────────────────────────────────┘</div>
+
+  <div style="text-align: center; padding: 30px 0 10px; color: var(--text-muted); font-size: 11px;">
+    silicon_agent QA & CI Architecture Visualization &mdash; Generated 2026-03-03
+  </div>
+
+</div>
+</body>
+</html>

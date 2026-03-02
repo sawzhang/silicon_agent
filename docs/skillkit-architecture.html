@@ -1,0 +1,1083 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SkillKit Agent Architecture</title>
+<style>
+  :root {
+    --bg: #0f1117;
+    --card: #1a1d27;
+    --card-hover: #1e2230;
+    --border: #2a2d3a;
+    --accent-blue: #4f8ff7;
+    --accent-purple: #a78bfa;
+    --accent-green: #34d399;
+    --accent-orange: #fb923c;
+    --accent-red: #f87171;
+    --accent-cyan: #22d3ee;
+    --accent-yellow: #facc15;
+    --accent-pink: #f472b6;
+    --text: #e2e8f0;
+    --text-dim: #94a3b8;
+    --text-muted: #64748b;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    padding: 40px 20px;
+  }
+  .container { max-width: 1440px; margin: 0 auto; }
+
+  h1 {
+    text-align: center; font-size: 28px; font-weight: 700; margin-bottom: 6px;
+    background: linear-gradient(135deg, var(--accent-cyan), var(--accent-purple));
+    -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+  }
+  .subtitle { text-align: center; color: var(--text-dim); font-size: 14px; margin-bottom: 48px; }
+  .section-title {
+    font-size: 18px; font-weight: 600; margin: 52px 0 20px;
+    padding-left: 12px; border-left: 3px solid var(--accent-cyan); color: var(--text);
+  }
+  code {
+    background: rgba(255,255,255,0.06); padding: 1px 6px; border-radius: 3px;
+    font-family: 'SF Mono', Menlo, monospace; font-size: 11px;
+  }
+
+  /* ── Layer Stack ── */
+  .layer-stack {
+    display: flex; flex-direction: column; gap: 0; margin: 20px 0;
+    position: relative;
+  }
+  .layer-row {
+    display: flex; align-items: stretch; min-height: 72px;
+    position: relative;
+  }
+  .layer-label {
+    width: 200px; flex-shrink: 0;
+    display: flex; align-items: center; justify-content: flex-end;
+    padding-right: 20px; font-size: 12px; font-weight: 600;
+    position: relative;
+  }
+  .layer-label::after {
+    content: ''; position: absolute; right: 0; top: 0; bottom: 0;
+    width: 2px;
+  }
+  .layer-content {
+    flex: 1; padding: 12px 20px; border-bottom: 1px solid rgba(255,255,255,0.04);
+    display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  }
+  .lbox {
+    padding: 8px 14px; border-radius: 8px; font-size: 12px;
+    border: 1px solid; line-height: 1.5;
+  }
+  .lbox .lbox-title { font-weight: 600; font-size: 12px; }
+  .lbox .lbox-sub { font-size: 10px; opacity: 0.7; margin-top: 2px; }
+
+  .c-blue { border-color: rgba(79,143,247,0.3); background: rgba(79,143,247,0.08); color: var(--accent-blue); }
+  .c-green { border-color: rgba(52,211,153,0.3); background: rgba(52,211,153,0.08); color: var(--accent-green); }
+  .c-purple { border-color: rgba(167,139,250,0.3); background: rgba(167,139,250,0.08); color: var(--accent-purple); }
+  .c-orange { border-color: rgba(251,146,60,0.3); background: rgba(251,146,60,0.08); color: var(--accent-orange); }
+  .c-red { border-color: rgba(248,113,113,0.3); background: rgba(248,113,113,0.08); color: var(--accent-red); }
+  .c-cyan { border-color: rgba(34,211,238,0.3); background: rgba(34,211,238,0.08); color: var(--accent-cyan); }
+  .c-yellow { border-color: rgba(250,204,21,0.3); background: rgba(250,204,21,0.08); color: var(--accent-yellow); }
+  .c-pink { border-color: rgba(244,114,182,0.3); background: rgba(244,114,182,0.08); color: var(--accent-pink); }
+  .c-dim { border-color: var(--border); background: rgba(255,255,255,0.03); color: var(--text-dim); }
+
+  .layer-connector {
+    width: 200px; display: flex; justify-content: flex-end; padding-right: 10px;
+    flex-shrink: 0;
+  }
+  .layer-connector .vline {
+    width: 2px; height: 20px; background: linear-gradient(180deg, var(--accent-cyan), var(--accent-purple));
+    border-radius: 1px;
+  }
+
+  /* ── Horizontal Arrow ── */
+  .harrow {
+    display: inline-flex; align-items: center; color: var(--text-muted); font-size: 16px;
+    flex-shrink: 0;
+  }
+
+  /* ── Chat Loop ── */
+  .loop-container {
+    background: var(--card); border: 1px solid var(--border); border-radius: 14px;
+    padding: 28px; margin: 20px 0; position: relative; overflow: hidden;
+  }
+  .loop-container::before {
+    content: ''; position: absolute; top: 0; left: 0;
+    width: 100%; height: 3px;
+    background: linear-gradient(90deg, var(--accent-cyan), var(--accent-purple), var(--accent-pink));
+  }
+  .loop-title {
+    font-size: 15px; font-weight: 700; margin-bottom: 20px;
+    display: flex; align-items: center; gap: 10px;
+  }
+  .loop-badge {
+    font-size: 10px; padding: 2px 8px; border-radius: 10px;
+    background: rgba(34,211,238,0.15); color: var(--accent-cyan);
+    font-weight: 600; letter-spacing: 0.5px;
+  }
+
+  .loop-flow {
+    display: flex; flex-direction: column; gap: 0; position: relative;
+    padding-left: 30px;
+  }
+  .loop-flow::before {
+    content: ''; position: absolute; left: 11px; top: 10px; bottom: 10px;
+    width: 2px; background: linear-gradient(180deg, var(--border), rgba(42,45,58,0.3));
+  }
+  .loop-step {
+    display: flex; align-items: flex-start; gap: 14px;
+    padding: 8px 0; position: relative;
+  }
+  .loop-dot {
+    width: 10px; height: 10px; border-radius: 50%;
+    flex-shrink: 0; margin-top: 4px; margin-left: -19px;
+    z-index: 1;
+  }
+  .loop-step-content { flex: 1; }
+  .loop-step-title { font-size: 13px; font-weight: 600; }
+  .loop-step-desc { font-size: 11px; color: var(--text-muted); margin-top: 2px; line-height: 1.5; }
+  .loop-sub { border-left: 2px dashed var(--border); margin-left: 4px; padding-left: 20px; margin-top: 6px; }
+
+  .dot-blue { background: var(--accent-blue); box-shadow: 0 0 6px rgba(79,143,247,0.4); }
+  .dot-green { background: var(--accent-green); box-shadow: 0 0 6px rgba(52,211,153,0.4); }
+  .dot-purple { background: var(--accent-purple); box-shadow: 0 0 6px rgba(167,139,250,0.4); }
+  .dot-orange { background: var(--accent-orange); box-shadow: 0 0 6px rgba(251,146,60,0.4); }
+  .dot-red { background: var(--accent-red); box-shadow: 0 0 6px rgba(248,113,113,0.4); }
+  .dot-cyan { background: var(--accent-cyan); box-shadow: 0 0 6px rgba(34,211,238,0.4); }
+  .dot-yellow { background: var(--accent-yellow); box-shadow: 0 0 6px rgba(250,204,21,0.4); }
+  .dot-pink { background: var(--accent-pink); box-shadow: 0 0 6px rgba(244,114,182,0.4); }
+  .dot-dim { background: var(--text-muted); }
+
+  /* ── Grid Cards ── */
+  .grid-2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(380px, 1fr)); gap: 16px; margin: 20px 0; }
+  .grid-3 { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; margin: 20px 0; }
+  .gcard {
+    background: var(--card); border: 1px solid var(--border); border-radius: 12px;
+    padding: 20px; position: relative; overflow: hidden;
+  }
+  .gcard::before { content: ''; position: absolute; top: 0; left: 0; width: 100%; height: 3px; }
+  .gcard.gc-blue::before { background: linear-gradient(90deg, var(--accent-blue), transparent); }
+  .gcard.gc-green::before { background: linear-gradient(90deg, var(--accent-green), transparent); }
+  .gcard.gc-purple::before { background: linear-gradient(90deg, var(--accent-purple), transparent); }
+  .gcard.gc-orange::before { background: linear-gradient(90deg, var(--accent-orange), transparent); }
+  .gcard.gc-red::before { background: linear-gradient(90deg, var(--accent-red), transparent); }
+  .gcard.gc-cyan::before { background: linear-gradient(90deg, var(--accent-cyan), transparent); }
+  .gcard.gc-pink::before { background: linear-gradient(90deg, var(--accent-pink), transparent); }
+  .gcard.gc-yellow::before { background: linear-gradient(90deg, var(--accent-yellow), transparent); }
+  .gcard-title { font-size: 15px; font-weight: 600; margin-bottom: 10px; }
+  .gcard-desc { font-size: 12px; color: var(--text-dim); line-height: 1.6; }
+  .gcard-footer {
+    font-size: 11px; color: var(--text-muted); margin-top: 12px;
+    padding-top: 10px; border-top: 1px solid var(--border); line-height: 1.5;
+  }
+
+  /* ── Table ── */
+  .dtable {
+    width: 100%; border-collapse: collapse; font-size: 12px; margin: 16px 0;
+  }
+  .dtable th {
+    text-align: left; padding: 10px 14px; background: rgba(255,255,255,0.03);
+    color: var(--text-dim); font-weight: 600; font-size: 11px;
+    text-transform: uppercase; letter-spacing: 0.5px; border-bottom: 1px solid var(--border);
+  }
+  .dtable td {
+    padding: 8px 14px; border-bottom: 1px solid rgba(255,255,255,0.03); color: var(--text-dim);
+  }
+  .dtable td:first-child { color: var(--text); font-weight: 500; }
+  .check { color: var(--accent-green); }
+  .cross { color: var(--text-muted); opacity: 0.3; }
+
+  /* ── Inline Tags ── */
+  .tag {
+    display: inline-block; padding: 2px 8px; border-radius: 4px;
+    font-size: 10px; font-weight: 600; letter-spacing: 0.3px;
+  }
+  .tag-blue { background: rgba(79,143,247,0.15); color: var(--accent-blue); }
+  .tag-green { background: rgba(52,211,153,0.15); color: var(--accent-green); }
+  .tag-purple { background: rgba(167,139,250,0.15); color: var(--accent-purple); }
+  .tag-orange { background: rgba(251,146,60,0.15); color: var(--accent-orange); }
+  .tag-red { background: rgba(248,113,113,0.15); color: var(--accent-red); }
+  .tag-cyan { background: rgba(34,211,238,0.15); color: var(--accent-cyan); }
+  .tag-yellow { background: rgba(250,204,21,0.15); color: var(--accent-yellow); }
+  .tag-pink { background: rgba(244,114,182,0.15); color: var(--accent-pink); }
+
+  .footer {
+    text-align: center; margin-top: 60px; padding-top: 20px;
+    border-top: 1px solid var(--border); color: var(--text-muted); font-size: 12px;
+  }
+</style>
+</head>
+<body>
+<div class="container">
+
+<h1>SkillKit Agent Architecture</h1>
+<p class="subtitle">从 Engine 调度到 LLM 调用的完整分层架构拆解</p>
+
+<!-- ═══════════════════════════════════════════════════
+     Section 1: 分层总览
+     ═══════════════════════════════════════════════════ -->
+<div class="section-title">1. 分层架构总览</div>
+
+<div class="layer-stack">
+  <!-- Layer 1: Engine -->
+  <div class="layer-row">
+    <div class="layer-label" style="color:var(--accent-blue);">
+      Worker Engine
+      <div style="position:absolute;right:-1px;top:0;bottom:0;width:2px;background:var(--accent-blue);"></div>
+    </div>
+    <div class="layer-content" style="background:rgba(79,143,247,0.03);">
+      <div class="lbox c-blue">
+        <div class="lbox-title">_process_task()</div>
+        <div class="lbox-sub">调度管线、累积 prior_outputs、管理压缩</div>
+      </div>
+      <span class="harrow">→</span>
+      <div class="lbox c-blue">
+        <div class="lbox-title">_execute_single_stage()</div>
+        <div class="lbox-sub">组装上下文、构建 prompt、调用 executor</div>
+      </div>
+    </div>
+  </div>
+  <!-- Layer 2: Executor -->
+  <div class="layer-row">
+    <div class="layer-label" style="color:var(--accent-green);">
+      Executor
+      <div style="position:absolute;right:-1px;top:0;bottom:0;width:2px;background:var(--accent-green);"></div>
+    </div>
+    <div class="layer-content" style="background:rgba(52,211,153,0.03);">
+      <div class="lbox c-green">
+        <div class="lbox-title">execute_stage()</div>
+        <div class="lbox-sub">构建 StageContext → build_user_prompt()</div>
+      </div>
+      <span class="harrow">→</span>
+      <div class="lbox c-green">
+        <div class="lbox-title">get_agent(role, task_id)</div>
+        <div class="lbox-sub">从 Agent Pool 获取/创建 Runner</div>
+      </div>
+      <span class="harrow">→</span>
+      <div class="lbox c-green">
+        <div class="lbox-title">runner.chat(prompt, reset=True)</div>
+        <div class="lbox-sub">触发核心 Chat Loop</div>
+      </div>
+    </div>
+  </div>
+  <!-- Layer 3: SandboxedAgentRunner -->
+  <div class="layer-row">
+    <div class="layer-label" style="color:var(--accent-purple);">
+      SandboxedAgentRunner
+      <div style="position:absolute;right:-1px;top:0;bottom:0;width:2px;background:var(--accent-purple);"></div>
+    </div>
+    <div class="layer-content" style="background:rgba(167,139,250,0.03);">
+      <div class="lbox c-purple">
+        <div class="lbox-title">get_tools()</div>
+        <div class="lbox-sub">按角色过滤 → allowed_tools 白名单</div>
+      </div>
+      <div class="lbox c-purple">
+        <div class="lbox-title">ToolExecutionPolicyMixin</div>
+        <div class="lbox-sub">参数校验 / cwd 注入 / 路径沙箱 / 目录读取</div>
+      </div>
+      <div class="lbox c-purple">
+        <div class="lbox-title">_resolve_workspace_path()</div>
+        <div class="lbox-sub">路径归一化 + 防逃逸</div>
+      </div>
+    </div>
+  </div>
+  <!-- Layer 4: AgentRunner core -->
+  <div class="layer-row">
+    <div class="layer-label" style="color:var(--accent-cyan);">
+      AgentRunner <span class="tag tag-cyan">SkillKit Core</span>
+      <div style="position:absolute;right:-1px;top:0;bottom:0;width:2px;background:var(--accent-cyan);"></div>
+    </div>
+    <div class="layer-content" style="background:rgba(34,211,238,0.03);">
+      <div class="lbox c-cyan">
+        <div class="lbox-title">chat() / chat_stream()</div>
+        <div class="lbox-sub">核心 Agent Loop：LLM 调用 + Tool 执行</div>
+      </div>
+      <div class="lbox c-cyan">
+        <div class="lbox-title">_conversation[]</div>
+        <div class="lbox-sub">AgentMessage 对话历史</div>
+      </div>
+      <div class="lbox c-cyan">
+        <div class="lbox-title">EventBus</div>
+        <div class="lbox-sub">生命周期事件系统</div>
+      </div>
+      <div class="lbox c-cyan">
+        <div class="lbox-title">ContextManager</div>
+        <div class="lbox-sub">上下文窗口管理 + 压缩</div>
+      </div>
+    </div>
+  </div>
+  <!-- Layer 5: SkillsEngine -->
+  <div class="layer-row">
+    <div class="layer-label" style="color:var(--accent-orange);">
+      SkillsEngine
+      <div style="position:absolute;right:-1px;top:0;bottom:0;width:2px;background:var(--accent-orange);"></div>
+    </div>
+    <div class="layer-content" style="background:rgba(251,146,60,0.03);">
+      <div class="lbox c-orange">
+        <div class="lbox-title">SKILL.md 加载</div>
+        <div class="lbox-sub">MarkdownSkillLoader + 目录扫描</div>
+      </div>
+      <div class="lbox c-orange">
+        <div class="lbox-title">execute() / execute_script()</div>
+        <div class="lbox-sub">委托 BashRuntime 执行命令</div>
+      </div>
+      <div class="lbox c-orange">
+        <div class="lbox-title">Skill 过滤 & 热加载</div>
+        <div class="lbox-sub">平台/环境变量/依赖检查 + 文件监听</div>
+      </div>
+    </div>
+  </div>
+  <!-- Layer 6: LLM / Runtime -->
+  <div class="layer-row">
+    <div class="layer-label" style="color:var(--accent-red);">
+      LLM & Runtime
+      <div style="position:absolute;right:-1px;top:0;bottom:0;width:2px;background:var(--accent-red);"></div>
+    </div>
+    <div class="layer-content" style="background:rgba(248,113,113,0.03);">
+      <div class="lbox c-red">
+        <div class="lbox-title">AsyncOpenAI Client</div>
+        <div class="lbox-sub">httpx + trust_env=False + 300s timeout</div>
+      </div>
+      <div class="lbox c-dim">
+        <div class="lbox-title">AdapterRegistry</div>
+        <div class="lbox-sub">可插拔 LLM Provider (当前未注册)</div>
+      </div>
+      <div class="lbox c-red">
+        <div class="lbox-title">BashRuntime</div>
+        <div class="lbox-sub">Shell 命令执行 + 流式输出 + 超时控制</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════
+     Section 2: Agent 创建与池化
+     ═══════════════════════════════════════════════════ -->
+<div class="section-title">2. Agent 创建与池化生命周期</div>
+
+<div class="loop-container">
+  <div class="loop-title">
+    get_agent(role, task_id) 调用链
+    <span class="loop-badge">agents.py</span>
+  </div>
+  <div class="loop-flow">
+    <div class="loop-step">
+      <div class="loop-dot dot-blue"></div>
+      <div class="loop-step-content">
+        <div class="loop-step-title">1. 计算缓存 Key</div>
+        <div class="loop-step-desc"><code>key = f"{role}:{task_id}"</code> — 同一任务同一角色复用 Runner</div>
+      </div>
+    </div>
+    <div class="loop-step">
+      <div class="loop-dot dot-cyan"></div>
+      <div class="loop-step-content">
+        <div class="loop-step-title">2. 模型解析</div>
+        <div class="loop-step-desc">
+          优先级：stage 级 override → <code>LLM_ROLE_MODEL_MAP[role]</code> → 全局 <code>LLM_MODEL</code>
+        </div>
+      </div>
+    </div>
+    <div class="loop-step">
+      <div class="loop-dot dot-green"></div>
+      <div class="loop-step-content">
+        <div class="loop-step-title">3. 运行时签名比对</div>
+        <div class="loop-step-desc">
+          对比 (model, temperature, max_tokens, max_turns, skill_dirs, prompt_append)。
+          签名不变 → 返回缓存实例；签名变化 → 销毁旧实例，创建新 Runner。
+        </div>
+      </div>
+    </div>
+    <div class="loop-step">
+      <div class="loop-dot dot-purple"></div>
+      <div class="loop-step-content">
+        <div class="loop-step-title">4. _create_runner()</div>
+        <div class="loop-step-desc">构建完整的 SandboxedAgentRunner</div>
+        <div class="loop-sub">
+          <div class="loop-step">
+            <div class="loop-dot dot-dim" style="width:6px;height:6px;margin-left:-14px;margin-top:6px;"></div>
+            <div class="loop-step-content">
+              <div class="loop-step-desc">创建工作目录 <code>/tmp/silicon_agent/tasks/{task_id}</code></div>
+            </div>
+          </div>
+          <div class="loop-step">
+            <div class="loop-dot dot-dim" style="width:6px;height:6px;margin-left:-14px;margin-top:6px;"></div>
+            <div class="loop-step-content">
+              <div class="loop-step-desc">查找 <code>SYSTEM_PROMPTS[role]</code> (中文角色提示词)</div>
+            </div>
+          </div>
+          <div class="loop-step">
+            <div class="loop-dot dot-dim" style="width:6px;height:6px;margin-left:-14px;margin-top:6px;"></div>
+            <div class="loop-step-content">
+              <div class="loop-step-desc"><code>AgentRunner.create(skill_dirs, system_prompt, max_turns)</code></div>
+            </div>
+          </div>
+          <div class="loop-step">
+            <div class="loop-dot dot-dim" style="width:6px;height:6px;margin-left:-14px;margin-top:6px;"></div>
+            <div class="loop-step-content">
+              <div class="loop-step-desc">
+                包装为 <code>SandboxedAgentRunner(engine, config, default_cwd, allowed_tools)</code>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="loop-step">
+      <div class="loop-dot dot-orange"></div>
+      <div class="loop-step-content">
+        <div class="loop-step-title">5. 缓存存入</div>
+        <div class="loop-step-desc">
+          <code>_agents[key] = runner</code>，附加运行时签名用于后续比对。
+          任务结束调用 <code>close_agents_for_task(task_id)</code> 清理所有该任务的 Runner。
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════
+     Section 3: 核心 Chat Loop
+     ═══════════════════════════════════════════════════ -->
+<div class="section-title">3. 核心 Chat Loop (AgentRunner.chat)</div>
+
+<div class="loop-container">
+  <div class="loop-title">
+    runner.chat(user_prompt, reset=True)
+    <span class="loop-badge">skillkit/agent.py</span>
+    <span class="tag tag-red" style="margin-left:8px;">reset=True 清空对话历史</span>
+  </div>
+  <div class="loop-flow">
+    <div class="loop-step">
+      <div class="loop-dot dot-cyan"></div>
+      <div class="loop-step-content">
+        <div class="loop-step-title">INPUT 事件</div>
+        <div class="loop-step-desc">可拦截/转换输入，支持短路返回（跳过整个 loop）</div>
+      </div>
+    </div>
+    <div class="loop-step">
+      <div class="loop-dot dot-blue"></div>
+      <div class="loop-step-content">
+        <div class="loop-step-title">Skill 检测</div>
+        <div class="loop-step-desc">检查 <code>/skill-name</code> 模式 → 若匹配，包装 skill 内容为用户消息</div>
+      </div>
+    </div>
+    <div class="loop-step">
+      <div class="loop-dot dot-green"></div>
+      <div class="loop-step-content">
+        <div class="loop-step-title">追加 User Message 到 _conversation[]</div>
+        <div class="loop-step-desc">AgentMessage(role="user", content=prompt)</div>
+      </div>
+    </div>
+    <div class="loop-step">
+      <div class="loop-dot dot-purple"></div>
+      <div class="loop-step-content">
+        <div class="loop-step-title">AGENT_START 事件</div>
+        <div class="loop-step-desc">通知外部系统 agent 开始工作（executor 记录日志）</div>
+      </div>
+    </div>
+    <div class="loop-step">
+      <div class="loop-dot dot-yellow"></div>
+      <div class="loop-step-content">
+        <div class="loop-step-title" style="color:var(--accent-yellow);">for turn in range(max_turns):</div>
+        <div class="loop-step-desc" style="font-size:12px;">每一轮 = 一次 LLM 调用 + 可能的多次 Tool 执行</div>
+        <div class="loop-sub">
+          <!-- Turn steps -->
+          <div class="loop-step">
+            <div class="loop-dot dot-dim" style="width:7px;height:7px;margin-left:-14px;margin-top:5px;"></div>
+            <div class="loop-step-content">
+              <div class="loop-step-title">Abort / Steering 检查</div>
+              <div class="loop-step-desc">协作式取消 + 中途注入用户消息</div>
+            </div>
+          </div>
+          <div class="loop-step">
+            <div class="loop-dot dot-cyan" style="width:7px;height:7px;margin-left:-14px;margin-top:5px;"></div>
+            <div class="loop-step-content">
+              <div class="loop-step-title">TURN_START → CONTEXT_TRANSFORM</div>
+              <div class="loop-step-desc">可修改发送给 LLM 的消息列表</div>
+            </div>
+          </div>
+          <div class="loop-step">
+            <div class="loop-dot dot-green" style="width:7px;height:7px;margin-left:-14px;margin-top:5px;"></div>
+            <div class="loop-step-content">
+              <div class="loop-step-title">Context Compaction 检查</div>
+              <div class="loop-step-desc">若 token 估算 > 窗口 × 0.9 → 执行滑动窗口/预算裁剪</div>
+            </div>
+          </div>
+          <div class="loop-step">
+            <div class="loop-dot dot-red" style="width:7px;height:7px;margin-left:-14px;margin-top:5px;"></div>
+            <div class="loop-step-content">
+              <div class="loop-step-title" style="color:var(--accent-red);">_call_llm(messages)</div>
+              <div class="loop-step-desc">
+                发送 system_prompt + _conversation → OpenAI API<br/>
+                返回 AgentMessage (content + tool_calls + reasoning + usage)
+              </div>
+            </div>
+          </div>
+          <div class="loop-step">
+            <div class="loop-dot dot-purple" style="width:7px;height:7px;margin-left:-14px;margin-top:5px;"></div>
+            <div class="loop-step-content">
+              <div class="loop-step-title">追加 Assistant Message 到 _conversation[]</div>
+              <div class="loop-step-desc">TURN_END 事件</div>
+            </div>
+          </div>
+          <div class="loop-step">
+            <div class="loop-dot dot-orange" style="width:7px;height:7px;margin-left:-14px;margin-top:5px;"></div>
+            <div class="loop-step-content">
+              <div class="loop-step-title" style="color:var(--accent-orange);">无 tool_calls → 返回响应 (结束 loop)</div>
+              <div class="loop-step-desc">纯文本回复 = 最终输出</div>
+            </div>
+          </div>
+          <div class="loop-step">
+            <div class="loop-dot dot-yellow" style="width:7px;height:7px;margin-left:-14px;margin-top:5px;"></div>
+            <div class="loop-step-content">
+              <div class="loop-step-title" style="color:var(--accent-yellow);">有 tool_calls → 逐个执行</div>
+              <div class="loop-step-desc">for each tool_call: BEFORE_TOOL_CALL → execute → AFTER_TOOL_RESULT → 追加 tool result message</div>
+            </div>
+          </div>
+          <div class="loop-step">
+            <div class="loop-dot dot-dim" style="width:7px;height:7px;margin-left:-14px;margin-top:5px;"></div>
+            <div class="loop-step-content">
+              <div class="loop-step-title">回到 loop 顶部，带着 tool results 再次调用 LLM</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="loop-step">
+      <div class="loop-dot dot-red"></div>
+      <div class="loop-step-content">
+        <div class="loop-step-title">max_turns 耗尽 → 返回 "Max turns reached" 哨兵消息</div>
+        <div class="loop-step-desc">Executor 检测后发送 continuation prompts (reset=False)</div>
+      </div>
+    </div>
+    <div class="loop-step">
+      <div class="loop-dot dot-pink"></div>
+      <div class="loop-step-content">
+        <div class="loop-step-title">AGENT_END 事件 (finally)</div>
+        <div class="loop-step-desc">无论成功/失败/取消，始终触发</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════
+     Section 4: Tool Execution Pipeline
+     ═══════════════════════════════════════════════════ -->
+<div class="section-title">4. Tool 执行管线</div>
+
+<div class="grid-2">
+  <div class="gcard gc-cyan">
+    <div class="gcard-title">5 个核心工具</div>
+    <table class="dtable">
+      <thead><tr><th>工具</th><th>参数</th><th>执行方</th></tr></thead>
+      <tbody>
+        <tr><td><code>execute</code></td><td>command, cwd?</td><td>BashRuntime.execute()</td></tr>
+        <tr><td><code>execute_script</code></td><td>script, cwd?</td><td>BashRuntime.execute_script()</td></tr>
+        <tr><td><code>write</code></td><td>path, content</td><td>Path.write_text()</td></tr>
+        <tr><td><code>read</code></td><td>path</td><td>Path.read_text() (100K 截断)</td></tr>
+        <tr><td><code>skill</code></td><td>name, arguments?</td><td>SkillsEngine (按需加载)</td></tr>
+      </tbody>
+    </table>
+    <div class="gcard-footer">
+      额外：动态 Skill Action 工具 <code>{skill}:{action}</code>
+      + Extension 注册工具
+    </div>
+  </div>
+
+  <div class="gcard gc-purple">
+    <div class="gcard-title">Tool 执行的三层防护</div>
+    <div class="gcard-desc" style="line-height:2;">
+      <span class="tag tag-purple">Layer 1</span> <strong>get_tools() 过滤</strong> — 只将角色白名单内的工具声明给 LLM<br/>
+      <span class="tag tag-orange">Layer 2</span> <strong>ToolExecutionPolicyMixin</strong> — 运行时拦截：参数校验、cwd 自动注入、白名单二次检查<br/>
+      <span class="tag tag-red">Layer 3</span> <strong>SandboxedAgentRunner</strong> — 路径归一化 + 防逃逸 (<code>_resolve_workspace_path</code>)
+    </div>
+    <div class="gcard-footer">
+      <strong>降级机制：</strong>LLM 返回非法 tool JSON → executor 检测到 tool_call_error →
+      切换 <code>get_agent_text_only()</code>，禁用 function calling
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════
+     Section 5: EventBus 事件系统
+     ═══════════════════════════════════════════════════ -->
+<div class="section-title">5. EventBus 生命周期事件</div>
+
+<div class="loop-container">
+  <div class="loop-title">
+    一次 chat() 调用的完整事件时序
+    <span class="loop-badge">skillkit/events.py</span>
+  </div>
+  <div style="display:flex; flex-wrap:wrap; gap:8px; margin-bottom:16px;">
+    <span class="tag tag-blue">可拦截</span>
+    <span class="tag tag-green">可修改</span>
+    <span class="tag tag-purple">通知型</span>
+    <span class="tag tag-orange">Tool 相关</span>
+  </div>
+  <div style="display:flex; flex-wrap:wrap; gap:8px 16px; font-size:12px; line-height:2.2;">
+    <div class="lbox c-blue" style="padding:4px 12px;">
+      <span style="font-weight:600;">INPUT</span>
+      <span style="opacity:0.6; font-size:10px;"> 可短路</span>
+    </div>
+    <span class="harrow">→</span>
+    <div class="lbox c-purple" style="padding:4px 12px;">
+      <span style="font-weight:600;">AGENT_START</span>
+    </div>
+    <span class="harrow">→</span>
+    <div style="border:1px dashed var(--accent-yellow); border-radius:8px; padding:6px 12px; display:inline-flex; align-items:center; gap:8px; flex-wrap:wrap;">
+      <span style="color:var(--accent-yellow); font-size:10px; font-weight:600;">LOOP</span>
+      <div class="lbox c-purple" style="padding:3px 8px; font-size:11px;">TURN_START</div>
+      <span class="harrow" style="font-size:12px;">→</span>
+      <div class="lbox c-green" style="padding:3px 8px; font-size:11px;">CONTEXT_TRANSFORM</div>
+      <span class="harrow" style="font-size:12px;">→</span>
+      <div class="lbox c-red" style="padding:3px 8px; font-size:11px;">_call_llm</div>
+      <span class="harrow" style="font-size:12px;">→</span>
+      <div class="lbox c-purple" style="padding:3px 8px; font-size:11px;">TURN_END</div>
+      <span class="harrow" style="font-size:12px;">→</span>
+      <div class="lbox c-orange" style="padding:3px 8px; font-size:11px;">BEFORE_TOOL_CALL</div>
+      <span class="harrow" style="font-size:12px;">→</span>
+      <div class="lbox c-orange" style="padding:3px 8px; font-size:11px;">TOOL_EXEC_UPDATE</div>
+      <span class="harrow" style="font-size:12px;">→</span>
+      <div class="lbox c-orange" style="padding:3px 8px; font-size:11px;">AFTER_TOOL_RESULT</div>
+    </div>
+    <span class="harrow">→</span>
+    <div class="lbox c-pink" style="padding:4px 12px;">
+      <span style="font-weight:600;">AGENT_END</span>
+      <span style="opacity:0.6; font-size:10px;"> (finally)</span>
+    </div>
+  </div>
+  <div style="margin-top:16px; font-size:11px; color:var(--text-muted); line-height:1.6;">
+    <strong>Executor 如何利用事件：</strong>
+    <code>StageEventTracker</code> 注册监听器 → TURN_START/END 记录 LLM 调用日志 →
+    BEFORE_TOOL_CALL 记录工具执行 → TOOL_EXECUTION_UPDATE 流式推送到 WebSocket →
+    AFTER_TOOL_RESULT 写入 task_log 持久化。通过 <code>off_by_source()</code> 清理。
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════
+     Section 6: AgentMessage & Conversation
+     ═══════════════════════════════════════════════════ -->
+<div class="section-title">6. 对话管理 (_conversation)</div>
+
+<div class="grid-2">
+  <div class="gcard gc-cyan">
+    <div class="gcard-title">AgentMessage 结构</div>
+    <table class="dtable">
+      <thead><tr><th>字段</th><th>类型</th><th>说明</th></tr></thead>
+      <tbody>
+        <tr><td>role</td><td>str</td><td>"user" | "assistant" | "system" | "tool"</td></tr>
+        <tr><td>content</td><td>str | list</td><td>文本或多模态内容 (TextContent | ImageContent)</td></tr>
+        <tr><td>tool_calls</td><td>list[dict]</td><td>[{id, name, arguments}, ...] — LLM 请求的工具调用</td></tr>
+        <tr><td>tool_call_id</td><td>str?</td><td>tool result 消息的关联 ID</td></tr>
+        <tr><td>reasoning</td><td>str?</td><td>MiniMax reasoning_split 推理内容</td></tr>
+        <tr><td>token_usage</td><td>TokenUsage?</td><td>本轮 input/output/cache/thinking tokens</td></tr>
+        <tr><td>metadata</td><td>dict</td><td>finish_reason, model 等</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="gcard gc-green">
+    <div class="gcard-title">Conversation 生命周期</div>
+    <div class="gcard-desc" style="line-height:2;">
+      <span class="tag tag-red">reset=True</span> 清空 <code>_conversation[]</code>，全新上下文<br/>
+      <span class="tag tag-green">reset=False</span> 保留历史，继续对话（用于 continuation / evaluator loop）<br/>
+      <span class="tag tag-cyan">steer(msg)</span> 注入用户消息到 steering_queue，下一轮前插入<br/>
+      <span class="tag tag-orange">follow_up(msg)</span> 当前 loop 结束后自动发送后续消息<br/>
+      <span class="tag tag-purple">abort()</span> 协作式取消，在 tool 执行间隙检查
+    </div>
+    <div class="gcard-footer">
+      <strong>关键设计：</strong>跨 stage 调用始终 <code>reset=True</code> — Agent 不共享对话历史，
+      所有上下文靠 <code>build_user_prompt()</code> 显式注入
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════
+     Section 7: System Prompt 组装
+     ═══════════════════════════════════════════════════ -->
+<div class="section-title">7. System Prompt 三层组装</div>
+
+<div class="loop-container">
+  <div class="loop-title">AgentRunner.build_system_prompt()</div>
+  <div style="display:flex; flex-direction:column; gap:8px;">
+    <div style="display:flex; align-items:stretch; gap:12px;">
+      <div style="width:28px;height:28px;border-radius:50%;background:rgba(79,143,247,0.2);color:var(--accent-blue);display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;flex-shrink:0;">1</div>
+      <div style="flex:1;padding:10px 14px;border-radius:8px;background:rgba(79,143,247,0.06);border-left:2px solid var(--accent-blue);font-size:12px;">
+        <strong>SYSTEM_PROMPTS[role]</strong> — 角色身份定义（中文）+ 工作目录提示 + system_prompt_append
+      </div>
+    </div>
+    <div style="display:flex; align-items:stretch; gap:12px;">
+      <div style="width:28px;height:28px;border-radius:50%;background:rgba(52,211,153,0.2);color:var(--accent-green);display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;flex-shrink:0;">2</div>
+      <div style="flex:1;padding:10px 14px;border-radius:8px;background:rgba(52,211,153,0.06);border-left:2px solid var(--accent-green);font-size:12px;">
+        <strong>Context Files</strong> — AGENTS.md / CLAUDE.md (若 <code>load_context_files=True</code>，当前关闭)
+      </div>
+    </div>
+    <div style="display:flex; align-items:stretch; gap:12px;">
+      <div style="width:28px;height:28px;border-radius:50%;background:rgba(251,146,60,0.2);color:var(--accent-orange);display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;flex-shrink:0;">3</div>
+      <div style="flex:1;padding:10px 14px;border-radius:8px;background:rgba(251,146,60,0.06);border-left:2px solid var(--accent-orange);font-size:12px;">
+        <strong>Skills Prompt</strong> — 已加载的 Skill 描述（XML 格式，16000 字符预算）+ 可调用技能列表
+      </div>
+    </div>
+  </div>
+  <div style="margin-top:14px; font-size:11px; color:var(--text-muted);">
+    System Prompt 在 Runner 创建时固定，整个任务期间不变。动态内容（prior outputs、retry context 等）通过 User Message 注入。
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════
+     Section 8: 角色 × 工具 × Turns 矩阵
+     ═══════════════════════════════════════════════════ -->
+<div class="section-title">8. 角色 × 工具 × Max Turns 矩阵</div>
+
+<div style="background:var(--card); border:1px solid var(--border); border-radius:12px; padding:20px; margin:20px 0; overflow-x:auto;">
+  <table class="dtable">
+    <thead>
+      <tr>
+        <th>角色</th>
+        <th>read</th>
+        <th>write</th>
+        <th>execute</th>
+        <th>execute_script</th>
+        <th>skill</th>
+        <th>Max Turns</th>
+        <th>典型 Skill 目录</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td style="color:var(--accent-blue); font-weight:600;">orchestrator</td>
+        <td class="check">&#10003;</td>
+        <td class="cross">&#10007;</td>
+        <td class="check">&#10003;</td>
+        <td class="cross">&#10007;</td>
+        <td class="check">&#10003;</td>
+        <td>10</td>
+        <td>shared + orchestrator</td>
+      </tr>
+      <tr>
+        <td style="color:var(--text-dim); font-weight:600;">spec</td>
+        <td class="check">&#10003;</td>
+        <td class="check">&#10003;</td>
+        <td class="cross">&#10007;</td>
+        <td class="cross">&#10007;</td>
+        <td class="check">&#10003;</td>
+        <td>20</td>
+        <td>shared + spec</td>
+      </tr>
+      <tr>
+        <td style="color:var(--accent-green); font-weight:600;">coding</td>
+        <td class="check">&#10003;</td>
+        <td class="check">&#10003;</td>
+        <td class="check">&#10003;</td>
+        <td class="check">&#10003;</td>
+        <td class="check">&#10003;</td>
+        <td>20</td>
+        <td>shared + coding</td>
+      </tr>
+      <tr>
+        <td style="color:var(--accent-orange); font-weight:600;">test</td>
+        <td class="check">&#10003;</td>
+        <td class="check">&#10003;</td>
+        <td class="check">&#10003;</td>
+        <td class="check">&#10003;</td>
+        <td class="check">&#10003;</td>
+        <td>20</td>
+        <td>shared + test</td>
+      </tr>
+      <tr>
+        <td style="color:var(--accent-purple); font-weight:600;">review</td>
+        <td class="check">&#10003;</td>
+        <td class="cross">&#10007;</td>
+        <td class="check">&#10003;</td>
+        <td class="cross">&#10007;</td>
+        <td class="check">&#10003;</td>
+        <td>10</td>
+        <td>shared + review</td>
+      </tr>
+      <tr>
+        <td style="color:var(--accent-red); font-weight:600;">smoke</td>
+        <td class="check">&#10003;</td>
+        <td class="cross">&#10007;</td>
+        <td class="check">&#10003;</td>
+        <td class="cross">&#10007;</td>
+        <td class="check">&#10003;</td>
+        <td>10</td>
+        <td>shared + smoke</td>
+      </tr>
+      <tr>
+        <td style="color:var(--accent-cyan); font-weight:600;">doc</td>
+        <td class="check">&#10003;</td>
+        <td class="check">&#10003;</td>
+        <td class="cross">&#10007;</td>
+        <td class="cross">&#10007;</td>
+        <td class="check">&#10003;</td>
+        <td>20</td>
+        <td>shared + doc</td>
+      </tr>
+    </tbody>
+  </table>
+</div>
+
+<!-- ═══════════════════════════════════════════════════
+     Section 9: ContextManager
+     ═══════════════════════════════════════════════════ -->
+<div class="section-title">9. 上下文窗口管理 (ContextManager)</div>
+
+<div class="grid-3">
+  <div class="gcard gc-cyan">
+    <div class="gcard-title">Token 估算</div>
+    <div class="gcard-desc">
+      <code>estimate_tokens(text)</code><br/>
+      字符数 / 4 的启发式估算。每条消息额外 +4 tokens（角色标记开销）。
+      计入 content + reasoning + tool_call arguments。
+    </div>
+  </div>
+  <div class="gcard gc-orange">
+    <div class="gcard-title">压缩触发</div>
+    <div class="gcard-desc">
+      <code>should_compact(messages)</code><br/>
+      当 token 估算 > context_window × 0.9 时触发。
+      默认 context_window = 128K，reserve_tokens = 4096。
+    </div>
+  </div>
+  <div class="gcard gc-red">
+    <div class="gcard-title">两种压缩策略</div>
+    <div class="gcard-desc" style="line-height:1.8;">
+      <span class="tag tag-orange">SlidingWindow</span> 保留最近 N 轮，超出预算从前向后裁剪<br/>
+      <span class="tag tag-red">TokenBudget</span> 从最新消息反向累积，直到填满预算
+    </div>
+    <div class="gcard-footer">约束：裁剪后首条消息必须为 user 或 system 角色</div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════
+     Section 10: LLM 调用路径
+     ═══════════════════════════════════════════════════ -->
+<div class="section-title">10. LLM 调用路径 (_call_llm)</div>
+
+<div class="loop-container">
+  <div class="loop-title">_call_llm(messages) 双路径分发</div>
+  <div style="display:flex; gap:20px; flex-wrap:wrap;">
+    <!-- Path A -->
+    <div style="flex:1; min-width:300px; padding:16px; border:1px solid var(--border); border-radius:10px;">
+      <div style="font-size:13px; font-weight:600; color:var(--accent-red); margin-bottom:10px;">
+        路径 A：内置 OpenAI Client <span class="tag tag-red">当前使用</span>
+      </div>
+      <div style="font-size:11px; color:var(--text-dim); line-height:1.8;">
+        1. 懒初始化 <code>AsyncOpenAI</code> (httpx, trust_env=False, 300s timeout)<br/>
+        2. 格式化 messages → OpenAI API 格式<br/>
+        3. 构建 kwargs: model, messages, temperature, max_tokens, tools<br/>
+        4. MiniMax 特殊: <code>extra_body.reasoning_split=True</code><br/>
+        5. <code>client.chat.completions.create(**kwargs)</code><br/>
+        6. 提取 content, reasoning, tool_calls, usage → AgentMessage
+      </div>
+    </div>
+    <!-- Path B -->
+    <div style="flex:1; min-width:300px; padding:16px; border:1px solid var(--border); border-radius:10px; opacity:0.6;">
+      <div style="font-size:13px; font-weight:600; color:var(--text-dim); margin-bottom:10px;">
+        路径 B：LLMAdapter <span class="tag tag-purple">可扩展</span>
+      </div>
+      <div style="font-size:11px; color:var(--text-muted); line-height:1.8;">
+        1. 检查 <code>self.active_adapter</code> (AdapterRegistry)<br/>
+        2. 若不为 None → <code>adapter.chat(messages, system_prompt)</code><br/>
+        3. 返回 AgentResponse → 转换为 AgentMessage<br/>
+        4. 支持自定义 Provider (Anthropic, 本地模型等)<br/>
+        <br/>
+        <em>当前 AdapterRegistry 为空，所有调用走路径 A</em>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════
+     Section 11: Skills 系统
+     ═══════════════════════════════════════════════════ -->
+<div class="section-title">11. Skills 系统</div>
+
+<div class="grid-2">
+  <div class="gcard gc-orange">
+    <div class="gcard-title">Skill 加载与管理 (SkillsEngine)</div>
+    <div class="gcard-desc" style="line-height:1.8;">
+      <strong>加载：</strong>扫描 skill_dirs 下的 <code>SKILL.md</code> 文件 (YAML frontmatter + Markdown body)<br/>
+      <strong>过滤：</strong>DefaultSkillFilter — 平台兼容性、环境变量、依赖检查<br/>
+      <strong>缓存：</strong>get_snapshot() 快照缓存，文件变更时失效<br/>
+      <strong>格式：</strong>Skills 以 XML 格式注入 System Prompt（16K 字符预算）<br/>
+      <strong>热加载：</strong>watchfiles 监听 skill 目录变更
+    </div>
+  </div>
+
+  <div class="gcard gc-yellow">
+    <div class="gcard-title">两种调用方式</div>
+    <div class="gcard-desc" style="line-height:2;">
+      <span class="tag tag-orange">Tool 调用</span>
+      LLM 发起 <code>skill(name="xxx", arguments="...")</code> →
+      返回 skill 内容作为 tool result → LLM 据此继续工作<br/>
+      <span class="tag tag-yellow">Slash 命令</span>
+      用户输入 <code>/skill-name args</code> →
+      skill 内容包装为 <code>&lt;skill-content&gt;</code> 标签注入用户消息
+    </div>
+    <div class="gcard-footer">
+      <strong>Fork 模式：</strong>标记 <code>context: fork</code> 的 skill 会创建子 AgentRunner，
+      用 skill 内容作为 system prompt，独立执行后返回结果。<br/>
+      <strong>动态注入：</strong>Skill 中的 <code>!`command`</code> 模式会在加载时执行，stdout 替换占位符。
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════
+     Section 12: TokenUsage 追踪
+     ═══════════════════════════════════════════════════ -->
+<div class="section-title">12. Token 消耗追踪与熔断</div>
+
+<div class="grid-2">
+  <div class="gcard gc-green">
+    <div class="gcard-title">TokenUsage 五维追踪</div>
+    <table class="dtable">
+      <thead><tr><th>维度</th><th>来源</th></tr></thead>
+      <tbody>
+        <tr><td>input_tokens</td><td>prompt_tokens (含 cache_read)</td></tr>
+        <tr><td>output_tokens</td><td>completion_tokens</td></tr>
+        <tr><td>cache_read_tokens</td><td>prompt_tokens_details.cached_tokens</td></tr>
+        <tr><td>cache_write_tokens</td><td>自动计算 (input - cache_read)</td></tr>
+        <tr><td>thinking_tokens</td><td>reasoning output tokens</td></tr>
+      </tbody>
+    </table>
+    <div class="gcard-footer">
+      支持 <code>+</code> / <code>+=</code> 运算符累积。
+      <code>cumulative_usage</code> 记录整个 Runner 生命周期的总量。
+      <code>reset_usage()</code> 在每个 stage 开始前归零。
+    </div>
+  </div>
+
+  <div class="gcard gc-red">
+    <div class="gcard-title">熔断器 (Circuit Breaker)</div>
+    <div class="gcard-desc" style="line-height:2;">
+      <span class="tag tag-red">Token 限制</span>
+      <code>CB_MAX_TOKENS_PER_TASK</code> = 200K — 单任务总 token 上限<br/>
+      <span class="tag tag-orange">成本限制</span>
+      <code>CB_MAX_COST_PER_TASK_RMB</code> = ¥50 — 单任务成本上限<br/>
+      <span class="tag tag-yellow">Stage 超时</span>
+      <code>WORKER_STAGE_TIMEOUT</code> = 300s — 单次 LLM 调用超时<br/>
+      <span class="tag tag-purple">任务超时</span>
+      <code>WORKER_TASK_TIMEOUT</code> = 1800s — 整个任务总超时
+    </div>
+    <div class="gcard-footer">
+      Executor 每轮 tool 执行后检查 <code>cumulative_usage.total_tokens</code>，
+      超限则终止 stage 并标记 failed。
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════
+     Section 13: Executor 容错机制
+     ═══════════════════════════════════════════════════ -->
+<div class="section-title">13. Executor 容错与续写机制</div>
+
+<div class="grid-3">
+  <div class="gcard gc-red">
+    <div class="gcard-title">重试策略</div>
+    <div class="gcard-desc" style="line-height:1.8;">
+      最多 <code>WORKER_STAGE_MAX_RETRIES + 1</code> 次尝试。
+      指数退避：<code>WORKER_STAGE_RETRY_DELAY × 2^attempt</code>。
+      超时/API 错误/未知错误均可重试。
+    </div>
+  </div>
+  <div class="gcard gc-orange">
+    <div class="gcard-title">Tool Fallback</div>
+    <div class="gcard-desc" style="line-height:1.8;">
+      检测 LLM 返回非法 tool JSON →
+      <code>get_agent_text_only()</code> 禁用 function calling →
+      纯文本模式重试，缓存键带 <code>:textonly</code> 后缀。
+    </div>
+  </div>
+  <div class="gcard gc-cyan">
+    <div class="gcard-title">Continuation 续写</div>
+    <div class="gcard-desc" style="line-height:1.8;">
+      输出包含 "Max turns reached" →
+      发送 "请继续" prompt (<code>reset=False</code>) →
+      最多 3 次续写 → 合并所有输出。
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════
+     Section 14: 数据流全景
+     ═══════════════════════════════════════════════════ -->
+<div class="section-title">14. 完整数据流全景</div>
+
+<div style="background:var(--card); border:1px solid var(--border); border-radius:12px; padding:24px; margin:20px 0; overflow-x:auto;">
+  <pre style="font-family:'SF Mono',Menlo,monospace; font-size:11px; line-height:2; color:var(--text-dim); white-space:pre; overflow-x:auto;">
+<span style="color:var(--accent-blue);font-weight:700;">Engine</span>                          <span style="color:var(--accent-green);font-weight:700;">Executor</span>                     <span style="color:var(--accent-purple);font-weight:700;">SandboxedAgentRunner</span>              <span style="color:var(--accent-cyan);font-weight:700;">AgentRunner (SkillKit)</span>              <span style="color:var(--accent-red);font-weight:700;">LLM API</span>
+  │                                 │                              │                                    │                                     │
+  │ _process_task()                 │                              │                                    │                                     │
+  │ ├─ prior_outputs = []           │                              │                                    │                                     │
+  │ ├─ compression = CR()           │                              │                                    │                                     │
+  │ │                               │                              │                                    │                                     │
+  │ ├─ <span style="color:var(--accent-yellow);">for stage in stages:</span>        │                              │                                    │                                     │
+  │ │   │                           │                              │                                    │                                     │
+  │ │   ├─ load project_memory      │                              │                                    │                                     │
+  │ │   ├─ build compressed_prior   │                              │                                    │                                     │
+  │ │   ├─ build retry_context      │                              │                                    │                                     │
+  │ │   │                           │                              │                                    │                                     │
+  │ │   └──────────────────────────>│ execute_stage()              │                                    │                                     │
+  │ │                               │ ├─ StageContext              │                                    │                                     │
+  │ │                               │ ├─ build_user_prompt(ctx)    │                                    │                                     │
+  │ │                               │ │                            │                                    │                                     │
+  │ │                               │ ├──────────────────────────>│ get_agent(role, task_id)            │                                     │
+  │ │                               │ │                            │ ├─ cache lookup / _create_runner() │                                     │
+  │ │                               │ │                            │ └─ return runner                   │                                     │
+  │ │                               │ │                            │                                    │                                     │
+  │ │                               │ ├─ register event listeners  │                                    │                                     │
+  │ │                               │ │                            │                                    │                                     │
+  │ │                               │ └──────────────────────────────────────────────────────────────>│ chat(prompt, reset=True)              │
+  │ │                               │                              │                                    │ ├─ clear _conversation[]             │
+  │ │                               │                              │                                    │ ├─ append user msg                   │
+  │ │                               │                              │                                    │ │                                     │
+  │ │                               │                              │                                    │ ├─ <span style="color:var(--accent-yellow);">for turn in max_turns:</span>            │
+  │ │                               │                              │                                    │ │   ├─ CONTEXT_TRANSFORM              │
+  │ │                               │                              │                                    │ │   ├─ compaction check               │
+  │ │                               │                              │                                    │ │   ├──────────────────────────────>│ completions.create()
+  │ │                               │                              │                                    │ │   │<─────────────────────────────│ response
+  │ │                               │                              │                                    │ │   ├─ append assistant msg            │
+  │ │                               │                              │                                    │ │   │                                  │
+  │ │                               │                              │                                    │ │   ├─ if tool_calls:                  │
+  │ │                               │                              │  _execute_tool_with_policy() <─────│ │   │   ├─ BEFORE_TOOL_CALL            │
+  │ │                               │                              │  ├─ validate args                  │ │   │   ├─ _execute_tool()             │
+  │ │                               │                              │  ├─ inject cwd                     │ │   │   │                              │
+  │ │                               │                              │  ├─ resolve path                   │ │   │   │                              │
+  │ │                               │                              │  └─ delegate to base ──────────>│ │   │   │  BashRuntime /               │
+  │ │                               │                              │                                    │ │   │   │  file I/O /                  │
+  │ │                               │                              │                                    │ │   │   │  skill load                  │
+  │ │                               │                              │                                    │ │   │   ├─ AFTER_TOOL_RESULT           │
+  │ │                               │                              │                                    │ │   │   └─ append tool result msg      │
+  │ │                               │                              │                                    │ │   └─ next turn                      │
+  │ │                               │                              │                                    │ │                                     │
+  │ │                               │ <──────────────────────────────────────────────────────────────│ return AgentMessage                   │
+  │ │                               │ ├─ continuations (if needed) │                                    │                                     │
+  │ │                               │ ├─ evaluator loop (optional) │                                    │                                     │
+  │ │                               │ ├─ persist output_summary    │                                    │                                     │
+  │ │                               │ └─ return output             │                                    │                                     │
+  │ │   │                           │                              │                                    │                                     │
+  │ │   ├─ prior_outputs.append()   │                              │                                    │                                     │
+  │ │   ├─ compression.add()        │                              │                                    │                                     │
+  │ │   └─ next stage               │                              │                                    │                                     │
+  │ │                               │                              │                                    │                                     │
+  │ └─ _finalize_task_resources()   │                              │                                    │                                     │
+  │    ├─ extract memories          │                              │                                    │                                     │
+  │    ├─ commit & push (worktree)  │                              │                                    │                                     │
+  │    └─ close_agents_for_task()   │                              │                                    │                                     │
+  </pre>
+</div>
+
+<div class="footer">
+  Silicon Agent — SkillKit Agent Architecture &nbsp;&bull;&nbsp; Generated 2026-03
+</div>
+
+</div>
+</body>
+</html>

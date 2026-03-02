@@ -1,0 +1,1335 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Agentic Engineering Highlights</title>
+<style>
+  :root {
+    --bg: #0f1117;
+    --card: #1a1d27;
+    --card-hover: #1e2230;
+    --border: #2a2d3a;
+    --accent-blue: #4f8ff7;
+    --accent-purple: #a78bfa;
+    --accent-green: #34d399;
+    --accent-orange: #fb923c;
+    --accent-red: #f87171;
+    --accent-cyan: #22d3ee;
+    --accent-yellow: #facc15;
+    --accent-pink: #f472b6;
+    --text: #e2e8f0;
+    --text-dim: #94a3b8;
+    --text-muted: #64748b;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: var(--bg); color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    padding: 40px 20px;
+  }
+  .container { max-width: 1440px; margin: 0 auto; }
+
+  h1 {
+    text-align: center; font-size: 28px; font-weight: 700; margin-bottom: 6px;
+    background: linear-gradient(135deg, var(--accent-orange), var(--accent-pink), var(--accent-purple));
+    -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+  }
+  .subtitle { text-align: center; color: var(--text-dim); font-size: 14px; margin-bottom: 48px; }
+
+  .section-title {
+    font-size: 18px; font-weight: 600; margin: 56px 0 20px;
+    padding-left: 12px; border-left: 3px solid var(--accent-cyan); color: var(--text);
+  }
+  .section-subtitle {
+    font-size: 13px; color: var(--text-muted); margin: -14px 0 20px 16px;
+  }
+  code {
+    background: rgba(255,255,255,0.06); padding: 1px 6px; border-radius: 3px;
+    font-family: 'SF Mono', Menlo, monospace; font-size: 11px;
+  }
+
+  /* ── Colors ── */
+  .c-blue { border-color: rgba(79,143,247,0.3); background: rgba(79,143,247,0.08); color: var(--accent-blue); }
+  .c-green { border-color: rgba(52,211,153,0.3); background: rgba(52,211,153,0.08); color: var(--accent-green); }
+  .c-purple { border-color: rgba(167,139,250,0.3); background: rgba(167,139,250,0.08); color: var(--accent-purple); }
+  .c-orange { border-color: rgba(251,146,60,0.3); background: rgba(251,146,60,0.08); color: var(--accent-orange); }
+  .c-red { border-color: rgba(248,113,113,0.3); background: rgba(248,113,113,0.08); color: var(--accent-red); }
+  .c-cyan { border-color: rgba(34,211,238,0.3); background: rgba(34,211,238,0.08); color: var(--accent-cyan); }
+  .c-yellow { border-color: rgba(250,204,21,0.3); background: rgba(250,204,21,0.08); color: var(--accent-yellow); }
+  .c-pink { border-color: rgba(244,114,182,0.3); background: rgba(244,114,182,0.08); color: var(--accent-pink); }
+  .c-dim { border-color: var(--border); background: rgba(255,255,255,0.03); color: var(--text-dim); }
+
+  .dot-blue { background: var(--accent-blue); box-shadow: 0 0 6px rgba(79,143,247,0.4); }
+  .dot-green { background: var(--accent-green); box-shadow: 0 0 6px rgba(52,211,153,0.4); }
+  .dot-purple { background: var(--accent-purple); box-shadow: 0 0 6px rgba(167,139,250,0.4); }
+  .dot-orange { background: var(--accent-orange); box-shadow: 0 0 6px rgba(251,146,60,0.4); }
+  .dot-red { background: var(--accent-red); box-shadow: 0 0 6px rgba(248,113,113,0.4); }
+  .dot-cyan { background: var(--accent-cyan); box-shadow: 0 0 6px rgba(34,211,238,0.4); }
+  .dot-yellow { background: var(--accent-yellow); box-shadow: 0 0 6px rgba(250,204,21,0.4); }
+  .dot-pink { background: var(--accent-pink); box-shadow: 0 0 6px rgba(244,114,182,0.4); }
+  .dot-dim { background: var(--text-muted); }
+
+  /* ── Tag ── */
+  .tag {
+    display: inline-block; padding: 2px 8px; border-radius: 4px;
+    font-size: 10px; font-weight: 600; letter-spacing: 0.3px;
+  }
+  .tag-green { background: rgba(52,211,153,0.15); color: var(--accent-green); }
+  .tag-blue { background: rgba(79,143,247,0.15); color: var(--accent-blue); }
+  .tag-orange { background: rgba(251,146,60,0.15); color: var(--accent-orange); }
+  .tag-red { background: rgba(248,113,113,0.15); color: var(--accent-red); }
+  .tag-purple { background: rgba(167,139,250,0.15); color: var(--accent-purple); }
+  .tag-cyan { background: rgba(34,211,238,0.15); color: var(--accent-cyan); }
+  .tag-yellow { background: rgba(250,204,21,0.15); color: var(--accent-yellow); }
+  .tag-pink { background: rgba(244,114,182,0.15); color: var(--accent-pink); }
+
+  /* ── Grids ── */
+  .grid-2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(380px, 1fr)); gap: 16px; margin: 20px 0; }
+  .grid-3 { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; margin: 20px 0; }
+  .grid-4 { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; margin: 20px 0; }
+  .gcard {
+    background: var(--card); border: 1px solid var(--border); border-radius: 12px;
+    padding: 20px; transition: background 0.2s;
+  }
+  .gcard:hover { background: var(--card-hover); }
+  .gcard-title { font-size: 14px; font-weight: 600; margin-bottom: 10px; display: flex; align-items: center; gap: 8px; }
+  .gcard-body { font-size: 12px; color: var(--text-dim); line-height: 1.7; }
+  .gcard-body ul { padding-left: 16px; margin-top: 6px; }
+  .gcard-body li { margin-bottom: 3px; }
+
+  /* ── Loop Container ── */
+  .loop-container {
+    background: var(--card); border: 1px solid var(--border); border-radius: 14px;
+    padding: 28px; margin: 20px 0; position: relative; overflow: hidden;
+  }
+  .loop-container::before {
+    content: ''; position: absolute; top: 0; left: 0;
+    width: 100%; height: 3px;
+  }
+  .lc-orange::before { background: linear-gradient(90deg, var(--accent-orange), var(--accent-pink), var(--accent-purple)); }
+  .lc-green::before { background: linear-gradient(90deg, var(--accent-green), var(--accent-cyan)); }
+  .lc-blue::before { background: linear-gradient(90deg, var(--accent-blue), var(--accent-purple)); }
+  .lc-cyan::before { background: linear-gradient(90deg, var(--accent-cyan), var(--accent-green)); }
+  .lc-red::before { background: linear-gradient(90deg, var(--accent-red), var(--accent-orange)); }
+  .lc-purple::before { background: linear-gradient(90deg, var(--accent-purple), var(--accent-pink)); }
+  .lc-pink::before { background: linear-gradient(90deg, var(--accent-pink), var(--accent-purple)); }
+  .lc-yellow::before { background: linear-gradient(90deg, var(--accent-yellow), var(--accent-orange)); }
+  .loop-title {
+    font-size: 15px; font-weight: 700; margin-bottom: 20px;
+    display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  }
+  .loop-badge {
+    font-size: 10px; padding: 2px 8px; border-radius: 10px;
+    font-weight: 600; letter-spacing: 0.5px;
+  }
+  .badge-cyan { background: rgba(34,211,238,0.15); color: var(--accent-cyan); }
+  .badge-orange { background: rgba(251,146,60,0.15); color: var(--accent-orange); }
+  .badge-green { background: rgba(52,211,153,0.15); color: var(--accent-green); }
+  .badge-red { background: rgba(248,113,113,0.15); color: var(--accent-red); }
+  .badge-purple { background: rgba(167,139,250,0.15); color: var(--accent-purple); }
+  .badge-pink { background: rgba(244,114,182,0.15); color: var(--accent-pink); }
+  .badge-yellow { background: rgba(250,204,21,0.15); color: var(--accent-yellow); }
+  .badge-blue { background: rgba(79,143,247,0.15); color: var(--accent-blue); }
+
+  .loop-flow {
+    display: flex; flex-direction: column; gap: 0; position: relative;
+    padding-left: 30px;
+  }
+  .loop-flow::before {
+    content: ''; position: absolute; left: 11px; top: 10px; bottom: 10px;
+    width: 2px; background: linear-gradient(180deg, var(--border), rgba(42,45,58,0.3));
+  }
+  .loop-step {
+    display: flex; align-items: flex-start; gap: 14px;
+    padding: 8px 0; position: relative;
+  }
+  .loop-dot {
+    width: 10px; height: 10px; border-radius: 50%;
+    flex-shrink: 0; margin-top: 4px; margin-left: -19px; z-index: 1;
+  }
+  .loop-step-content { flex: 1; }
+  .loop-step-title { font-size: 13px; font-weight: 600; }
+  .loop-step-desc { font-size: 11px; color: var(--text-muted); margin-top: 2px; line-height: 1.6; }
+
+  /* ── Layer Stack ── */
+  .layer-stack { display: flex; flex-direction: column; gap: 0; margin: 20px 0; }
+  .layer-row { display: flex; align-items: stretch; min-height: 64px; }
+  .layer-label {
+    width: 170px; flex-shrink: 0;
+    display: flex; align-items: center; justify-content: flex-end;
+    padding-right: 20px; font-size: 12px; font-weight: 600;
+  }
+  .layer-content {
+    flex: 1; padding: 12px 20px; border-bottom: 1px solid rgba(255,255,255,0.04);
+    display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  }
+  .lbox {
+    padding: 8px 14px; border-radius: 8px; font-size: 12px;
+    border: 1px solid; line-height: 1.5;
+  }
+  .lbox .lbox-title { font-weight: 600; font-size: 12px; }
+  .lbox .lbox-sub { font-size: 10px; opacity: 0.7; margin-top: 2px; }
+
+  /* ── Flow Diagram ── */
+  .flow-diagram {
+    display: flex; align-items: stretch; gap: 0; margin: 20px 0;
+    overflow-x: auto; padding-bottom: 10px;
+  }
+  .flow-node {
+    min-width: 130px; padding: 14px; border-radius: 12px;
+    border: 1px solid; text-align: center; flex-shrink: 0;
+    display: flex; flex-direction: column; justify-content: center; align-items: center; gap: 4px;
+  }
+  .flow-node .fn-icon { font-size: 22px; }
+  .flow-node .fn-label { font-size: 12px; font-weight: 600; }
+  .flow-node .fn-sub { font-size: 10px; opacity: 0.7; }
+  .flow-arrow {
+    display: flex; align-items: center; justify-content: center;
+    min-width: 36px; color: var(--text-muted); font-size: 18px; flex-shrink: 0;
+  }
+
+  /* ── ASCII ── */
+  .ascii {
+    background: var(--card); border: 1px solid var(--border); border-radius: 12px;
+    padding: 24px; margin: 20px 0; overflow-x: auto;
+    font-family: 'SF Mono', Menlo, Consolas, monospace;
+    font-size: 11px; line-height: 1.6; color: var(--text-dim); white-space: pre;
+  }
+
+  /* ── Table ── */
+  .qa-table {
+    width: 100%; border-collapse: collapse; margin: 20px 0; font-size: 12px;
+  }
+  .qa-table th {
+    text-align: left; padding: 10px 14px; font-weight: 600;
+    background: rgba(79,143,247,0.08); border-bottom: 2px solid var(--border);
+    color: var(--accent-blue); font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px;
+  }
+  .qa-table td {
+    padding: 10px 14px; border-bottom: 1px solid var(--border);
+    color: var(--text-dim); vertical-align: top;
+  }
+  .qa-table tr:hover td { background: rgba(255,255,255,0.02); }
+
+  /* ── Highlight Box ── */
+  .hbox {
+    padding: 16px 20px; border-radius: 10px; margin: 16px 0;
+    border: 1px solid;
+  }
+  .hbox-title { font-size: 13px; font-weight: 700; margin-bottom: 6px; }
+  .hbox-body { font-size: 12px; line-height: 1.7; }
+
+  /* ── Top 5 Hero ── */
+  .hero-grid {
+    display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; margin: 20px 0;
+  }
+  .hero-card {
+    background: var(--card); border: 1px solid var(--border); border-radius: 14px;
+    padding: 20px 16px; text-align: center; position: relative; overflow: hidden;
+    transition: transform 0.2s, box-shadow 0.2s;
+  }
+  .hero-card:hover { transform: translateY(-2px); box-shadow: 0 8px 24px rgba(0,0,0,0.3); }
+  .hero-card::before {
+    content: ''; position: absolute; top: 0; left: 0; width: 100%; height: 3px;
+  }
+  .hero-card:nth-child(1)::before { background: linear-gradient(90deg, var(--accent-cyan), var(--accent-green)); }
+  .hero-card:nth-child(2)::before { background: linear-gradient(90deg, var(--accent-purple), var(--accent-pink)); }
+  .hero-card:nth-child(3)::before { background: linear-gradient(90deg, var(--accent-orange), var(--accent-yellow)); }
+  .hero-card:nth-child(4)::before { background: linear-gradient(90deg, var(--accent-blue), var(--accent-cyan)); }
+  .hero-card:nth-child(5)::before { background: linear-gradient(90deg, var(--accent-red), var(--accent-orange)); }
+  .hero-rank { font-size: 32px; font-weight: 800; opacity: 0.15; position: absolute; top: 8px; right: 12px; }
+  .hero-icon { font-size: 28px; margin-bottom: 8px; }
+  .hero-title { font-size: 13px; font-weight: 700; margin-bottom: 6px; }
+  .hero-desc { font-size: 11px; color: var(--text-muted); line-height: 1.5; }
+
+  /* ── Responsive ── */
+  @media (max-width: 1200px) {
+    .hero-grid { grid-template-columns: repeat(3, 1fr); }
+  }
+  @media (max-width: 768px) {
+    .hero-grid { grid-template-columns: 1fr; }
+    .flow-diagram { flex-direction: column; align-items: center; }
+    .flow-arrow { transform: rotate(90deg); min-width: auto; min-height: 28px; }
+    .layer-label { width: 110px; font-size: 10px; }
+    .grid-2, .grid-3, .grid-4 { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+<div class="container">
+
+  <h1>Agentic Engineering Highlights</h1>
+  <p class="subtitle">silicon_agent 平台核心 Agentic 设计亮点拆解 — 从编排到自进化的 16 项技术深潜</p>
+
+  <!-- ════════════════════════════════════════════ -->
+  <!-- TOP 5 HERO -->
+  <!-- ════════════════════════════════════════════ -->
+  <div class="section-title">Top 5 — 最具亮点的设计</div>
+
+  <div class="hero-grid">
+    <div class="hero-card">
+      <div class="hero-rank">1</div>
+      <div class="hero-icon">&#129504;</div>
+      <div class="hero-title" style="color: var(--accent-cyan);">Confidence-Driven<br>Dynamic Gate</div>
+      <div class="hero-desc">Agent 对自身输出不确信时<br>自动触发人工审核<br>自适应人机协作</div>
+    </div>
+    <div class="hero-card">
+      <div class="hero-rank">2</div>
+      <div class="hero-icon">&#128257;</div>
+      <div class="hero-title" style="color: var(--accent-purple);">Self-Evaluation<br>Loop</div>
+      <div class="hero-desc">Agent 自批判 + 迭代精炼<br>confidence &lt; 阈值自动重跑<br>类 Constitutional AI</div>
+    </div>
+    <div class="hero-card">
+      <div class="hero-rank">3</div>
+      <div class="hero-icon">&#129513;</div>
+      <div class="hero-title" style="color: var(--accent-orange);">三源记忆<br>+ 角色 RBAC</div>
+      <div class="hero-desc">LLM 提取 / 失败反思 / 人类反馈<br>不同角色看不同知识子集<br>跨任务学习</div>
+    </div>
+    <div class="hero-card">
+      <div class="hero-rank">4</div>
+      <div class="hero-icon">&#128736;</div>
+      <div class="hero-title" style="color: var(--accent-blue);">DAG 引擎<br>+ 失败重定向</div>
+      <div class="hero-desc">code &rarr; test &rarr; code<br>自修复闭环<br>有界循环防失控</div>
+    </div>
+    <div class="hero-card">
+      <div class="hero-rank">5</div>
+      <div class="hero-icon">&#128269;</div>
+      <div class="hero-title" style="color: var(--accent-red);">Model API<br>Forensics</div>
+      <div class="hero-desc">Sandbox 拦截全部 LLM 调用<br>原始 Request/Response 存档<br>完整审计链</div>
+    </div>
+  </div>
+
+  <!-- ════════════════════════════════════════════════ -->
+  <!-- PART I: PIPELINE ORCHESTRATION LAYER            -->
+  <!-- ════════════════════════════════════════════════ -->
+  <div class="section-title" style="border-color: var(--accent-orange);">Part I &mdash; Pipeline 编排层</div>
+
+  <!-- ── 1. Template Dual-Mode ── -->
+  <div class="section-title">1. 声明式模板 + 双模式执行引擎</div>
+  <div class="section-subtitle">同一 JSON 模板自动适配线性/DAG 两种执行模式</div>
+
+  <div class="loop-container lc-orange">
+    <div class="loop-title">
+      <code>TaskTemplateModel.stages</code>
+      <span class="loop-badge badge-orange">AUTO-DETECT</span>
+    </div>
+    <div class="loop-flow">
+      <div class="loop-step">
+        <div class="loop-dot dot-orange"></div>
+        <div class="loop-step-content">
+          <div class="loop-step-title" style="color: var(--accent-orange);">Template JSON 定义 stages 数组</div>
+          <div class="loop-step-desc">
+            每个 stage 包含：<code>name</code>, <code>agent_role</code>, <code>order</code>（线性模式）, <code>depends_on</code>（DAG 模式）<br>
+            可选字段：<code>model</code>（模型覆盖）, <code>instruction</code>, <code>timeout</code>, <code>condition</code>, <code>on_failure</code>, <code>max_executions</code>, <code>evaluator</code>, <code>context_from</code>
+          </div>
+        </div>
+      </div>
+      <div class="loop-step">
+        <div class="loop-dot dot-cyan"></div>
+        <div class="loop-step-content">
+          <div class="loop-step-title" style="color: var(--accent-cyan);">Engine 检测执行模式</div>
+          <div class="loop-step-desc">
+            扫描 stages 数组 — 若任一 stage 含 <code>depends_on</code> 字段 &rarr; DAG 模式 &rarr; <code>StageGraph</code><br>
+            否则 &rarr; 线性模式 &rarr; 按 <code>order</code> 值排序，同 order 并行执行
+          </div>
+        </div>
+      </div>
+      <div class="loop-step">
+        <div class="loop-dot dot-green"></div>
+        <div class="loop-step-content">
+          <div class="loop-step-title" style="color: var(--accent-green);">向后兼容</div>
+          <div class="loop-step-desc">
+            旧模板无 <code>depends_on</code> &rarr; 自动走线性模式，无需任何迁移<br>
+            新模板可混用：部分 stage 有 <code>depends_on</code>，引擎自动补全缺失的依赖关系
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="grid-2">
+    <div class="gcard">
+      <div class="gcard-title" style="color: var(--accent-blue);">&#128203; 5 个内置模板</div>
+      <div class="gcard-body">
+        <table class="qa-table" style="margin: 0;">
+          <tr><th>模板</th><th>Stages</th><th>Gates</th><th>场景</th></tr>
+          <tr><td><code>full_pipeline</code></td><td>9</td><td>3</td><td>完整功能开发</td></tr>
+          <tr><td><code>quick_fix</code></td><td>4</td><td>0</td><td>简单 bug 修复</td></tr>
+          <tr><td><code>doc_only</code></td><td>2</td><td>0</td><td>纯文档</td></tr>
+          <tr><td><code>review_only</code></td><td>2</td><td>0</td><td>代码审查</td></tr>
+          <tr><td><code>custom</code></td><td>可变</td><td>可变</td><td>自定义</td></tr>
+        </table>
+      </div>
+    </div>
+    <div class="gcard">
+      <div class="gcard-title" style="color: var(--accent-purple);">&#128220; 模板版本控制</div>
+      <div class="gcard-body">
+        <code>TEMPLATE_VERSIONING_ENABLED=True</code> 时：
+        <ul>
+          <li>更新模板 &rarr; 创建<strong>新行</strong>，<code>version</code> 自增</li>
+          <li><code>parent_id</code> 指向前一版本 &rarr; 形成不可变链</li>
+          <li>旧版本 <code>is_active=False</code>，但保留在数据库中</li>
+          <li>效果：Pipeline 定义的<strong>完整审计追踪</strong></li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── 2. Graph Engine ── -->
+  <div class="section-title">2. DAG 图执行引擎 + 失败重定向闭环</div>
+  <div class="section-subtitle">worker/graph.py — 支持有向无环图调度、失败自愈、有界循环</div>
+
+  <div class="ascii">
+  ┌──────────────────────────────────────────────────────────────────────────┐
+  │              DAG Execution: code → test → code 自修复闭环               │
+  │                                                                          │
+  │                                                                          │
+  │       ┌──────────┐         ┌──────────┐         ┌──────────┐           │
+  │       │  parse   │────────▶│   spec   │────────▶│   code   │◀──┐      │
+  │       │ order: 1 │         │ order: 2 │         │ order: 3 │   │      │
+  │       └──────────┘         └──────────┘         └────┬─────┘   │      │
+  │                                                       │         │      │
+  │                                                       ▼         │      │
+  │                                                  ┌──────────┐   │      │
+  │                                                  │   test   │   │      │
+  │                                                  │ order: 4 │   │      │
+  │                                                  └────┬─────┘   │      │
+  │                                                       │         │      │
+  │                                         ┌─────────────┤         │      │
+  │                                         │             │         │      │
+  │                                    ✅ PASS        ❌ FAIL      │      │
+  │                                         │        on_failure:    │      │
+  │                                         ▼          "code" ──────┘      │
+  │                                    ┌──────────┐                        │
+  │                                    │  review  │     ⚡ 安全机制:        │
+  │                                    │ order: 5 │     max_executions=3   │
+  │                                    └──────────┘     GRAPH_MAX_LOOP_    │
+  │                                                     ITERATIONS × N     │
+  └──────────────────────────────────────────────────────────────────────────┘</div>
+
+  <div class="grid-3">
+    <div class="gcard">
+      <div class="gcard-title" style="color: var(--accent-cyan);">&#128260; Ready-Set 算法</div>
+      <div class="gcard-body">
+        <code>get_ready_stages()</code> 判定条件：
+        <ul>
+          <li>所有依赖 stage 已 <code>completed</code> 或 <code>skipped</code></li>
+          <li>自身不在 <code>running</code> 状态</li>
+          <li>执行次数 &lt; <code>max_executions</code></li>
+          <li>失败 stage 且未达上限 &rarr; 可重新调度</li>
+        </ul>
+      </div>
+    </div>
+    <div class="gcard">
+      <div class="gcard-title" style="color: var(--accent-red);">&#128165; 失败重定向</div>
+      <div class="gcard-body">
+        Stage 定义 <code>on_failure: "target_stage"</code>：
+        <ul>
+          <li>test 失败 &rarr; 重置 code 为 <code>pending</code></li>
+          <li>从 completed/failed 集合中移除 target</li>
+          <li>下一轮循环自动重新执行</li>
+          <li>配合 <code>max_executions</code> 防止无限重跑</li>
+        </ul>
+      </div>
+    </div>
+    <div class="gcard">
+      <div class="gcard-title" style="color: var(--accent-green);">&#9989; 安全验证</div>
+      <div class="gcard-body">
+        <code>validate()</code> 方法：
+        <ul>
+          <li>DFS 三色法（WHITE/GRAY/BLACK）<strong>环检测</strong></li>
+          <li>缺失依赖项检测</li>
+          <li>全局循环上限：<code>GRAPH_MAX_LOOP_ITERATIONS &times; len(nodes)</code></li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── 3. Dynamic Routing ── -->
+  <div class="section-title">3. 动态路由 — LLM 决定下一步</div>
+  <div class="section-subtitle">engine.py _route_decision — 基于 Stage 输出和 confidence 的智能分支选择</div>
+
+  <div class="loop-container lc-purple">
+    <div class="loop-title">
+      <code>DYNAMIC_ROUTING_ENABLED=True</code>
+      <span class="loop-badge badge-purple">LLM DECIDES</span>
+    </div>
+    <div class="loop-flow">
+      <div class="loop-step">
+        <div class="loop-dot dot-blue"></div>
+        <div class="loop-step-content">
+          <div class="loop-step-title" style="color: var(--accent-blue);">Stage 完成，检测 routing_config</div>
+          <div class="loop-step-desc">模板中 stage 可定义 <code>routing_config: {"options": [{"target": "code", "description": "..."}, ...]}</code></div>
+        </div>
+      </div>
+      <div class="loop-step">
+        <div class="loop-dot dot-purple"></div>
+        <div class="loop-step-content">
+          <div class="loop-step-title" style="color: var(--accent-purple);">组装路由 Prompt</div>
+          <div class="loop-step-desc">将 stage output summary + confidence + 可选分支描述发送给 LLM，要求返回单一 target 名称</div>
+        </div>
+      </div>
+      <div class="loop-step">
+        <div class="loop-dot dot-orange"></div>
+        <div class="loop-step-content">
+          <div class="loop-step-title" style="color: var(--accent-orange);">记录决策 + 跳转</div>
+          <div class="loop-step-desc">路由决策记录到 <code>task.routing_decisions</code>（JSON 字段），可审计可回溯。Engine 跳转执行 target stage。</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── 4. Multi-Model Routing ── -->
+  <div class="section-title">4. 多模型路由 — 3 级决议体系</div>
+  <div class="section-subtitle">agents.py resolve_model_for_role — Stage &gt; Role &gt; Global 三级覆盖</div>
+
+  <div class="layer-stack">
+    <div class="layer-row">
+      <div class="layer-label" style="color: var(--accent-red);">优先级 1<br>Stage 级</div>
+      <div class="layer-content">
+        <div class="lbox c-red">
+          <div class="lbox-title">stage_defs[name]["model"]</div>
+          <div class="lbox-sub">模板中每个 stage 单独指定模型</div>
+        </div>
+        <div class="lbox c-dim">
+          <div class="lbox-sub">例: test stage 用便宜快速模型</div>
+        </div>
+      </div>
+    </div>
+    <div class="layer-row">
+      <div class="layer-label" style="color: var(--accent-orange);">优先级 2<br>Role 级</div>
+      <div class="layer-content">
+        <div class="lbox c-orange">
+          <div class="lbox-title">LLM_ROLE_MODEL_MAP</div>
+          <div class="lbox-sub">JSON 映射: {"coding": "gpt-4o", "review": "claude-sonnet"}</div>
+        </div>
+        <div class="lbox c-dim">
+          <div class="lbox-sub">按角色选择最适合的模型</div>
+        </div>
+      </div>
+    </div>
+    <div class="layer-row">
+      <div class="layer-label" style="color: var(--accent-yellow);">优先级 3<br>Global 级</div>
+      <div class="layer-content">
+        <div class="lbox c-yellow">
+          <div class="lbox-title">LLM_MODEL</div>
+          <div class="lbox-sub">全局默认模型（兜底）</div>
+        </div>
+        <div class="lbox c-dim">
+          <div class="lbox-sub">所有未指定模型的 stage/role 使用此模型</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="hbox c-cyan" style="margin-top: 12px;">
+    <div class="hbox-title" style="color: var(--accent-cyan);">Runtime Signature 缓存机制</div>
+    <div class="hbox-body">
+      Agent Runner 按 <code>(role, task_id)</code> 缓存复用。每次 stage 执行时计算当前 config 的<strong>签名元组</strong>（model, temperature, max_tokens, ...），
+      若签名与缓存中不一致 &rarr; <strong>自动销毁旧 Runner 并重建</strong>。适用于同一 role 在重试时切换到不同模型的场景。
+    </div>
+  </div>
+
+  <!-- ════════════════════════════════════════════════ -->
+  <!-- PART II: HUMAN-IN-THE-LOOP LAYER                -->
+  <!-- ════════════════════════════════════════════════ -->
+  <div class="section-title" style="border-color: var(--accent-green);">Part II &mdash; Human-in-the-Loop 层</div>
+
+  <!-- ── 5. Gate Four Modes ── -->
+  <div class="section-title">5. Gate 四种人机协作模式</div>
+  <div class="section-subtitle">从被动审批到主动求助 — 全维度的人类介入机制</div>
+
+  <div class="grid-2">
+    <div class="gcard">
+      <div class="gcard-title"><span class="tag tag-blue">MODE A</span> Static Gate — 模板定义</div>
+      <div class="gcard-body">
+        在模板 <code>gates</code> JSON 中声明：
+        <div class="ascii" style="margin: 8px 0; padding: 12px; font-size: 10px;">{"after_stage": "spec", "type": "human_approve", "max_retries": 2}</div>
+        <ul>
+          <li>Stage 完成后自动创建 <code>HumanGateModel</code></li>
+          <li>Worker 每 3 秒轮询 DB 直到 approved/rejected</li>
+          <li>通过 WebSocket 广播 <code>gate:created</code></li>
+          <li>外部通知（飞书/钉钉）同步推送</li>
+        </ul>
+      </div>
+    </div>
+    <div class="gcard">
+      <div class="gcard-title"><span class="tag tag-cyan">MODE B</span> Dynamic Gate — 信心驱动</div>
+      <div class="gcard-body">
+        <code>DYNAMIC_GATE_ENABLED=True</code> +<br>
+        <code>DYNAMIC_GATE_CONFIDENCE_THRESHOLD=0.5</code>
+        <ul>
+          <li>每个 stage 完成后检查 <code>output_structured.confidence</code></li>
+          <li>低于阈值 &rarr; 自动插入 <code>confidence_review</code> gate</li>
+          <li>标记 <code>is_dynamic=True</code> 区分于模板 gate</li>
+          <li><strong>Agent 主动"承认"不确信 &rarr; 请求人类帮助</strong></li>
+        </ul>
+        <div class="hbox c-cyan" style="margin-top: 10px; padding: 10px;">
+          <div class="hbox-body">这是最有亮点的设计 — 实现了 Agent 的<strong>自我认知边界感知</strong></div>
+        </div>
+      </div>
+    </div>
+    <div class="gcard">
+      <div class="gcard-title"><span class="tag tag-orange">MODE C</span> Rejection Feedback — 反馈循环</div>
+      <div class="gcard-body">
+        Gate 被拒绝 + <code>current_retry &lt; max_retries</code>：
+        <ul>
+          <li>构造 <code>gate_rejection_context</code>（审阅者评论 + 重试次数）</li>
+          <li>重置 stage 为 <code>pending</code>，清空 output/error</li>
+          <li>重跑 stage 时注入 prompt：<br><code>"## Gate 审批被拒绝 — 请根据反馈修改"</code></li>
+          <li>Agent 看到人类的<strong>具体修改意见</strong>后重新执行</li>
+        </ul>
+      </div>
+    </div>
+    <div class="gcard">
+      <div class="gcard-title"><span class="tag tag-green">MODE D</span> Revise & Continue — 修订继续</div>
+      <div class="gcard-body">
+        第三种 Gate 决议（非 approve 非 reject）：
+        <ul>
+          <li>审阅者提供 <code>revised_content</code> 修改稿</li>
+          <li>不完全拒绝，而是携带修订稿继续执行后续 stage</li>
+          <li>适用场景：输出大方向正确但需微调的情况</li>
+          <li>减少不必要的全量重跑开销</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── 6. Interactive Planning ── -->
+  <div class="section-title">6. Interactive Planning — 规划-审批-执行三阶段</div>
+  <div class="section-subtitle">engine.py _check_interactive_planning — 人工审批执行计划后才启动 coding</div>
+
+  <div class="flow-diagram">
+    <div class="flow-node c-blue">
+      <div class="fn-icon">&#128221;</div>
+      <div class="fn-label">parse 阶段</div>
+      <div class="fn-sub">需求解析 + 任务拆解</div>
+    </div>
+    <div class="flow-arrow">&rarr;</div>
+    <div class="flow-node c-yellow" style="border-width: 2px;">
+      <div class="fn-icon">&#9208;</div>
+      <div class="fn-label">planning 状态</div>
+      <div class="fn-sub">任务暂停等待审批</div>
+    </div>
+    <div class="flow-arrow">&rarr;</div>
+    <div class="flow-node c-green">
+      <div class="fn-icon">&#128100;</div>
+      <div class="fn-label">plan_review Gate</div>
+      <div class="fn-sub">人工审批执行计划</div>
+    </div>
+    <div class="flow-arrow">&rarr;</div>
+    <div class="flow-node c-purple" style="min-width: 180px;">
+      <div class="fn-icon">&#128260;</div>
+      <div class="fn-label">三种结果</div>
+      <div class="fn-sub" style="text-align: left; font-size: 10px;">
+        Approved &rarr; 继续执行<br>
+        Rejected &rarr; 重跑 parse<br>
+        Timeout &rarr; 任务失败
+      </div>
+    </div>
+    <div class="flow-arrow">&rarr;</div>
+    <div class="flow-node c-cyan">
+      <div class="fn-icon">&#9654;</div>
+      <div class="fn-label">后续 stages</div>
+      <div class="fn-sub">spec → code → test ...</div>
+    </div>
+  </div>
+
+  <div class="hbox c-yellow">
+    <div class="hbox-title" style="color: var(--accent-yellow);">设计意义</div>
+    <div class="hbox-body">
+      在 AI Agent 执行高成本操作（coding、testing）之前插入人工检查点。当 parse 阶段的任务拆解不合理时，<strong>在消耗大量 Token 之前就能发现并修正</strong>，显著降低浪费。<br>
+      通过 <code>INTERACTIVE_PLANNING_TEMPLATES</code> 可精确控制哪些模板启用此机制。
+    </div>
+  </div>
+
+  <!-- ════════════════════════════════════════════════ -->
+  <!-- PART III: SELF-IMPROVEMENT LAYER                -->
+  <!-- ════════════════════════════════════════════════ -->
+  <div class="section-title" style="border-color: var(--accent-purple);">Part III &mdash; 自进化层</div>
+
+  <!-- ── 7. Self-Evaluation Loop ── -->
+  <div class="section-title">7. Self-Evaluation Loop — 自批判迭代精炼</div>
+  <div class="section-subtitle">executor.py _run_evaluator_loop_inner — Agent 自评 + 循环改进直到达标</div>
+
+  <div class="loop-container lc-purple">
+    <div class="loop-title">
+      <code>evaluator: {"enabled": true, "criteria": "...", "min_confidence": 0.7}</code>
+      <span class="loop-badge badge-purple">MAX 3 ITERATIONS</span>
+    </div>
+    <div class="loop-flow">
+      <div class="loop-step">
+        <div class="loop-dot dot-blue"></div>
+        <div class="loop-step-content">
+          <div class="loop-step-title" style="color: var(--accent-blue);">Step 1: 初始执行</div>
+          <div class="loop-step-desc">Agent 按正常流程执行 stage，生成初始输出</div>
+        </div>
+      </div>
+      <div class="loop-step">
+        <div class="loop-dot dot-purple"></div>
+        <div class="loop-step-content">
+          <div class="loop-step-title" style="color: var(--accent-purple);">Step 2: 自我评估</div>
+          <div class="loop-step-desc">
+            Agent 对自己的输出生成结构化评估：<br>
+            <code>{"confidence": 0.x, "issues": ["问题1", "问题2"], "suggestions": ["建议1"]}</code>
+          </div>
+        </div>
+      </div>
+      <div class="loop-step">
+        <div class="loop-dot dot-orange"></div>
+        <div class="loop-step-content">
+          <div class="loop-step-title" style="color: var(--accent-orange);">Step 3: 判断 confidence &ge; min_confidence ?</div>
+          <div class="loop-step-desc">
+            <span class="tag tag-green">YES</span> &rarr; 通过，进入下一 stage<br>
+            <span class="tag tag-red">NO</span> &rarr; 将 issues + suggestions 注入 prompt，回到 Step 1 重新执行
+          </div>
+        </div>
+      </div>
+      <div class="loop-step">
+        <div class="loop-dot dot-green"></div>
+        <div class="loop-step-content">
+          <div class="loop-step-title" style="color: var(--accent-green);">Step 4: 结果记录</div>
+          <div class="loop-step-desc">
+            最终 <code>self_assessment_score</code> 存储在 stage 上 &rarr; 可作为 Dynamic Gate 判断依据<br>
+            最多 <code>max_iterations</code> 次（默认 3），超过强制通过
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="ascii">
+     ┌──────────────────────────────────────────────────────────────┐
+     │              Self-Evaluation Loop 状态机                     │
+     │                                                              │
+     │     ┌────────────┐                                          │
+     │     │  Execute   │◀─────── injection: issues +              │
+     │     │  Stage     │         suggestions from                 │
+     │     └─────┬──────┘         self-assessment                  │
+     │           │                        ▲                        │
+     │           ▼                        │                        │
+     │     ┌────────────┐           ┌─────┴──────┐                │
+     │     │ Self-Eval  │──── NO ──▶│ Confidence │                │
+     │     │ Generate   │           │   &lt; 0.7 ?  │                │
+     │     │ Assessment │           └─────┬──────┘                │
+     │     └────────────┘                 │                        │
+     │                               YES  │  (iteration &lt; max)    │
+     │                                    ▼                        │
+     │                              ┌───────────┐                 │
+     │                              │  PASS ✅  │                 │
+     │                              │ → next    │                 │
+     │                              │   stage   │                 │
+     │                              └───────────┘                 │
+     └──────────────────────────────────────────────────────────────┘</div>
+
+  <!-- ── 8. Ralph Loop V2 ── -->
+  <div class="section-title">8. Ralph Loop V2 — 结构化失败反思 + 智能重试</div>
+  <div class="section-subtitle">worker/failure.py — 6 类故障分类 + LLM 反思三元组 + 跨任务经验沉淀</div>
+
+  <div class="grid-2">
+    <div class="gcard">
+      <div class="gcard-title" style="color: var(--accent-red);">&#128165; 6 类故障分类引擎</div>
+      <div class="gcard-body">
+        基于正则匹配错误消息，自动分类并决定处理策略：
+        <table class="qa-table" style="margin: 8px 0 0;">
+          <tr><th>类别</th><th>触发模式</th><th>处理</th></tr>
+          <tr>
+            <td><span class="tag tag-cyan">TRANSIENT</span></td>
+            <td>timeout, network, rate_limit</td>
+            <td>自动重试</td>
+          </tr>
+          <tr>
+            <td><span class="tag tag-orange">TOOL_ERROR</span></td>
+            <td>invalid JSON, tool failure</td>
+            <td>文本模式重试<br><code>enable_tools=False</code></td>
+          </tr>
+          <tr>
+            <td><span class="tag tag-red">RESOURCE</span></td>
+            <td>circuit breaker, quota</td>
+            <td><strong>终止</strong></td>
+          </tr>
+          <tr>
+            <td><span class="tag tag-purple">SEMANTIC</span></td>
+            <td>wrong output, quality issue</td>
+            <td>增强上下文重试</td>
+          </tr>
+          <tr>
+            <td><span class="tag tag-yellow">GATE_REJECTED</span></td>
+            <td>人工拒绝</td>
+            <td>反馈循环重试</td>
+          </tr>
+          <tr>
+            <td><span class="tag tag-pink">UNKNOWN</span></td>
+            <td>无法分类</td>
+            <td>标记失败</td>
+          </tr>
+        </table>
+      </div>
+    </div>
+    <div class="gcard">
+      <div class="gcard-title" style="color: var(--accent-purple);">&#129504; 结构化反思三元组</div>
+      <div class="gcard-body">
+        <code>SKILL_REFLECTION_ENABLED=True</code> 时，失败后 LLM 分析错误生成：
+        <div class="ascii" style="margin: 8px 0; padding: 12px; font-size: 10px; line-height: 1.6;">{
+  "root_cause": "SQL查询缺少JOIN导致字段不存在",
+  "lesson":     "关联查询时必须显式JOIN所有引用的表",
+  "suggestion": "在SELECT前添加LEFT JOIN user_profiles"
+}</div>
+        <strong>三元组去向：</strong>
+        <ul>
+          <li><code>root_cause</code> + <code>lesson</code> + <code>suggestion</code> 全部注入<strong>重试 prompt</strong></li>
+          <li><code>lesson</code> 持久化到 Project Memory<br>（<code>issues</code> 类别，confidence=0.7）</li>
+          <li>效果：<strong>A 任务踩的坑，B 任务天然避开</strong></li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── 9. Three-Source Memory ── -->
+  <div class="section-title">9. 三源记忆系统 — 跨任务知识积累</div>
+  <div class="section-subtitle">worker/memory.py + memory_extractor.py — LLM 提取 / 失败反思 / 人类反馈三重来源</div>
+
+  <div class="loop-container lc-green">
+    <div class="loop-title">
+      三种知识来源 &rarr; 四个知识类别 &rarr; 角色维度 RBAC 访问
+    </div>
+
+    <!-- Source 1 -->
+    <div style="display: flex; gap: 16px; flex-wrap: wrap; margin-bottom: 20px;">
+      <div style="flex: 1; min-width: 250px; padding: 14px; border-radius: 10px; border: 1px solid rgba(79,143,247,0.3); background: rgba(79,143,247,0.05);">
+        <div style="font-size: 13px; font-weight: 700; color: var(--accent-blue); margin-bottom: 6px;">&#128218; Source 1: LLM 自动提取</div>
+        <div style="font-size: 11px; color: var(--text-dim); line-height: 1.6;">
+          任务完成后，<code>extract_and_store_memories()</code> 将所有 stage 输出（截断 8000 字符）发送给 LLM<br>
+          提取最多 <strong>10 条</strong>知识条目<br>
+          Confidence: <span class="tag tag-blue">可变</span>（LLM 自评）
+        </div>
+      </div>
+      <div style="flex: 1; min-width: 250px; padding: 14px; border-radius: 10px; border: 1px solid rgba(251,146,60,0.3); background: rgba(251,146,60,0.05);">
+        <div style="font-size: 13px; font-weight: 700; color: var(--accent-orange); margin-bottom: 6px;">&#128161; Source 2: 失败反思</div>
+        <div style="font-size: 11px; color: var(--text-dim); line-height: 1.6;">
+          Stage 失败 + <code>SKILL_REFLECTION_ENABLED</code> 时<br>
+          <code>lesson</code> 存入 <code>issues</code> 类别<br>
+          Confidence: <span class="tag tag-orange">0.7</span>（中等可信）
+        </div>
+      </div>
+      <div style="flex: 1; min-width: 250px; padding: 14px; border-radius: 10px; border: 1px solid rgba(52,211,153,0.3); background: rgba(52,211,153,0.05);">
+        <div style="font-size: 13px; font-weight: 700; color: var(--accent-green); margin-bottom: 6px;">&#128100; Source 3: 人类 Gate 反馈</div>
+        <div style="font-size: 11px; color: var(--text-dim); line-height: 1.6;">
+          Gate 被拒绝时，LLM 蒸馏审阅者评论为一句话教训<br>
+          存入 <code>SkillFeedbackModel</code> + <code>ProjectMemoryStore</code><br>
+          Confidence: <span class="tag tag-green">1.0</span>（最高 — 人类来源）
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Memory Categories -->
+  <div style="margin-top: 8px;">
+    <div style="font-size: 13px; font-weight: 600; margin-bottom: 12px; color: var(--text);">四个知识类别 + 角色维度 RBAC</div>
+    <table class="qa-table">
+      <tr>
+        <th style="width: 120px;">角色</th>
+        <th><span class="tag tag-blue">conventions</span> 编码规范</th>
+        <th><span class="tag tag-purple">architecture</span> 架构决策</th>
+        <th><span class="tag tag-green">patterns</span> 实现模式</th>
+        <th><span class="tag tag-orange">issues</span> 已知问题</th>
+      </tr>
+      <tr>
+        <td style="color: var(--accent-cyan); font-weight: 600;">orchestrator</td>
+        <td style="text-align: center; color: var(--accent-green);">&#9679;</td>
+        <td style="text-align: center; color: var(--accent-green);">&#9679;</td>
+        <td style="text-align: center; color: var(--accent-green);">&#9679;</td>
+        <td style="text-align: center; color: var(--accent-green);">&#9679;</td>
+      </tr>
+      <tr>
+        <td style="color: var(--accent-blue); font-weight: 600;">coding</td>
+        <td style="text-align: center; color: var(--accent-green);">&#9679;</td>
+        <td style="text-align: center; color: var(--text-muted);">&#9675;</td>
+        <td style="text-align: center; color: var(--accent-green);">&#9679;</td>
+        <td style="text-align: center; color: var(--accent-green);">&#9679;</td>
+      </tr>
+      <tr>
+        <td style="color: var(--accent-orange); font-weight: 600;">test</td>
+        <td style="text-align: center; color: var(--text-muted);">&#9675;</td>
+        <td style="text-align: center; color: var(--text-muted);">&#9675;</td>
+        <td style="text-align: center; color: var(--accent-green);">&#9679;</td>
+        <td style="text-align: center; color: var(--accent-green);">&#9679;</td>
+      </tr>
+      <tr>
+        <td style="color: var(--accent-purple); font-weight: 600;">review</td>
+        <td style="text-align: center; color: var(--accent-green);">&#9679;</td>
+        <td style="text-align: center; color: var(--accent-green);">&#9679;</td>
+        <td style="text-align: center; color: var(--text-muted);">&#9675;</td>
+        <td style="text-align: center; color: var(--accent-green);">&#9679;</td>
+      </tr>
+      <tr>
+        <td style="color: var(--accent-green); font-weight: 600;">spec</td>
+        <td style="text-align: center; color: var(--accent-green);">&#9679;</td>
+        <td style="text-align: center; color: var(--accent-green);">&#9679;</td>
+        <td style="text-align: center; color: var(--accent-green);">&#9679;</td>
+        <td style="text-align: center; color: var(--accent-green);">&#9679;</td>
+      </tr>
+      <tr>
+        <td style="color: var(--accent-pink); font-weight: 600;">smoke / doc</td>
+        <td style="text-align: center; color: var(--text-muted);">&#9675;</td>
+        <td style="text-align: center; color: var(--text-muted);">&#9675;</td>
+        <td style="text-align: center; color: var(--accent-green);">&#9679;</td>
+        <td style="text-align: center; color: var(--accent-green);">&#9679;</td>
+      </tr>
+    </table>
+    <div style="font-size: 11px; color: var(--text-muted); margin-top: 6px;">
+      <span style="color: var(--accent-green);">&#9679;</span> 可访问 &nbsp;&nbsp;
+      <span style="color: var(--text-muted);">&#9675;</span> 不可见 &nbsp;&nbsp;
+      设计原则：<strong>最小知识原则</strong> — test agent 不需要架构决策，review agent 不需要实现模式
+    </div>
+  </div>
+
+  <div class="hbox c-green" style="margin-top: 16px;">
+    <div class="hbox-title" style="color: var(--accent-green);">存储与淘汰策略</div>
+    <div class="hbox-body">
+      文件级存储：<code>platform/memory/{project_id}/</code> — <code>index.json</code> + 4 个类别 JSON 文件<br>
+      每类别上限 <code>MEMORY_MAX_ENTRIES_PER_CATEGORY</code>（默认 50），超出时 FIFO 淘汰最旧条目<br>
+      每次 stage 执行注入该角色可见类别的最近 10 条记忆
+    </div>
+  </div>
+
+  <!-- ════════════════════════════════════════════════ -->
+  <!-- PART IV: ISOLATION & SECURITY LAYER             -->
+  <!-- ════════════════════════════════════════════════ -->
+  <div class="section-title" style="border-color: var(--accent-red);">Part IV &mdash; 隔离与安全层</div>
+
+  <!-- ── 10. Sandbox ── -->
+  <div class="section-title">10. Sandbox 容器隔离 — Docker Per-Task 安全沙箱</div>
+  <div class="section-subtitle">worker/sandbox.py + sandbox/agent_server.py — 每个 coding/test stage 一个独立容器</div>
+
+  <div class="ascii">
+  ┌─────────────────────────────────────────────────────────────────────────────┐
+  │                        Platform (Host Process)                              │
+  │                                                                             │
+  │  ┌──────────────┐    HTTP :9090    ┌──────────────────────────────────────┐ │
+  │  │   Executor   │ ───────────────▶ │       Docker Container              │ │
+  │  │              │                  │  ┌────────────────────────────────┐  │ │
+  │  │  _execute_   │  /execute_stream │  │    agent_server.py (FastAPI)  │  │ │
+  │  │  in_sandbox()│ ◀─── NDJSON ──── │  │                              │  │ │
+  │  │              │   heartbeat: 2s  │  │  LLM Client ──▶ OpenAI/etc  │  │ │
+  │  └──────────────┘                  │  │  Tool Exec  ──▶ /workspace  │  │ │
+  │                                    │  │  tool_policy.py (sandbox)   │  │ │
+  │                                    │  └────────────────────────────────┘  │ │
+  │                                    │                                      │ │
+  │                                    │  Security:                           │ │
+  │                                    │  --cap-drop=ALL                      │ │
+  │                                    │  --security-opt=no-new-privileges    │ │
+  │                                    │  --cpus / --memory / --pids-limit    │ │
+  │                                    │  Optional: --read-only + tmpfs       │ │
+  │                                    │  Network: sa-sandbox-net (isolated)  │ │
+  │                                    │  Mount: /workspace (bind, rw)        │ │
+  │                                    └──────────────────────────────────────┘ │
+  │                                                                             │
+  │  Concurrency: asyncio.Semaphore(SANDBOX_MAX_CONCURRENT=4)                  │
+  │  Fallback:    graceful (in-process) │ strict (must sandbox)                │
+  └─────────────────────────────────────────────────────────────────────────────┘</div>
+
+  <div class="grid-3">
+    <div class="gcard">
+      <div class="gcard-title" style="color: var(--accent-red);">&#128274; 安全加固 7 层</div>
+      <div class="gcard-body">
+        <ul>
+          <li><code>--cap-drop=ALL</code> 移除全部 Linux 能力</li>
+          <li><code>no-new-privileges</code> 禁止提权</li>
+          <li>CPU / 内存 / PID 限制</li>
+          <li>可选只读根文件系统 + tmpfs</li>
+          <li>隔离 Docker 网络</li>
+          <li>仅挂载 <code>/workspace</code></li>
+          <li>非 root 用户 (UID 1000)</li>
+        </ul>
+      </div>
+    </div>
+    <div class="gcard">
+      <div class="gcard-title" style="color: var(--accent-cyan);">&#128225; NDJSON Streaming</div>
+      <div class="gcard-body">
+        <code>/execute_stream</code> 端点：
+        <ul>
+          <li>增量事件：turn_start, tool_call, tool_output, turn_end</li>
+          <li>2 秒心跳保活</li>
+          <li>Platform 优先使用 streaming，404 回退 legacy</li>
+          <li>支持实时 stage 日志推送到前端</li>
+        </ul>
+      </div>
+    </div>
+    <div class="gcard">
+      <div class="gcard-title" style="color: var(--accent-orange);">&#128269; Model API Forensics</div>
+      <div class="gcard-body">
+        <code>SANDBOX_DUMP_MODEL_API_RESPONSE=true</code>
+        <ul>
+          <li>Monkey-patch <code>chat.completions.create</code></li>
+          <li>拦截并记录每次 LLM API 原始 request/response</li>
+          <li>JSONL 格式存档，可从宿主机挂载访问</li>
+          <li>用于事后<strong>完整重放</strong> Agent 决策链</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── 11. Git Worktree ── -->
+  <div class="section-title">11. Git Worktree Per-Task 隔离</div>
+  <div class="section-subtitle">worker/worktree.py — 每个任务独享 Git 分支和工作目录</div>
+
+  <div class="loop-container lc-blue">
+    <div class="loop-title">
+      Worktree 生命周期
+      <span class="loop-badge badge-blue">PER-TASK ISOLATION</span>
+    </div>
+    <div class="loop-flow">
+      <div class="loop-step">
+        <div class="loop-dot dot-cyan"></div>
+        <div class="loop-step-content">
+          <div class="loop-step-title" style="color: var(--accent-cyan);">1. Repo Mirror 管理</div>
+          <div class="loop-step-desc">
+            <code>ensure_repo_local_mirror()</code> — 维护远程仓库的本地 clone<br>
+            <code>asyncio.Lock</code> 防止并发 fetch/clone 竞争
+          </div>
+        </div>
+      </div>
+      <div class="loop-step">
+        <div class="loop-dot dot-blue"></div>
+        <div class="loop-step-content">
+          <div class="loop-step-title" style="color: var(--accent-blue);">2. Worktree 创建</div>
+          <div class="loop-step-desc">
+            <code>git worktree add -b task/{8char}-{slug}</code><br>
+            支持中文分支名（<code>\u4e00-\u9fff</code> 范围），从 base branch 签出
+          </div>
+        </div>
+      </div>
+      <div class="loop-step">
+        <div class="loop-dot dot-green"></div>
+        <div class="loop-step-content">
+          <div class="loop-step-title" style="color: var(--accent-green);">3. Stage 执行</div>
+          <div class="loop-step-desc">所有 stages 共享同一 worktree 作为工作目录，Agent 可在真实 git 仓库中操作</div>
+        </div>
+      </div>
+      <div class="loop-step">
+        <div class="loop-dot dot-orange"></div>
+        <div class="loop-step-content">
+          <div class="loop-step-title" style="color: var(--accent-orange);">4. Commit + Push + PR</div>
+          <div class="loop-step-desc">
+            <code>commit_and_push()</code>：stage all &rarr; commit &rarr; push（带重试）<br>
+            <code>create_pr()</code>：<code>gh pr create</code>，支持 GitHub Enterprise（<code>GH_HOST</code> + <code>GH_ENTERPRISE_TOKEN</code>）
+          </div>
+        </div>
+      </div>
+      <div class="loop-step">
+        <div class="loop-dot dot-red"></div>
+        <div class="loop-step-content">
+          <div class="loop-step-title" style="color: var(--accent-red);">5. 清理 + 崩溃恢复</div>
+          <div class="loop-step-desc">
+            <code>cleanup_worktree()</code>：<code>git worktree remove --force</code><br>
+            Worker 启动时 <code>_prune_stale_worktrees()</code> 自动清理孤儿工作树
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── 12. Tool Policy ── -->
+  <div class="section-title">12. Tool Execution Policy — 三层工具安全</div>
+  <div class="section-subtitle">sandbox/tool_policy.py — Platform + Sandbox 共享的统一工具策略</div>
+
+  <div class="layer-stack">
+    <div class="layer-row">
+      <div class="layer-label" style="color: var(--accent-red);">Layer 1<br>角色白名单</div>
+      <div class="layer-content">
+        <div class="lbox c-red">
+          <div class="lbox-title">get_tools() 过滤</div>
+          <div class="lbox-sub">每个角色只暴露允许的工具子集</div>
+        </div>
+        <div class="lbox c-dim">
+          <div class="lbox-sub">例: doc 角色没有 execute 工具</div>
+        </div>
+      </div>
+    </div>
+    <div class="layer-row">
+      <div class="layer-label" style="color: var(--accent-orange);">Layer 2<br>运行时验证</div>
+      <div class="layer-content">
+        <div class="lbox c-orange">
+          <div class="lbox-title">JSON 参数解析 + 校验</div>
+          <div class="lbox-sub">无效 JSON 返回可操作错误提示（含期望格式）</div>
+        </div>
+        <div class="lbox c-dim">
+          <div class="lbox-sub">自动注入 cwd 参数</div>
+        </div>
+      </div>
+    </div>
+    <div class="layer-row">
+      <div class="layer-label" style="color: var(--accent-purple);">Layer 3<br>路径沙箱</div>
+      <div class="layer-content">
+        <div class="lbox c-purple">
+          <div class="lbox-title">_resolve_workspace_path()</div>
+          <div class="lbox-sub">relative_to 检查，阻止 workspace 逃逸</div>
+        </div>
+        <div class="lbox c-dim">
+          <div class="lbox-sub">../../etc/passwd → 拒绝</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ════════════════════════════════════════════════ -->
+  <!-- PART V: EVENT-DRIVEN & OBSERVABILITY LAYER      -->
+  <!-- ════════════════════════════════════════════════ -->
+  <div class="section-title" style="border-color: var(--accent-yellow);">Part V &mdash; 事件驱动与可观测性层</div>
+
+  <!-- ── 13. Trigger Engine ── -->
+  <div class="section-title">13. 触发规则引擎 — 事件驱动任务创建</div>
+  <div class="section-subtitle">services/trigger_service.py + worker/scheduler.py — Webhook + Cron 双驱动</div>
+
+  <div class="grid-2">
+    <div class="gcard">
+      <div class="gcard-title" style="color: var(--accent-cyan);">&#127384; 布尔表达式树过滤器</div>
+      <div class="gcard-body">
+        超越简单的 AND 平级过滤，支持<strong>递归嵌套</strong>的布尔逻辑：
+        <div class="ascii" style="margin: 8px 0; padding: 12px; font-size: 10px; line-height: 1.5;">{
+  "op": "or",
+  "conditions": [
+    {
+      "op": "and",
+      "conditions": [
+        {"type": "branch", "value": "main"},
+        {"type": "labels", "value": ["urgent"]}
+      ]
+    },
+    {"type": "title_contains", "value": "hotfix"}
+  ]
+}</div>
+        谓词类型：<code>labels</code>, <code>branch</code>, <code>title_contains</code>, <code>author_not</code><br>
+        运算符：<code>and</code>, <code>or</code>, <code>not</code> 任意嵌套
+      </div>
+    </div>
+    <div class="gcard">
+      <div class="gcard-title" style="color: var(--accent-orange);">&#128336; 去重 + Cron + Dry-Run</div>
+      <div class="gcard-body">
+        <strong>去重窗口：</strong><br>
+        <code>dedup_key_template</code>（如 <code>"jira:{issue_key}"</code>）+ <code>dedup_window_hours</code>（默认 24h）<br>
+        窗口内相同 key 的事件不会重复创建任务<br><br>
+        <strong>Cron 调度器：</strong><br>
+        每 60 秒扫描 <code>source="cron"</code> 的规则<br>
+        <code>croniter</code> 计算下次触发时间<br><br>
+        <strong>Dry-Run 测试：</strong><br>
+        <code>simulate_event()</code> / <code>test_rule()</code><br>
+        完整执行过滤和去重逻辑但<strong>不创建任务</strong>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── 14. Skill Analytics ── -->
+  <div class="section-title">14. Skill 效能分析体系</div>
+  <div class="section-subtitle">25 个 Skill &times; 8 个角色目录 — 可量化的 Agent 能力矩阵</div>
+
+  <div class="grid-2">
+    <div class="gcard">
+      <div class="gcard-title" style="color: var(--accent-purple);">&#128218; 25 Skill &times; 8 目录</div>
+      <div class="gcard-body">
+        <table class="qa-table" style="margin: 0;">
+          <tr><th>目录</th><th>Skills</th></tr>
+          <tr><td><code>orchestrator/</code></td><td>parse-requirements, quality-signoff, risk-assessment, task-decompose</td></tr>
+          <tr><td><code>coding/</code></td><td>debug-code, generate-code, implement-api, refactor-code</td></tr>
+          <tr><td><code>spec/</code></td><td>design-api, design-architecture, design-database</td></tr>
+          <tr><td><code>test/</code></td><td>unit-test, integration-test, e2e-test, performance-test</td></tr>
+          <tr><td><code>review/</code></td><td>code-review, dependency-audit, security-scan</td></tr>
+          <tr><td><code>smoke/</code></td><td>api-health-check, smoke-test</td></tr>
+          <tr><td><code>doc/</code></td><td>api-doc, changelog, readme-gen</td></tr>
+          <tr><td><code>shared/</code></td><td>search-codebase</td></tr>
+        </table>
+      </div>
+    </div>
+    <div class="gcard">
+      <div class="gcard-title" style="color: var(--accent-green);">&#128200; 效能量化指标</div>
+      <div class="gcard-body">
+        <code>aggregate_skill_metrics()</code> 从 <code>task_stage_logs</code> 统计：
+        <ul>
+          <li>每个 Skill 的<strong>调用次数</strong></li>
+          <li><strong>成功率</strong>（成功 / 总调用）</li>
+          <li><strong>平均执行时长</strong></li>
+          <li><strong>平均 Token 消耗</strong></li>
+          <li><strong>Gate 拒绝次数</strong>（人类不满意率）</li>
+        </ul>
+        <div class="hbox c-green" style="margin-top: 10px; padding: 10px;">
+          <div class="hbox-body">数据驱动 Skill 优化：高拒绝率的 Skill 可能需要改进 prompt 或增加 evaluator</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── 15. KPI ROI ── -->
+  <div class="section-title">15. KPI ROI 仪表板 — 量化 Agent 投资回报</div>
+  <div class="section-subtitle">services/kpi_service.py — 三大视图：总览 / ROI 分析 / 开发者驾驶舱</div>
+
+  <div class="grid-3">
+    <div class="gcard">
+      <div class="gcard-title" style="color: var(--accent-blue);">&#128202; KPI Summary</div>
+      <div class="gcard-body">
+        <ul>
+          <li>任务总数 / 完成率</li>
+          <li>平均执行时长（分钟）</li>
+          <li>总 Token 消耗</li>
+          <li>总成本（RMB）</li>
+          <li>近期 KPI 指标记录</li>
+        </ul>
+      </div>
+    </div>
+    <div class="gcard">
+      <div class="gcard-title" style="color: var(--accent-green);">&#128176; ROI Dashboard</div>
+      <div class="gcard-body">
+        <ul>
+          <li><strong>人工成本估算</strong>：<br><code>estimated_hours &times; hourly_rate</code><br>（默认 8h &times; &yen;150/h = &yen;1200）</li>
+          <li><strong>Agent 成本</strong>：Token 换算</li>
+          <li><strong>ROI 比率</strong>：<br><code>total_savings / agent_cost</code></li>
+          <li>按角色拆分效率指标</li>
+        </ul>
+      </div>
+    </div>
+    <div class="gcard">
+      <div class="gcard-title" style="color: var(--accent-orange);">&#128736; Developer Cockpit</div>
+      <div class="gcard-body">
+        运营实时视图：
+        <ul>
+          <li>&#128308; 等待审批的 Gates</li>
+          <li>&#9654; 正在运行的任务 + 当前 stage</li>
+          <li>&#10060; 今日失败任务</li>
+          <li>&#9989; 今日完成任务</li>
+          <li>最近完成列表</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── 16. Conditional Skip ── -->
+  <div class="section-title">16. 条件跳过逻辑 — Stage 动态裁剪</div>
+  <div class="section-subtitle">worker/conditions.py — 基于前序 Stage 输出的条件表达式评估</div>
+
+  <div class="grid-2">
+    <div class="gcard">
+      <div class="gcard-title" style="color: var(--accent-yellow);">&#128268; 条件定义</div>
+      <div class="gcard-body">
+        Stage 模板中的 <code>condition</code> 字段：
+        <div class="ascii" style="margin: 8px 0; padding: 12px; font-size: 10px;">{"source_stage": "code",
+ "field": "metadata.coverage.lines",
+ "operator": "gte",
+ "value": 80}</div>
+        当 code stage 的输出中 <code>metadata.coverage.lines &ge; 80</code> 时才执行此 stage
+      </div>
+    </div>
+    <div class="gcard">
+      <div class="gcard-title" style="color: var(--accent-cyan);">&#128295; 支持的操作符</div>
+      <div class="gcard-body">
+        <div style="display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px;">
+          <span class="tag tag-blue">eq</span>
+          <span class="tag tag-blue">ne</span>
+          <span class="tag tag-green">gt</span>
+          <span class="tag tag-green">lt</span>
+          <span class="tag tag-green">gte</span>
+          <span class="tag tag-green">lte</span>
+          <span class="tag tag-orange">contains</span>
+          <span class="tag tag-orange">not_contains</span>
+          <span class="tag tag-purple">exists</span>
+          <span class="tag tag-purple">not_exists</span>
+        </div>
+        <ul>
+          <li><strong>点表示法</strong>支持深层字段访问：<code>metadata.coverage.lines</code></li>
+          <li>未知操作符 / 缺失 source stage &rarr; 默认<strong>执行</strong>（安全侧）</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <!-- ════════════════════════════════════════════════ -->
+  <!-- FINAL: COMPLETE ASCII DATA FLOW                 -->
+  <!-- ════════════════════════════════════════════════ -->
+  <div class="section-title" style="border-color: var(--accent-pink);">Appendix &mdash; 完整 Agentic Engineering 数据流</div>
+
+  <div class="ascii">
+  ┌─────────────────────────────────────────────────────────────────────────────────────────┐
+  │                            AGENTIC ENGINEERING DATA FLOW                                │
+  │                                                                                         │
+  │  ┌─────────────┐    ┌──────────────┐    ┌──────────────────────────────────────────┐   │
+  │  │  External    │    │  Trigger     │    │            Template System               │   │
+  │  │  Events      │───▶│  Engine      │───▶│  ┌─────────────────────────────────┐    │   │
+  │  │              │    │              │    │  │ stages: [{name, role, order,    │    │   │
+  │  │  GitHub      │    │  bool-tree   │    │  │   depends_on, condition,        │    │   │
+  │  │  Jira        │    │  filter      │    │  │   on_failure, evaluator,        │    │   │
+  │  │  GitLab      │    │  dedup       │    │  │   model, context_from}]         │    │   │
+  │  │  Cron        │    │  dry-run     │    │  │ gates: [{after_stage, type}]    │    │   │
+  │  └─────────────┘    └──────────────┘    │  │ version: immutable chain        │    │   │
+  │                                          │  └──────────────────┬──────────────┘    │   │
+  │                                          └─────────────────────┼───────────────────┘   │
+  │                                                                │                       │
+  │                                                                ▼                       │
+  │  ┌─────────────────────────────────────────────────────────────────────────────────┐   │
+  │  │                          ENGINE (Dual-Mode Execution)                            │   │
+  │  │                                                                                   │   │
+  │  │  ┌─ Linear Mode ──────────────────────────────────────────────────────────────┐  │   │
+  │  │  │  order=1 → order=2 → order=3 (same order = parallel)                      │  │   │
+  │  │  └────────────────────────────────────────────────────────────────────────────┘  │   │
+  │  │  ┌─ DAG Mode ─────────────────────────────────────────────────────────────────┐  │   │
+  │  │  │  StageGraph → get_ready_stages() → parallel exec → on_failure redirect    │  │   │
+  │  │  │  cycle detection (DFS 3-color) │ max_executions │ GRAPH_MAX_LOOP          │  │   │
+  │  │  └────────────────────────────────────────────────────────────────────────────┘  │   │
+  │  │                                                                                   │   │
+  │  │   For each stage:                                                                 │   │
+  │  │   ┌──────────────────────────────────────────────────────────────────────────┐    │   │
+  │  │   │                                                                          │    │   │
+  │  │   │  ① Condition Check ──(skip?)──▶ ② Model Resolve (stage>role>global)     │    │   │
+  │  │   │         │                              │                                 │    │   │
+  │  │   │         ▼                              ▼                                 │    │   │
+  │  │   │  ③ Prompt Assembly:                ④ Agent Runner                        │    │   │
+  │  │   │     task + repo_ctx                   (role, task_id)                    │    │   │
+  │  │   │     + memory (RBAC)                   runtime signature                 │    │   │
+  │  │   │     + compressed_outputs              cache / rebuild                   │    │   │
+  │  │   │     + retry_ctx                       │                                 │    │   │
+  │  │   │     + gate_feedback                   ▼                                 │    │   │
+  │  │   │     + instruction               ┌──────────────┐                        │    │   │
+  │  │   │                                 │  Sandbox /    │                        │    │   │
+  │  │   │                                 │  In-Process   │                        │    │   │
+  │  │   │                                 │  Execution    │                        │    │   │
+  │  │   │                                 └──────┬───────┘                        │    │   │
+  │  │   │                                        │                                 │    │   │
+  │  │   │  ⑤ Self-Evaluation Loop:              │                                 │    │   │
+  │  │   │     confidence < threshold? ──(yes)──▶ re-execute (max 3x)              │    │   │
+  │  │   │         │ (no)                                                           │    │   │
+  │  │   │         ▼                                                                │    │   │
+  │  │   │  ⑥ Circuit Breaker Check (200K tok / ¥50)                               │    │   │
+  │  │   │         │                                                                │    │   │
+  │  │   │         ▼                                                                │    │   │
+  │  │   │  ⑦ Dynamic Gate Check (confidence < 0.5?)                               │    │   │
+  │  │   │         │                                                                │    │   │
+  │  │   │         ▼                                                                │    │   │
+  │  │   │  ⑧ Static Gate (if template defines) ──▶ Human Approve/Reject/Revise   │    │   │
+  │  │   │         │                                      │                         │    │   │
+  │  │   │         │                         (reject + retry)──▶ Ralph Loop V2     │    │   │
+  │  │   │         │                                      │     root_cause          │    │   │
+  │  │   │         │                                      │     lesson → Memory     │    │   │
+  │  │   │         │                                      │     suggestion          │    │   │
+  │  │   │         ▼                                      │                         │    │   │
+  │  │   │  ⑨ Dynamic Routing (LLM picks next stage)    │                         │    │   │
+  │  │   │                                                │                         │    │   │
+  │  │   └────────────────────────────────────────────────┘                         │    │   │
+  │  │                                                                                   │   │
+  │  │  Post-Completion:                                                                 │   │
+  │  │  ┌────────────────────────────────────────────────────────────────────────────┐  │   │
+  │  │  │  Memory Extract (LLM) → conventions / architecture / patterns / issues    │  │   │
+  │  │  │  Skill Metrics Aggregate → invocations, success rate, avg duration        │  │   │
+  │  │  │  KPI Record → tokens, cost, duration, ROI                                 │  │   │
+  │  │  │  Audit Log → action_type, risk_level                                      │  │   │
+  │  │  │  Git Worktree → commit + push + create PR → cleanup                       │  │   │
+  │  │  │  External Notify → Slack / 飞书 / 钉钉                                     │  │   │
+  │  │  └────────────────────────────────────────────────────────────────────────────┘  │   │
+  │  └───────────────────────────────────────────────────────────────────────────────────┘   │
+  └─────────────────────────────────────────────────────────────────────────────────────────┘</div>
+
+  <div style="text-align: center; padding: 30px 0 10px; color: var(--text-muted); font-size: 11px;">
+    silicon_agent Agentic Engineering Highlights &mdash; Generated 2026-03-03
+  </div>
+
+</div>
+</body>
+</html>
