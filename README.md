@@ -1,5 +1,8 @@
 # Silicon Agent Platform
 
+[![CI](https://github.com/sawzhang/silicon_agent/actions/workflows/ci.yml/badge.svg)](https://github.com/sawzhang/silicon_agent/actions/workflows/ci.yml)
+[![E2E Smoke Test](https://github.com/sawzhang/silicon_agent/actions/workflows/e2e.yml/badge.svg)](https://github.com/sawzhang/silicon_agent/actions/workflows/e2e.yml)
+
 硅基数字员工集群管理平台 — 基于 LLM 驱动的多 Agent 协作软件研发系统。
 
 ## 架构概览
