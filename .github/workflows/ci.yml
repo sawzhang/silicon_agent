@@ -16,6 +16,26 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  pr-size-check:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check PR diff size
+        run: |
+          LINES=$(git diff --diff-filter=ACMR origin/${{ github.base_ref }}...HEAD -- \
+            '*.py' '*.ts' '*.tsx' '*.js' '*.jsx' \
+            ':!**/package-lock.json' ':!**/uv.lock' \
+            | grep '^[+-]' | grep -v '^[+-]\{3\}' | wc -l)
+          echo "Changed lines (added + removed): $LINES"
+          if [ "$LINES" -gt 1000 ]; then
+            echo "::error::PR diff is $LINES lines (limit: 1000). Please split into smaller PRs."
+            exit 1
+          fi
+
   backend-lint:
     runs-on: ubuntu-latest
     defaults:
