@@ -30,8 +30,17 @@ def _verify_jira_signature(body: bytes, signature: str | None) -> bool:
         return True  # no secret configured, skip verification
     if not signature:
         return False
+    return _verify_jira_signature_with_secret(body, signature, settings.JIRA_WEBHOOK_SECRET)
+
+
+def _verify_jira_signature_with_secret(
+    body: bytes, signature: str | None, secret: str
+) -> bool:
+    """Verify Jira webhook HMAC-SHA256 signature with a given secret."""
+    if not signature:
+        return False
     expected = hmac.new(
-        settings.JIRA_WEBHOOK_SECRET.encode(),
+        secret.encode(),
         body,
         hashlib.sha256,
     ).hexdigest()
@@ -84,5 +93,49 @@ async def jira_webhook(request: Request, session: AsyncSession = Depends(get_db)
         "status": "received",
         "event": event_type,
         "issue": issue_key,
+        "task_id": task_id,
+    }
+
+
+@router.post("/{project_id}")
+async def jira_webhook_project(
+    project_id: str,
+    request: Request,
+    session: AsyncSession = Depends(get_db),
+):
+    """项目级 Jira webhook：使用项目专属 secret 验签，只匹配该项目的触发规则。"""
+    from app.services.integration_service import IntegrationService
+
+    integration_svc = IntegrationService(session)
+    integration = await integration_svc.get_integration_by_project_provider(project_id, "jira")
+    if integration is None or not integration.enabled:
+        raise HTTPException(status_code=404, detail="Jira integration not found for this project")
+
+    body_bytes = await request.body()
+    signature = request.headers.get("X-Atlassian-Signature")
+
+    if not _verify_jira_signature_with_secret(body_bytes, signature, integration.webhook_secret):
+        logger.warning("Jira project webhook signature verification failed project_id=%s", project_id)
+        raise HTTPException(status_code=403, detail="Invalid webhook signature")
+
+    data = json.loads(body_bytes)
+    raw_event = data.get("webhookEvent", "unknown")
+    event_type = _JIRA_EVENT_MAP.get(raw_event, raw_event)
+    issue_key = data.get("issue", {}).get("key", "unknown")
+
+    logger.info(
+        "Jira project webhook received: project=%s event=%s issue=%s",
+        project_id, raw_event, issue_key,
+    )
+
+    payload = _normalize_jira_payload(data)
+    service = TriggerService(session)
+    task_id = await service.process_event("jira", event_type, payload, project_id=project_id)
+
+    return {
+        "status": "received",
+        "event": event_type,
+        "issue": issue_key,
+        "project_id": project_id,
         "task_id": task_id,
     }

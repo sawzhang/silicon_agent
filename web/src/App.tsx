@@ -15,6 +15,7 @@ const Audit = React.lazy(() => import('@/pages/Audit/index'));
 const Config = React.lazy(() => import('@/pages/Config/index'));
 const CircuitBreaker = React.lazy(() => import('@/pages/CircuitBreaker/index'));
 const Projects = React.lazy(() => import('@/pages/Projects/index'));
+const ProjectDetail = React.lazy(() => import('@/pages/Projects/ProjectDetail'));
 const ROI = React.lazy(() => import('@/pages/ROI/index'));
 const Cockpit = React.lazy(() => import('@/pages/Cockpit/index'));
 const TaskLogs = React.lazy(() => import('@/pages/TaskLogs/index'));
@@ -32,6 +33,7 @@ const App: React.FC = () => {
           <Route path="/dashboard" element={<Dashboard />} />
           <Route path="/tasks" element={<Tasks />} />
           <Route path="/projects" element={<Projects />} />
+          <Route path="/projects/:id" element={<ProjectDetail />} />
           <Route path="/tasks/:id" element={<TaskDetail />} />
           <Route path="/gates" element={<Gates />} />
           <Route path="/skills" element={<Skills />} />

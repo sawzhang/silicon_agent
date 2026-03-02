@@ -34,13 +34,20 @@ _GITHUB_EVENT_MAP: dict[tuple[str, str | None], str] = {
 
 
 def _verify_signature(body: bytes, signature: str | None) -> bool:
-    """验证 GitHub webhook HMAC-SHA256 签名（X-Hub-Signature-256 头）。"""
+    """验证 GitHub webhook HMAC-SHA256 签名（X-Hub-Signature-256 头），使用全局 secret。"""
     if not settings.GITHUB_WEBHOOK_SECRET:
         return True  # 未配置 secret，跳过验证
     if not signature:
         return False
+    return _verify_signature_with_secret(body, signature, settings.GITHUB_WEBHOOK_SECRET)
+
+
+def _verify_signature_with_secret(body: bytes, signature: str | None, secret: str) -> bool:
+    """验证 GitHub webhook HMAC-SHA256 签名。"""
+    if not signature:
+        return False
     expected = "sha256=" + hmac.new(
-        settings.GITHUB_WEBHOOK_SECRET.encode(),
+        secret.encode(),
         body,
         hashlib.sha256,
     ).hexdigest()
@@ -169,5 +176,51 @@ async def github_webhook(request: Request, session: AsyncSession = Depends(get_d
         "status": "received",
         "event": event_type,
         "repo": repo_name,
+        "task_id": task_id,
+    }
+
+
+@router.post("/{project_id}")
+async def github_webhook_project(
+    project_id: str,
+    request: Request,
+    session: AsyncSession = Depends(get_db),
+):
+    """项目级 GitHub webhook：使用项目专属 secret 验签，只匹配该项目的触发规则。"""
+    from app.services.integration_service import IntegrationService
+
+    integration_svc = IntegrationService(session)
+    integration = await integration_svc.get_integration_by_project_provider(project_id, "github")
+    if integration is None or not integration.enabled:
+        raise HTTPException(status_code=404, detail="GitHub integration not found for this project")
+
+    body_bytes = await request.body()
+    signature = request.headers.get("X-Hub-Signature-256")
+
+    if not _verify_signature_with_secret(body_bytes, signature, integration.webhook_secret):
+        logger.warning("GitHub project webhook 签名验证失败 project_id=%s", project_id)
+        raise HTTPException(status_code=403, detail="Invalid webhook signature")
+
+    import json
+    body = json.loads(body_bytes)
+
+    gh_event = request.headers.get("X-GitHub-Event", "unknown")
+    event_type = _resolve_event_type(gh_event, body)
+    repo_name = (body.get("repository") or {}).get("full_name", "unknown")
+
+    logger.info(
+        "GitHub project webhook received: project=%s event=%s type=%s repo=%s",
+        project_id, gh_event, event_type, repo_name,
+    )
+
+    payload = _normalize_github_payload(gh_event, event_type, body)
+    service = TriggerService(session)
+    task_id = await service.process_event("github", event_type, payload, project_id=project_id)
+
+    return {
+        "status": "received",
+        "event": event_type,
+        "repo": repo_name,
+        "project_id": project_id,
         "task_id": task_id,
     }

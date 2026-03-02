@@ -4,8 +4,8 @@ from __future__ import annotations
 import pytest
 import pytest_asyncio
 from app.db.session import async_session_factory
-from app.models.trigger import TriggerRuleModel
-from app.services.trigger_service import _eval_filter_node, _passes_filters
+from app.models.trigger import TriggerEventModel, TriggerRuleModel
+from app.services.trigger_service import TriggerService, _eval_filter_node, _passes_filters
 
 
 # ── 复杂过滤器单元测试 ─────────────────────────────────────────────────────────
@@ -421,3 +421,136 @@ class TestSimulateEndpoint:
                 if r:
                     await session.delete(r)
                     await session.commit()
+
+
+# ── project_id 作用域测试 ─────────────────────────────────────────────────────
+
+
+@pytest_asyncio.fixture
+async def project_scoped_rules():
+    """创建两条规则：一条绑定项目 A，一条绑定项目 B。"""
+    from sqlalchemy import delete
+
+    rule_a_id = "tt-scope-a"
+    rule_b_id = "tt-scope-b"
+    async with async_session_factory() as session:
+        rule_a = TriggerRuleModel(
+            id=rule_a_id,
+            name="rule-project-a",
+            source="github",
+            event_type="pr_opened",
+            project_id="project-aaa",
+            title_template="A: {event_type}",
+            enabled=True,
+        )
+        rule_b = TriggerRuleModel(
+            id=rule_b_id,
+            name="rule-project-b",
+            source="github",
+            event_type="pr_opened",
+            project_id="project-bbb",
+            title_template="B: {event_type}",
+            enabled=True,
+        )
+        session.add_all([rule_a, rule_b])
+        await session.commit()
+
+    yield {"rule_a_id": rule_a_id, "rule_b_id": rule_b_id}
+
+    async with async_session_factory() as session:
+        await session.execute(
+            delete(TriggerEventModel).where(
+                TriggerEventModel.project_id.in_(["project-aaa", "project-bbb"])
+            )
+        )
+        for rid in (rule_a_id, rule_b_id):
+            r = await session.get(TriggerRuleModel, rid)
+            if r:
+                await session.delete(r)
+        await session.commit()
+
+
+@pytest.mark.asyncio
+async def test_process_event_with_project_id_scopes(project_scoped_rules):
+    """process_event with project_id only matches that project's rules."""
+    async with async_session_factory() as session:
+        svc = TriggerService(session)
+        # project-aaa event should match rule A, not rule B
+        await svc.process_event(
+            "github", "pr_opened", {"event_type": "pr_opened"},
+            project_id="project-aaa",
+        )
+
+    # Check the event log: should reference project-aaa
+    async with async_session_factory() as session:
+        from sqlalchemy import select
+        res = await session.execute(
+            select(TriggerEventModel).where(
+                TriggerEventModel.project_id == "project-aaa"
+            )
+        )
+        events = res.scalars().all()
+        assert len(events) >= 1
+        # The event should have been logged for project-aaa
+        assert events[0].project_id == "project-aaa"
+
+
+@pytest.mark.asyncio
+async def test_process_event_without_project_id_matches_all(project_scoped_rules):
+    """process_event without project_id matches rules from all projects."""
+    async with async_session_factory() as session:
+        svc = TriggerService(session)
+        # Without project_id, should match rule A (first by created_at)
+        await svc.process_event(
+            "github", "pr_opened", {"event_type": "pr_opened"},
+        )
+
+    # Check events were logged without project_id scope
+    async with async_session_factory() as session:
+        from sqlalchemy import select
+        res = await session.execute(
+            select(TriggerEventModel).where(
+                TriggerEventModel.project_id.is_(None),
+                TriggerEventModel.source == "github",
+            ).order_by(TriggerEventModel.created_at.desc()).limit(5)
+        )
+        events = res.scalars().all()
+        assert len(events) >= 1
+
+
+@pytest.mark.asyncio
+async def test_list_rules_by_project(project_scoped_rules):
+    """list_rules_by_project returns only that project's rules."""
+    async with async_session_factory() as session:
+        svc = TriggerService(session)
+        rules_a = await svc.list_rules_by_project("project-aaa")
+        rules_b = await svc.list_rules_by_project("project-bbb")
+
+    assert len(rules_a) == 1
+    assert rules_a[0].name == "rule-project-a"
+    assert len(rules_b) == 1
+    assert rules_b[0].name == "rule-project-b"
+
+
+@pytest.mark.asyncio
+async def test_list_events_by_project(project_scoped_rules):
+    """list_events_by_project returns only that project's events."""
+    # First, generate some events
+    async with async_session_factory() as session:
+        svc = TriggerService(session)
+        await svc.process_event(
+            "github", "pr_opened", {"event_type": "pr_opened"},
+            project_id="project-aaa",
+        )
+
+    async with async_session_factory() as session:
+        svc = TriggerService(session)
+        events_a = await svc.list_events_by_project("project-aaa")
+        events_b = await svc.list_events_by_project("project-bbb")
+
+    assert len(events_a) >= 1
+    for e in events_a:
+        assert e.project_id == "project-aaa"
+    # project-bbb should have no events (or at least none from this test)
+    for e in events_b:
+        assert e.project_id == "project-bbb"

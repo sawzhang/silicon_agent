@@ -73,6 +73,8 @@ class TriggerEventModel(Base):
     task_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
     # 计算出的去重键
     dedup_key: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+    # 关联项目（项目级 webhook 传入）
+    project_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True, index=True)
     # 处理结果: "triggered" | "skipped_no_rule" | "skipped_filter" | "skipped_dedup"
     result: Mapped[str] = mapped_column(String(30), nullable=False)
     created_at: Mapped[datetime] = mapped_column(

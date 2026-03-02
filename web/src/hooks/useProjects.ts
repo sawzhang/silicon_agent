@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { listProjects, createProject, updateProject, deleteProject } from '@/services/projectApi';
+import { listProjects, getProject, createProject, updateProject, deleteProject } from '@/services/projectApi';
 import type { ProjectCreateRequest, ProjectUpdateRequest } from '@/types/project';
 
 export function useProjectList(params?: {
@@ -11,6 +11,14 @@ export function useProjectList(params?: {
   return useQuery({
     queryKey: ['projects', params],
     queryFn: () => listProjects(params),
+  });
+}
+
+export function useProject(id: string) {
+  return useQuery({
+    queryKey: ['project', id],
+    queryFn: () => getProject(id),
+    enabled: !!id,
   });
 }
 

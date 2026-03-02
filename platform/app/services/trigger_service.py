@@ -23,19 +23,24 @@ class TriggerService:
         source: str,
         event_type: str,
         payload: dict,
+        project_id: Optional[str] = None,
     ) -> Optional[str]:
         """处理外部事件，匹配规则并创建任务。
+
+        Args:
+            project_id: 项目级 webhook 传入时，只匹配该项目的规则。
 
         Returns:
             创建的 task_id，或 None（未触发）。
         """
         # 查找匹配的启用规则，按创建时间升序确保「首条命中」顺序确定
-        result = await self.session.execute(
-            select(TriggerRuleModel).where(
-                TriggerRuleModel.source == source,
-                TriggerRuleModel.enabled.is_(True),
-            ).order_by(TriggerRuleModel.created_at)
+        query = select(TriggerRuleModel).where(
+            TriggerRuleModel.source == source,
+            TriggerRuleModel.enabled.is_(True),
         )
+        if project_id is not None:
+            query = query.where(TriggerRuleModel.project_id == project_id)
+        result = await self.session.execute(query.order_by(TriggerRuleModel.created_at))
         rules = result.scalars().all()
 
         # 过滤 event_type（支持通配符 "*"）
@@ -45,7 +50,10 @@ class TriggerService:
         ]
 
         if not matched_rules:
-            await self._log_event(source, event_type, payload, None, None, "skipped_no_rule")
+            await self._log_event(
+                source, event_type, payload, None, None, "skipped_no_rule",
+                project_id=project_id,
+            )
             logger.info("触发器：无匹配规则 source=%s event=%s", source, event_type)
             return None
 
@@ -59,14 +67,20 @@ class TriggerService:
         for rule in matched_rules:
             # 1. 过滤器检查
             if not _passes_filters(rule.filters or {}, payload):
-                await self._log_event(source, event_type, payload, rule.id, None, "skipped_filter")
+                await self._log_event(
+                    source, event_type, payload, rule.id, None, "skipped_filter",
+                    project_id=project_id,
+                )
                 logger.info("触发器：过滤器未通过 rule=%s", rule.name)
                 continue
 
             # 2. 去重检查
             dedup_key = _render_template(rule.dedup_key_template or "", payload) or None
             if dedup_key and await self._is_duplicate(rule, dedup_key):
-                await self._log_event(source, event_type, payload, rule.id, dedup_key, "skipped_dedup")
+                await self._log_event(
+                    source, event_type, payload, rule.id, dedup_key, "skipped_dedup",
+                    project_id=project_id,
+                )
                 logger.info("触发器：去重跳过 rule=%s dedup_key=%s", rule.name, dedup_key)
                 continue
 
@@ -82,7 +96,10 @@ class TriggerService:
                 project_id=rule.project_id,
             ))
 
-            await self._log_event(source, event_type, payload, rule.id, dedup_key, "triggered", task.id)
+            await self._log_event(
+                source, event_type, payload, rule.id, dedup_key, "triggered", task.id,
+                project_id=project_id,
+            )
             logger.info(
                 "触发器：创建任务成功 rule=%s task_id=%s title=%s",
                 rule.name, task.id, title,
@@ -115,6 +132,7 @@ class TriggerService:
         dedup_key: Optional[str],
         result: str,
         task_id: Optional[str] = None,
+        project_id: Optional[str] = None,
     ) -> None:
         event = TriggerEventModel(
             source=source,
@@ -124,6 +142,7 @@ class TriggerService:
             dedup_key=dedup_key,
             result=result,
             task_id=task_id,
+            project_id=project_id,
         )
         self.session.add(event)
         await self.session.commit()
@@ -163,6 +182,25 @@ class TriggerService:
         await self.session.delete(rule)
         await self.session.commit()
         return True
+
+    async def list_rules_by_project(self, project_id: str) -> list[TriggerRuleModel]:
+        result = await self.session.execute(
+            select(TriggerRuleModel)
+            .where(TriggerRuleModel.project_id == project_id)
+            .order_by(TriggerRuleModel.created_at.desc())
+        )
+        return list(result.scalars().all())
+
+    async def list_events_by_project(
+        self, project_id: str, limit: int = 50
+    ) -> list[TriggerEventModel]:
+        result = await self.session.execute(
+            select(TriggerEventModel)
+            .where(TriggerEventModel.project_id == project_id)
+            .order_by(TriggerEventModel.created_at.desc())
+            .limit(limit)
+        )
+        return list(result.scalars().all())
 
     async def list_events(self, limit: int = 50) -> list[TriggerEventModel]:
         result = await self.session.execute(
