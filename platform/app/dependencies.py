@@ -14,6 +14,7 @@ from app.services.task_service import TaskService
 from app.services.task_log_service import TaskLogService
 from app.services.template_service import TemplateService
 from app.services.trigger_service import TriggerService
+from app.services.integration_service import IntegrationService
 
 
 async def get_agent_service(
@@ -80,6 +81,12 @@ async def get_trigger_service(
     session: AsyncSession = Depends(get_db),
 ) -> TriggerService:
     return TriggerService(session)
+
+
+async def get_integration_service(
+    session: AsyncSession = Depends(get_db),
+) -> IntegrationService:
+    return IntegrationService(session)
 
 
 async def get_llm_probe_service() -> LLMProbeService:

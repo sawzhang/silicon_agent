@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Button, Tag, message, Popconfirm, Space, Tooltip } from 'antd';
 import { PlusOutlined, DeleteOutlined, SyncOutlined, EditOutlined } from '@ant-design/icons';
 import { ProTable } from '@ant-design/pro-components';
@@ -30,6 +31,7 @@ const TECH_COLORS: Record<string, string> = {
 };
 
 const ProjectList: React.FC = () => {
+  const navigate = useNavigate();
   const actionRef = React.useRef<ActionType>();
   const createProject = useCreateProject();
   const updateProject = useUpdateProject();
@@ -61,6 +63,9 @@ const ProjectList: React.FC = () => {
       title: '名称',
       dataIndex: 'display_name',
       ellipsis: true,
+      render: (_, record) => (
+        <a onClick={() => navigate(`/projects/${record.id}`)}>{record.display_name}</a>
+      ),
     },
     {
       title: '标识代码',

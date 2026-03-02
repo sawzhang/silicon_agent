@@ -78,3 +78,45 @@ async def gitlab_webhook(request: Request, session: AsyncSession = Depends(get_d
         "project": project_name,
         "task_id": task_id,
     }
+
+
+@router.post("/{project_id}")
+async def gitlab_webhook_project(
+    project_id: str,
+    request: Request,
+    session: AsyncSession = Depends(get_db),
+):
+    """项目级 GitLab webhook：使用项目专属 token 验证，只匹配该项目的触发规则。"""
+    from app.services.integration_service import IntegrationService
+
+    integration_svc = IntegrationService(session)
+    integration = await integration_svc.get_integration_by_project_provider(project_id, "gitlab")
+    if integration is None or not integration.enabled:
+        raise HTTPException(status_code=404, detail="GitLab integration not found for this project")
+
+    token = request.headers.get("X-Gitlab-Token", "")
+    if token != integration.webhook_secret:
+        logger.warning("GitLab project webhook token verification failed project_id=%s", project_id)
+        raise HTTPException(status_code=403, detail="Invalid webhook token")
+
+    body = await request.json()
+    header_event = request.headers.get("X-Gitlab-Event", "")
+    event_type = _gitlab_event_type(body, header_event)
+    project_name = (body.get("project") or {}).get("name", "unknown")
+
+    logger.info(
+        "GitLab project webhook received: project=%s event=%s gl_project=%s",
+        project_id, event_type, project_name,
+    )
+
+    payload = _normalize_gitlab_payload(body)
+    service = TriggerService(session)
+    task_id = await service.process_event("gitlab", event_type, payload, project_id=project_id)
+
+    return {
+        "status": "received",
+        "event": event_type,
+        "project": project_name,
+        "project_id": project_id,
+        "task_id": task_id,
+    }

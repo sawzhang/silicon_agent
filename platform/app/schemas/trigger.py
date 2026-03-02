@@ -76,6 +76,7 @@ class TriggerEventResponse(BaseModel):
     rule_id: Optional[str]
     source: str
     event_type: str
+    project_id: Optional[str] = None
     task_id: Optional[str]
     dedup_key: Optional[str]
     result: str
