@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 import logging
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -167,6 +167,9 @@ async def seed_demo_data(session: AsyncSession) -> None:
 
     logger.info("Seeded %d sample tasks", len(sample_tasks))
 
+    # Flush tasks so foreign keys exist before inserting gates
+    await session.flush()
+
     # --- Seed Gates (linked to tasks) ---
     gates = [
         {
@@ -213,7 +216,7 @@ async def seed_demo_data(session: AsyncSession) -> None:
             task_id=gate_data["task_id"],
             agent_role=gate_data["agent_role"],
             status=gate_data["status"],
-            content=json.dumps(raw_content, ensure_ascii=False) if isinstance(raw_content, dict) else raw_content,
+            content=raw_content,
             reviewer=gate_data.get("reviewer"),
             review_comment=gate_data.get("review_comment"),
             reviewed_at=review_time if gate_data["status"] != "pending" else None,
@@ -230,7 +233,7 @@ async def seed_demo_data(session: AsyncSession) -> None:
         audit_log = AuditLogModel(
             agent_role=log_data["agent_role"],
             action_type=log_data["action_type"],
-            action_detail=json.dumps(detail, ensure_ascii=False) if isinstance(detail, dict) else detail,
+            action_detail=detail,
             risk_level=log_data["risk_level"],
             created_at=log_time,
         )
