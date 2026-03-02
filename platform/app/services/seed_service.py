@@ -206,12 +206,13 @@ async def seed_demo_data(session: AsyncSession) -> None:
 
     review_time = now - timedelta(hours=5, minutes=45)
     for gate_data in gates:
+        raw_content = gate_data.get("content")
         gate = HumanGateModel(
             gate_type=gate_data["gate_type"],
             task_id=gate_data["task_id"],
             agent_role=gate_data["agent_role"],
             status=gate_data["status"],
-            content=gate_data.get("content"),
+            content=json.dumps(raw_content, ensure_ascii=False) if isinstance(raw_content, dict) else raw_content,
             reviewer=gate_data.get("reviewer"),
             review_comment=gate_data.get("review_comment"),
             reviewed_at=review_time if gate_data["status"] != "pending" else None,
@@ -224,10 +225,11 @@ async def seed_demo_data(session: AsyncSession) -> None:
     # --- Seed Audit Logs ---
     log_time = now - timedelta(hours=6)
     for log_data in SEED_AUDIT_LOGS:
+        detail = log_data["action_detail"]
         audit_log = AuditLogModel(
             agent_role=log_data["agent_role"],
             action_type=log_data["action_type"],
-            action_detail=log_data["action_detail"],
+            action_detail=json.dumps(detail, ensure_ascii=False) if isinstance(detail, dict) else detail,
             risk_level=log_data["risk_level"],
             created_at=log_time,
         )
