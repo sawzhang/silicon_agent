@@ -787,3 +787,51 @@ async def test_recalculate_task_usage_after_retry(client):
             if obj:
                 await session.delete(obj)
         await session.commit()
+
+
+# ── New: NULL stage fields → schema coercion regression ────────────────────
+
+
+def test_list_tasks_with_null_stage_fields():
+    """TaskStageResponse coerces NULL int columns to 0 (legacy rows defense).
+
+    In production, ALTER TABLE ADD COLUMN on existing rows can leave int
+    columns as NULL. The fresh test DB has NOT NULL constraints so we cannot
+    create NULL rows via SQL; instead we validate the Pydantic schema layer
+    directly, which is the actual defense that prevents API 500.
+    """
+    from app.schemas.task import TaskStageResponse
+
+    # Simulate ORM object with None int fields (as returned by legacy rows)
+    stage = TaskStageResponse.model_validate({
+        "id": "fake-stage",
+        "task_id": "fake-task",
+        "stage_name": "coding",
+        "agent_role": "coding",
+        "status": "pending",
+        "tokens_used": None,
+        "turns_used": None,
+        "self_fix_count": None,
+        "retry_count": None,
+    })
+    assert stage.tokens_used == 0
+    assert stage.turns_used == 0
+    assert stage.self_fix_count == 0
+    assert stage.retry_count == 0
+
+
+def test_task_detail_response_null_tokens():
+    """TaskDetailResponse coerces NULL total_tokens and total_cost_rmb to defaults."""
+    from app.schemas.task import TaskDetailResponse
+    from datetime import datetime
+
+    task = TaskDetailResponse.model_validate({
+        "id": "fake-task",
+        "title": "Test",
+        "status": "pending",
+        "created_at": datetime.now().isoformat(),
+        "total_tokens": None,
+        "total_cost_rmb": None,
+    })
+    assert task.total_tokens == 0
+    assert task.total_cost_rmb == 0.0

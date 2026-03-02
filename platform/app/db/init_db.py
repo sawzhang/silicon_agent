@@ -35,7 +35,24 @@ def _add_missing_columns(connection) -> None:
         for col in table.columns:
             if col.name not in db_columns:
                 col_type = col.type.compile(connection.dialect)
-                stmt = f"ALTER TABLE {table_name} ADD COLUMN {col.name} {col_type}"
+
+                # Include SQL DEFAULT when the column has a scalar default,
+                # so existing rows get the value immediately (not NULL).
+                default_clause = ""
+                default_val = None
+                if col.server_default is not None:
+                    default_clause = f" DEFAULT {col.server_default.arg.text}"
+                elif col.default is not None and col.default.is_scalar:
+                    default_val = col.default.arg
+                    if isinstance(default_val, str):
+                        default_clause = f" DEFAULT '{default_val}'"
+                    else:
+                        default_clause = f" DEFAULT {default_val}"
+
+                stmt = (
+                    f"ALTER TABLE {table_name} ADD COLUMN"
+                    f" {col.name} {col_type}{default_clause}"
+                )
                 connection.execute(text(stmt))
                 logger.info("Added missing column: %s.%s (%s)", table_name, col.name, col_type)
 

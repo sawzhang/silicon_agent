@@ -16,7 +16,58 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Detect which areas changed to skip irrelevant jobs
+  changed-scope:
+    runs-on: ubuntu-latest
+    outputs:
+      backend: ${{ steps.filter.outputs.backend }}
+      frontend: ${{ steps.filter.outputs.frontend }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            backend:
+              - 'platform/**'
+            frontend:
+              - 'web/**'
+
+  pr-size-check:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check PR diff size
+        run: |
+          LINES=$(git diff --diff-filter=ACMR origin/${{ github.base_ref }}...HEAD -- \
+            '*.py' '*.ts' '*.tsx' '*.js' '*.jsx' \
+            ':!**/package-lock.json' ':!**/uv.lock' \
+            | grep '^[+-]' | grep -v '^[+-]\{3\}' | wc -l)
+          echo "Changed lines (added + removed): $LINES"
+          if [ "$LINES" -gt 1000 ]; then
+            echo "::error::PR diff is $LINES lines (limit: 1000). Please split into smaller PRs."
+            exit 1
+          fi
+
+  secret-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Scan for secrets
+        uses: trufflesecurity/trufflehog@v3.88.0
+        with:
+          extra_args: --only-verified --results=verified,unknown
+
   backend-lint:
+    needs: changed-scope
+    if: needs.changed-scope.outputs.backend == 'true' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -45,6 +96,8 @@ jobs:
         run: ruff check app/ tests/
 
   backend-test:
+    needs: changed-scope
+    if: needs.changed-scope.outputs.backend == 'true' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -106,6 +159,8 @@ jobs:
           retention-days: 30
 
   frontend-check:
+    needs: changed-scope
+    if: needs.changed-scope.outputs.frontend == 'true' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     defaults:
       run:

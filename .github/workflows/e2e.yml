@@ -1,0 +1,88 @@
+name: E2E Smoke Test
+
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+concurrency:
+  group: e2e-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  e2e-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      COMPOSE_PROJECT_NAME: e2e
+    defaults:
+      run:
+        working-directory: platform
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup SSH for private dependencies
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
+
+      - name: Build and start services
+        run: |
+          DOCKER_BUILDKIT=1 docker compose build --ssh default
+          docker compose up -d --wait
+
+      - name: Wait for app health
+        run: |
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:8000/health > /dev/null 2>&1; then
+              echo "App is healthy"
+              exit 0
+            fi
+            echo "Waiting for app... ($i/30)"
+            sleep 2
+          done
+          echo "::error::App failed to become healthy within 60s"
+          docker compose logs app
+          exit 1
+
+      - name: Run smoke tests
+        run: |
+          PASS=0
+          FAIL=0
+
+          check() {
+            local method=$1 url=$2 expect=$3 label=$4
+            status=$(curl -sf -o /dev/null -w "%{http_code}" -X "$method" "$url" 2>/dev/null || echo "000")
+            if [ "$status" = "$expect" ]; then
+              echo "✅ $label — $status"
+              PASS=$((PASS + 1))
+            else
+              echo "❌ $label — expected $expect, got $status"
+              FAIL=$((FAIL + 1))
+            fi
+          }
+
+          echo "## E2E Smoke Test Results" >> $GITHUB_STEP_SUMMARY
+
+          check GET  http://localhost:8000/health              200 "Health check"
+          check GET  http://localhost:8000/api/v1/agents       200 "List agents"
+          check GET  http://localhost:8000/api/v1/templates    200 "List templates"
+          check GET  http://localhost:8000/api/v1/tasks        200 "List tasks"
+          check GET  http://localhost:8000/api/v1/projects     200 "List projects"
+
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Passed: $PASS / $((PASS + FAIL))" | tee -a $GITHUB_STEP_SUMMARY
+
+          if [ "$FAIL" -gt 0 ]; then
+            echo "::error::$FAIL smoke test(s) failed"
+            exit 1
+          fi
+
+      - name: Dump logs on failure
+        if: failure()
+        run: docker compose logs --tail=100
+
+      - name: Cleanup
+        if: always()
+        run: docker compose down -v
