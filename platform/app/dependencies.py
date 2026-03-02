@@ -7,6 +7,7 @@ from app.services.audit_service import AuditService
 from app.services.circuit_breaker_service import CircuitBreakerService
 from app.services.gate_service import GateService
 from app.services.kpi_service import KPIService
+from app.services.llm_probe_service import LLMProbeService
 from app.services.project_service import ProjectService
 from app.services.skill_service import SkillService
 from app.services.task_service import TaskService
@@ -79,3 +80,7 @@ async def get_trigger_service(
     session: AsyncSession = Depends(get_db),
 ) -> TriggerService:
     return TriggerService(session)
+
+
+async def get_llm_probe_service() -> LLMProbeService:
+    return LLMProbeService()

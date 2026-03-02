@@ -1,5 +1,5 @@
-import React, { useEffect } from 'react';
-import { Row, Col, Card, Statistic, Typography, Badge } from 'antd';
+import React, { useEffect, useState } from 'react';
+import { Row, Col, Card, Statistic, Typography, Badge, Button, Space, Modal, Form, InputNumber, Tag, Alert, Descriptions } from 'antd';
 import { Link } from 'react-router-dom';
 import { useAgentStore } from '@/stores/agentStore';
 import { AGENT_ROLES } from '@/utils/constants';
@@ -8,15 +8,20 @@ import ActivityFeed from '@/components/ActivityFeed';
 import { useGateList } from '@/hooks/useGates';
 import { useKPISummary } from '@/hooks/useKPI';
 import { useAgentList } from '@/hooks/useAgents';
+import { useLLMProbe } from '@/hooks/useLLMProbe';
+import { formatTimestamp } from '@/utils/formatters';
 
 const { Title } = Typography;
 
 const Dashboard: React.FC = () => {
+  const [probeOpen, setProbeOpen] = useState(false);
+  const [probeForm] = Form.useForm<{ timeout_ms?: number }>();
   const agents = useAgentStore((s) => s.agents);
   const updateAgent = useAgentStore((s) => s.updateAgent);
   const { data: pendingGates } = useGateList({ status: 'pending' });
   const { data: kpiSummary } = useKPISummary();
   const { data: agentListData } = useAgentList();
+  const llmProbe = useLLMProbe();
   const pendingCount = pendingGates?.length ?? 0;
 
   // Sync REST agent data into Zustand store on load
@@ -32,6 +37,17 @@ const Dashboard: React.FC = () => {
       }
     }
   }, [agentListData, updateAgent]);
+
+  const handleProbe = async () => {
+    try {
+      const values = await probeForm.validateFields();
+      await llmProbe.mutateAsync({
+        timeout_ms: values.timeout_ms ?? 3000,
+      });
+    } catch (err: any) {
+      if (err?.errorFields) return;
+    }
+  };
 
   return (
     <div>
@@ -106,9 +122,68 @@ const Dashboard: React.FC = () => {
                 style={{ marginTop: 16 }}
               />
             )}
+            <Button style={{ marginTop: 16 }} onClick={() => setProbeOpen(true)}>
+              模型快速探活
+            </Button>
           </Card>
         </Col>
       </Row>
+
+      <Modal
+        title="大模型快速探活"
+        open={probeOpen}
+        onCancel={() => setProbeOpen(false)}
+        onOk={handleProbe}
+        confirmLoading={llmProbe.isPending}
+        okText="开始探活"
+      >
+        <Form form={probeForm} layout="vertical" initialValues={{ timeout_ms: 3000 }}>
+          <Form.Item
+            label="超时毫秒"
+            name="timeout_ms"
+            rules={[
+              { required: true, message: '请输入 timeout_ms' },
+              { type: 'number', min: 500, max: 10000, message: '范围应为 500..10000' },
+            ]}
+          >
+            <InputNumber style={{ width: '100%' }} min={500} max={10000} step={100} />
+          </Form.Item>
+        </Form>
+
+        {llmProbe.error && (
+          <Alert
+            type="error"
+            showIcon
+            style={{ marginTop: 12 }}
+            message={(llmProbe.error as any)?.response?.data?.detail?.[0]?.msg || (llmProbe.error as any)?.response?.data?.detail || '探活请求失败，请重试'}
+          />
+        )}
+
+        {llmProbe.data && (
+          <div style={{ marginTop: 16 }}>
+            <Space style={{ marginBottom: 12 }}>
+              <Tag color={llmProbe.data.ok ? 'success' : 'error'}>
+                {llmProbe.data.ok ? '可用' : '不可用'}
+              </Tag>
+              <Tag>延迟: {llmProbe.data.latency_ms}ms</Tag>
+              {llmProbe.data.error_code && <Tag color="red">{llmProbe.data.error_code}</Tag>}
+            </Space>
+            <Descriptions size="small" column={1} bordered>
+              <Descriptions.Item label="请求模型">{llmProbe.data.requested_model || '-'}</Descriptions.Item>
+              <Descriptions.Item label="实际模型">{llmProbe.data.resolved_model || '-'}</Descriptions.Item>
+              <Descriptions.Item label="Provider">{llmProbe.data.provider}</Descriptions.Item>
+              <Descriptions.Item label="Base URL">{llmProbe.data.base_url}</Descriptions.Item>
+              <Descriptions.Item label="Token 用量">
+                {llmProbe.data.input_tokens} / {llmProbe.data.output_tokens} / {llmProbe.data.total_tokens}
+              </Descriptions.Item>
+              <Descriptions.Item label="检查时间">{formatTimestamp(llmProbe.data.checked_at)}</Descriptions.Item>
+              {!llmProbe.data.ok && (
+                <Descriptions.Item label="错误信息">{llmProbe.data.error_message || '-'}</Descriptions.Item>
+              )}
+            </Descriptions>
+          </div>
+        )}
+      </Modal>
     </div>
   );
 };

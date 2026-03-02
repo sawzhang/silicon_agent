@@ -7,6 +7,7 @@ from app.api.v1 import (
     circuit_breaker,
     gates,
     kpi,
+    llm_probe,
     projects,
     skills,
     task_logs,
@@ -23,6 +24,7 @@ api_v1_router.include_router(tasks.router)
 api_v1_router.include_router(gates.router)
 api_v1_router.include_router(skills.router)
 api_v1_router.include_router(kpi.router)
+api_v1_router.include_router(llm_probe.router)
 api_v1_router.include_router(audit.router)
 api_v1_router.include_router(circuit_breaker.router)
 api_v1_router.include_router(templates.router)
