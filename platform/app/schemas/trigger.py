@@ -82,3 +82,35 @@ class TriggerEventResponse(BaseModel):
     created_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+class TriggerTestRequest(BaseModel):
+    payload: dict[str, Any] = Field(..., description="模拟的 webhook payload")
+
+
+class TriggerTestResponse(BaseModel):
+    rule_id: str
+    rule_name: str
+    filter_passed: bool
+    dedup_blocked: bool
+    dedup_key: Optional[str]
+    rendered_title: str
+    rendered_desc: Optional[str]
+    would_trigger: bool
+    result: str
+
+
+class TriggerSimulateRequest(BaseModel):
+    source: str = Field(..., description="事件来源: github | jira | gitlab | cron")
+    event_type: str = Field(..., description="事件类型，如 pr_opened、issue_created")
+    payload: dict[str, Any] = Field(..., description="模拟的 webhook payload")
+
+
+class TriggerSimulateResponse(BaseModel):
+    matched_rule: Optional[TriggerRuleResponse]
+    result: str  # would_trigger | skipped_no_rule | skipped_filter | skipped_dedup
+    filter_passed: bool
+    dedup_blocked: bool
+    dedup_key: Optional[str]
+    rendered_title: Optional[str]
+    rendered_desc: Optional[str]
