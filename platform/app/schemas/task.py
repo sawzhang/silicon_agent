@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import List, Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 
 
 class TaskCreateRequest(BaseModel):
@@ -39,6 +39,11 @@ class TaskStageResponse(BaseModel):
     # Phase 2.5: Per-stage retry count
     retry_count: int = 0
 
+    @field_validator("tokens_used", "turns_used", "self_fix_count", "retry_count", mode="before")
+    @classmethod
+    def _none_to_zero(cls, v: object) -> int:
+        return v if v is not None else 0
+
     model_config = {"from_attributes": True}
 
 
@@ -61,6 +66,16 @@ class TaskDetailResponse(BaseModel):
     project_name: Optional[str] = None
     target_branch: Optional[str] = None
     yunxiao_task_id: Optional[str] = None
+
+    @field_validator("total_tokens", mode="before")
+    @classmethod
+    def _tokens_none(cls, v: object) -> int:
+        return v if v is not None else 0
+
+    @field_validator("total_cost_rmb", mode="before")
+    @classmethod
+    def _cost_none(cls, v: object) -> float:
+        return v if v is not None else 0.0
 
     model_config = {"from_attributes": True}
 
