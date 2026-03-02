@@ -45,7 +45,8 @@ async def seed_demo_data(session: AsyncSession) -> None:
         return
 
     # --- Seed sample tasks with stages ---
-    now = datetime.now(timezone.utc)
+    # Use naive UTC datetime for PostgreSQL compatibility (DateTime columns lack timezone=True)
+    now = datetime.utcnow()
 
     # Get full_pipeline template
     tpl_result = await session.execute(
