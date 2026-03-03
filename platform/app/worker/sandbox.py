@@ -1,15 +1,13 @@
-"""Docker container sandbox lifecycle management.
+"""Sandbox lifecycle management with pluggable backends.
 
-Each task gets an isolated Docker container running the full agent stack
-(LLM client + SkillKit tools). The platform communicates with the container
-via HTTP to the embedded agent server.
+Supports two backends, selected via ``SANDBOX_BACKEND`` setting:
 
-Architecture (方式1 — 整体容器化):
-    Platform ──HTTP──> Container (agent_server.py)
-                         ├─ LLM client → OpenAI/etc API
-                         ├─ read/write tools → /workspace (bind mount)
-                         └─ execute/execute_script → container shell
+- ``"docker"`` (default) — each task gets a Docker container running
+  ``agent_server.py``; the platform communicates via HTTP/NDJSON.
+- ``"boxlite"`` — each task gets a BoxLite micro-VM; the ``AgentRunner``
+  runs in-process on the host, only shell/file I/O enters the VM.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -17,7 +15,6 @@ import inspect
 import json
 import logging
 import time
-from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Awaitable, Callable, Dict, Optional
 
@@ -26,20 +23,20 @@ import httpx
 from app.config import settings
 from app.integration.skillkit_env import build_sandbox_llm_env
 from app.worker.agents import get_all_tools
+from app.worker.sandbox_backend import (
+    OnSandboxEvent,
+    SandboxCreateResult,
+    SandboxInfo,
+    SandboxResult,
+)
 
 logger = logging.getLogger(__name__)
 _MODEL_API_LOG_MOUNT_DIR = "/model_api_logs"
 
-# Semaphore to limit concurrent containers
-_concurrency_sem: Optional[asyncio.Semaphore] = None
 
-
-def _get_semaphore() -> asyncio.Semaphore:
-    global _concurrency_sem
-    if _concurrency_sem is None:
-        _concurrency_sem = asyncio.Semaphore(settings.SANDBOX_MAX_CONCURRENT)
-    return _concurrency_sem
-
+# ---------------------------------------------------------------------------
+# Shared helpers
+# ---------------------------------------------------------------------------
 
 async def _run(cmd: list[str], timeout: float = 60) -> tuple[int, str, str]:
     """Run a command asynchronously without shell interpolation."""
@@ -57,42 +54,26 @@ async def _run(cmd: list[str], timeout: float = 60) -> tuple[int, str, str]:
     return proc.returncode, stdout.decode().strip(), stderr.decode().strip()
 
 
-@dataclass
-class SandboxInfo:
-    """Runtime info for a created sandbox container."""
-    container_id: str
-    container_name: str
-    host: str
-    port: int
-    task_id: str
-    created_at: float = field(default_factory=time.monotonic)
+# Semaphore to limit concurrent Docker containers
+_docker_concurrency_sem: Optional[asyncio.Semaphore] = None
 
 
-@dataclass
-class SandboxCreateResult:
-    """Result for sandbox container create operation."""
-
-    info: Optional[SandboxInfo] = None
-    workspace: str = ""
-    workspace_source: str = "fallback"
-    error_code: Optional[str] = None
-    error_message: Optional[str] = None
+def _get_docker_semaphore() -> asyncio.Semaphore:
+    global _docker_concurrency_sem
+    if _docker_concurrency_sem is None:
+        _docker_concurrency_sem = asyncio.Semaphore(settings.SANDBOX_MAX_CONCURRENT)
+    return _docker_concurrency_sem
 
 
-@dataclass
-class SandboxResult:
-    """Result from executing a stage inside a sandbox container."""
-    text_content: str = ""
-    total_tokens: int = 0
-    tool_calls: list[dict[str, Any]] = field(default_factory=list)
-    error: Optional[str] = None
-    streamed: bool = False
+# ============================================================================
+# Docker backend
+# ============================================================================
 
 
-class SandboxManager:
-    """Manages Docker container lifecycle for sandboxed agent execution."""
+class DockerSandboxBackend:
+    """Sandbox backend that uses Docker containers with an embedded HTTP agent server."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         self._containers: Dict[str, SandboxInfo] = {}
         self._http_client: Optional[httpx.AsyncClient] = None
 
@@ -105,6 +86,10 @@ class SandboxManager:
             )
         return self._http_client
 
+    # ------------------------------------------------------------------
+    # SandboxBackend protocol
+    # ------------------------------------------------------------------
+
     async def create(
         self,
         task_id: str,
@@ -113,11 +98,8 @@ class SandboxManager:
         workspace_source: str = "fallback",
         image: Optional[str] = None,
     ) -> SandboxCreateResult:
-        """Create a sandbox container for a task.
+        """Create a Docker container for a task."""
 
-        Mounts workspace at /workspace inside the container.
-        The container runs agent_server.py which listens on port 9090.
-        """
         def _failed(
             *,
             error_code: str,
@@ -135,7 +117,7 @@ class SandboxManager:
                 error_message=error_message,
             )
 
-        sem = _get_semaphore()
+        sem = _get_docker_semaphore()
         acquired = sem._value > 0  # Check without blocking
         if not acquired:
             logger.warning(
@@ -153,7 +135,6 @@ class SandboxManager:
                 error_message=f"Sandbox workspace path does not exist or is not a directory: {workspace}",
             )
 
-        # Build docker run command
         docker_cmd = self._build_docker_run_cmd(
             container_name=container_name,
             image=resolved_image,
@@ -172,7 +153,6 @@ class SandboxManager:
 
         container_id = out.strip()
 
-        # Wait for agent server to be ready
         host = await self._resolve_container_host(container_name)
         if not host:
             sem.release()
@@ -187,11 +167,13 @@ class SandboxManager:
 
         port = settings.SANDBOX_AGENT_PORT
         info = SandboxInfo(
-            container_id=container_id,
-            container_name=container_name,
-            host=host,
-            port=port,
             task_id=task_id,
+            sandbox_name=container_name,
+            extra={
+                "container_id": container_id,
+                "host": host,
+                "port": port,
+            },
         )
 
         if not await self._wait_for_healthy(info, timeout=60):
@@ -232,13 +214,9 @@ class SandboxManager:
         skill_dirs: Optional[list[str]] = None,
         workdir: str = "/workspace",
         timeout: int = 300,
-        on_event: Optional[Callable[[dict[str, Any]], Awaitable[None] | None]] = None,
+        on_event: Optional[OnSandboxEvent] = None,
     ) -> SandboxResult:
-        """Execute a stage in the sandbox container via HTTP.
-
-        Prefer streaming endpoint (/execute_stream). When unavailable, fall back
-        to legacy endpoint (/execute).
-        """
+        """Execute a stage in the Docker container via HTTP streaming."""
         payload = {
             "system_prompt": system_prompt,
             "user_prompt": user_prompt,
@@ -374,15 +352,15 @@ class SandboxManager:
         )
 
     async def destroy(self, task_id: str) -> None:
-        """Destroy a task's sandbox container and release resources."""
+        """Destroy a task's Docker container and release resources."""
         info = self._containers.pop(task_id, None)
         if info:
             await self._force_remove(info.container_name)
-            _get_semaphore().release()
+            _get_docker_semaphore().release()
             logger.info("Destroyed sandbox container: %s", info.container_name)
 
     async def destroy_all(self) -> None:
-        """Destroy all managed sandbox containers."""
+        """Destroy all managed Docker containers."""
         task_ids = list(self._containers.keys())
         for task_id in task_ids:
             await self.destroy(task_id)
@@ -392,9 +370,9 @@ class SandboxManager:
     def get_info(self, task_id: str) -> Optional[SandboxInfo]:
         return self._containers.get(task_id)
 
-    # -----------------------------------------------------------------------
-    # Internal helpers
-    # -----------------------------------------------------------------------
+    # ------------------------------------------------------------------
+    # Docker-specific helpers
+    # ------------------------------------------------------------------
 
     def _build_docker_run_cmd(
         self,
@@ -479,7 +457,6 @@ class SandboxManager:
         """Resolve the container's IP address on the sandbox network."""
         network = settings.SANDBOX_NETWORK
 
-        # Try Docker network inspect to get container IP
         rc, out, err = await _run(
             [
                 "docker",
@@ -495,7 +472,6 @@ class SandboxManager:
             if ip:
                 return ip
 
-        # Fallback: try to get IP from any network
         rc, out, err = await _run(
             [
                 "docker",
@@ -511,7 +487,6 @@ class SandboxManager:
             if ip:
                 return ip
 
-        # Last resort: localhost (container on host network)
         logger.warning("Could not resolve container IP for %s, falling back to 127.0.0.1", container_name)
         return "127.0.0.1"
 
@@ -542,6 +517,96 @@ class SandboxManager:
         rc, _, err = await _run(["docker", "rm", "-f", container_name], timeout=30)
         if rc != 0:
             logger.warning("Failed to remove container %s: %s", container_name, err)
+
+
+# ============================================================================
+# SandboxManager — facade that delegates to the configured backend
+# ============================================================================
+
+
+class SandboxManager:
+    """Manages sandbox lifecycle, delegating to a pluggable backend.
+
+    Backend selection is driven by ``settings.SANDBOX_BACKEND``:
+
+    - ``"docker"`` (default) — ``DockerSandboxBackend``
+    - ``"boxlite"`` — ``BoxLiteSandboxBackend``
+    """
+
+    def __init__(self) -> None:
+        self._backend = _create_backend()
+
+    # --- Proxy every method to the backend ---
+
+    async def create(
+        self,
+        task_id: str,
+        *,
+        workspace: str,
+        workspace_source: str = "fallback",
+        image: Optional[str] = None,
+    ) -> SandboxCreateResult:
+        return await self._backend.create(
+            task_id,
+            workspace=workspace,
+            workspace_source=workspace_source,
+            image=image,
+        )
+
+    async def execute_stage(
+        self,
+        info: SandboxInfo,
+        *,
+        system_prompt: str,
+        user_prompt: str,
+        model: Optional[str] = None,
+        temperature: Optional[float] = None,
+        max_tokens: Optional[int] = None,
+        max_turns: int = 20,
+        enable_tools: bool = True,
+        allowed_tools: Optional[list[str]] = None,
+        skill_dirs: Optional[list[str]] = None,
+        workdir: str = "/workspace",
+        timeout: int = 300,
+        on_event: Optional[Callable[[dict[str, Any]], Awaitable[None] | None]] = None,
+    ) -> SandboxResult:
+        return await self._backend.execute_stage(
+            info,
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            model=model,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            max_turns=max_turns,
+            enable_tools=enable_tools,
+            allowed_tools=allowed_tools,
+            skill_dirs=skill_dirs,
+            workdir=workdir,
+            timeout=timeout,
+            on_event=on_event,
+        )
+
+    async def destroy(self, task_id: str) -> None:
+        await self._backend.destroy(task_id)
+
+    async def destroy_all(self) -> None:
+        await self._backend.destroy_all()
+
+    def get_info(self, task_id: str) -> Optional[SandboxInfo]:
+        return self._backend.get_info(task_id)
+
+
+def _create_backend() -> DockerSandboxBackend:
+    """Instantiate the configured sandbox backend."""
+    backend_name = getattr(settings, "SANDBOX_BACKEND", "docker")
+    if backend_name == "boxlite":
+        from app.worker.sandbox_boxlite import BoxLiteSandboxBackend
+
+        logger.info("Using BoxLite sandbox backend")
+        return BoxLiteSandboxBackend()  # type: ignore[return-value]
+    else:
+        logger.info("Using Docker sandbox backend")
+        return DockerSandboxBackend()
 
 
 # ---------------------------------------------------------------------------

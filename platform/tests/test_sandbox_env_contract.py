@@ -1,4 +1,4 @@
-from app.worker.sandbox import SandboxManager
+from app.worker.sandbox import DockerSandboxBackend
 
 
 def _extract_env_vars_from_docker_cmd(tokens: list[str]) -> dict[str, str]:
@@ -38,8 +38,8 @@ def test_build_docker_run_cmd_includes_skillkit_compat_env(monkeypatch, tmp_path
         str(raw_log_dir),
     )
 
-    manager = SandboxManager()
-    cmd = manager._build_docker_run_cmd(
+    backend = DockerSandboxBackend()
+    cmd = backend._build_docker_run_cmd(
         container_name="sbx-test",
         image="sandbox-image:latest",
         workspace="/tmp/workspace",
@@ -74,8 +74,8 @@ def test_build_docker_run_cmd_disables_raw_model_dump_when_config_off(monkeypatc
         str(tmp_path / "model_api_logs"),
     )
 
-    manager = SandboxManager()
-    cmd = manager._build_docker_run_cmd(
+    backend = DockerSandboxBackend()
+    cmd = backend._build_docker_run_cmd(
         container_name="sbx-test",
         image="sandbox-image:latest",
         workspace="/tmp/workspace",

@@ -619,16 +619,12 @@ async def test_setup_sandbox_workspace_not_found(monkeypatch, tmp_path):
         SandboxCreateResult=FakeCreateResult,
         get_sandbox_manager=lambda: FakeSandboxMgr(),
     )
-    sys.modules["app.worker.sandbox"] = fake_sandbox_mod
+    monkeypatch.setitem(sys.modules, "app.worker.sandbox", fake_sandbox_mod)
 
-    try:
-        task = _make_task(project=None)
-        sandbox_info, sandbox_mgr, error = await engine._setup_sandbox(task, str(tmp_path / "nodir"), "given")
-        # workspace_not_found → no sandbox_info
-        assert sandbox_info is None
-    finally:
-        if "app.worker.sandbox" in sys.modules:
-            del sys.modules["app.worker.sandbox"]
+    task = _make_task(project=None)
+    sandbox_info, sandbox_mgr, error = await engine._setup_sandbox(task, str(tmp_path / "nodir"), "given")
+    # workspace_not_found → no sandbox_info
+    assert sandbox_info is None
 
 
 @pytest.mark.asyncio
@@ -662,16 +658,12 @@ async def test_setup_sandbox_success(monkeypatch, tmp_path):
         SandboxCreateResult=FakeCreateResult,
         get_sandbox_manager=lambda: FakeSandboxMgr(),
     )
-    sys.modules["app.worker.sandbox"] = fake_sandbox_mod
+    monkeypatch.setitem(sys.modules, "app.worker.sandbox", fake_sandbox_mod)
 
-    try:
-        task = _make_task(project=None)
-        sandbox_info, sandbox_mgr, error = await engine._setup_sandbox(task, str(tmp_path), "given")
-        assert sandbox_info is not None
-        assert error is None
-    finally:
-        if "app.worker.sandbox" in sys.modules:
-            del sys.modules["app.worker.sandbox"]
+    task = _make_task(project=None)
+    sandbox_info, sandbox_mgr, error = await engine._setup_sandbox(task, str(tmp_path), "given")
+    assert sandbox_info is not None
+    assert error is None
 
 
 @pytest.mark.asyncio
@@ -694,16 +686,12 @@ async def test_setup_sandbox_exception_graceful(monkeypatch, tmp_path):
         SandboxCreateResult=SimpleNamespace,
         get_sandbox_manager=lambda: FakeSandboxMgr(),
     )
-    sys.modules["app.worker.sandbox"] = fake_sandbox_mod
+    monkeypatch.setitem(sys.modules, "app.worker.sandbox", fake_sandbox_mod)
 
-    try:
-        task = _make_task(project=None)
-        sandbox_info, sandbox_mgr, error = await engine._setup_sandbox(task, str(tmp_path), "given")
-        assert sandbox_info is None
-        assert error == "sandbox_create_exception"
-    finally:
-        if "app.worker.sandbox" in sys.modules:
-            del sys.modules["app.worker.sandbox"]
+    task = _make_task(project=None)
+    sandbox_info, sandbox_mgr, error = await engine._setup_sandbox(task, str(tmp_path), "given")
+    assert sandbox_info is None
+    assert error == "sandbox_create_exception"
 
 
 @pytest.mark.asyncio
@@ -726,15 +714,11 @@ async def test_setup_sandbox_exception_strict(monkeypatch, tmp_path):
         SandboxCreateResult=SimpleNamespace,
         get_sandbox_manager=lambda: FakeSandboxMgr(),
     )
-    sys.modules["app.worker.sandbox"] = fake_sandbox_mod
+    monkeypatch.setitem(sys.modules, "app.worker.sandbox", fake_sandbox_mod)
 
-    try:
-        task = _make_task(project=None)
-        sandbox_info, sandbox_mgr, error = await engine._setup_sandbox(task, str(tmp_path), "given")
-        assert error == "sandbox_create_exception"
-    finally:
-        if "app.worker.sandbox" in sys.modules:
-            del sys.modules["app.worker.sandbox"]
+    task = _make_task(project=None)
+    sandbox_info, sandbox_mgr, error = await engine._setup_sandbox(task, str(tmp_path), "given")
+    assert error == "sandbox_create_exception"
 
 
 # ═══════════════════════════════════════════════════════════════════════
