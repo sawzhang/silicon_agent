@@ -2027,12 +2027,13 @@ async def _check_interactive_planning(
         if elapsed > settings.WORKER_GATE_MAX_WAIT_SECONDS:
             await _fail_task(session, task, "Plan review timed out")
             return True
-        try:
-            await session.refresh(gate)
-        except Exception:
+        if await _is_cancelled(session, task.id):
+            return True
+        gate_snapshot = await _get_gate_snapshot(gate.id)
+        if gate_snapshot is None:
             continue
 
-        if gate.status == "approved":
+        if gate_snapshot["status"] == "approved":
             # Resume execution
             task.status = "running"
             await session.commit()
@@ -2041,9 +2042,9 @@ async def _check_interactive_planning(
             })
             return False  # Continue execution
 
-        if gate.status in ("rejected", "revised"):
+        if gate_snapshot["status"] in ("rejected", "revised"):
             # If revised, update the plan; either way, re-run the parse stage
-            if gate.review_comment:
+            if gate_snapshot["review_comment"]:
                 # Store revision feedback for next parse execution
                 stage.error_message = None
                 stage.output_summary = None
@@ -2052,9 +2053,6 @@ async def _check_interactive_planning(
             task.status = "running"
             await session.commit()
             return False  # Will be re-executed in next iteration
-
-        if await _is_cancelled(session, task.id):
-            return True
 
     return True
 
@@ -2145,15 +2143,14 @@ async def _maybe_insert_dynamic_gate(
         elapsed = (datetime.now(timezone.utc) - gate_start).total_seconds()
         if elapsed > settings.WORKER_GATE_MAX_WAIT_SECONDS:
             return False
-        try:
-            await session.refresh(gate)
-        except Exception:
-            continue
-        if gate.status in ("approved", "revised"):
-            return True
-        if gate.status == "rejected":
-            return False
         if await _is_cancelled(session, task.id):
+            return False
+        gate_snapshot = await _get_gate_snapshot(gate.id)
+        if gate_snapshot is None:
+            continue
+        if gate_snapshot["status"] in ("approved", "revised"):
+            return True
+        if gate_snapshot["status"] == "rejected":
             return False
     return False
 
@@ -2438,14 +2435,32 @@ async def _handle_gate(
             )
             return {"result": "timeout", "comment": "", "retry_count": current_retry}
 
-        # Re-read gate status from DB (with error handling)
-        try:
-            await session.refresh(gate)
-        except Exception:
-            logger.warning("Failed to refresh gate %s, retrying", gate.id, exc_info=True)
+        # Cancellation has higher priority than gate resolution.
+        if await _is_cancelled(session, task.id):
+            logger.info("Task %s cancelled while waiting for gate", task.id)
+            duration_ms = round((time.monotonic() - gate_started_at) * 1000, 2)
+            await _emit_system_log(
+                task,
+                stage=stage,
+                event_type="gate_wait_cancelled",
+                status="cancelled",
+                correlation_id=gate_corr,
+                duration_ms=duration_ms,
+                response_body={"gate_id": gate.id},
+            )
+            await _close_started_system_log(
+                started_log_id=gate_started_log_id,
+                started_at_monotonic=gate_started_at,
+                status="cancelled",
+                result="task_cancelled",
+            )
+            return {"result": "cancelled", "comment": "", "retry_count": current_retry}
+
+        gate_snapshot = await _get_gate_snapshot(gate.id)
+        if gate_snapshot is None:
             continue
 
-        if gate.status == "approved":
+        if gate_snapshot["status"] == "approved":
             logger.info("Gate %s approved", gate.id)
             duration_ms = round((time.monotonic() - gate_started_at) * 1000, 2)
             await _emit_system_log(
@@ -2462,8 +2477,12 @@ async def _handle_gate(
                 started_at_monotonic=gate_started_at,
                 status="success",
             )
-            return {"result": "approved", "comment": gate.review_comment or "", "retry_count": current_retry}
-        elif gate.status == "rejected":
+            return {
+                "result": "approved",
+                "comment": gate_snapshot["review_comment"],
+                "retry_count": current_retry,
+            }
+        elif gate_snapshot["status"] == "rejected":
             logger.info("Gate %s rejected", gate.id)
             duration_ms = round((time.monotonic() - gate_started_at) * 1000, 2)
             await _emit_system_log(
@@ -2483,10 +2502,10 @@ async def _handle_gate(
             )
             return {
                 "result": "rejected",
-                "comment": gate.review_comment or "",
+                "comment": gate_snapshot["review_comment"],
                 "retry_count": current_retry,
             }
-        elif gate.status == "revised":
+        elif gate_snapshot["status"] == "revised":
             # Phase 2.4: Gate "revise and continue" mode
             logger.info("Gate %s revised", gate.id)
             duration_ms = round((time.monotonic() - gate_started_at) * 1000, 2)
@@ -2507,31 +2526,10 @@ async def _handle_gate(
             )
             return {
                 "result": "revised",
-                "comment": gate.review_comment or "",
-                "revised_content": gate.revised_content or "",
+                "comment": gate_snapshot["review_comment"],
+                "revised_content": gate_snapshot["revised_content"],
                 "retry_count": current_retry,
             }
-
-        # Also check for task cancellation during gate wait
-        if await _is_cancelled(session, task.id):
-            logger.info("Task %s cancelled while waiting for gate", task.id)
-            duration_ms = round((time.monotonic() - gate_started_at) * 1000, 2)
-            await _emit_system_log(
-                task,
-                stage=stage,
-                event_type="gate_wait_cancelled",
-                status="cancelled",
-                correlation_id=gate_corr,
-                duration_ms=duration_ms,
-                response_body={"gate_id": gate.id},
-            )
-            await _close_started_system_log(
-                started_log_id=gate_started_log_id,
-                started_at_monotonic=gate_started_at,
-                status="cancelled",
-                result="task_cancelled",
-            )
-            return {"result": "cancelled", "comment": "", "retry_count": current_retry}
 
     # Worker shutting down
     duration_ms = round((time.monotonic() - gate_started_at) * 1000, 2)
@@ -2554,12 +2552,45 @@ async def _handle_gate(
 
 
 async def _is_cancelled(session: AsyncSession, task_id: str) -> bool:
-    """Re-read task status from DB to check for cancellation."""
-    result = await session.execute(
-        select(TaskModel.status).where(TaskModel.id == task_id)
-    )
-    status = result.scalar_one_or_none()
-    return status == "cancelled"
+    """Read task status in a short-lived session to avoid stale transaction snapshots."""
+    del session
+    try:
+        async with async_session_factory() as read_session:
+            result = await read_session.execute(
+                select(TaskModel.status).where(TaskModel.id == task_id)
+            )
+            status = result.scalar_one_or_none()
+            return status == "cancelled"
+    except Exception:
+        logger.warning("Failed to read cancellation status for task %s", task_id, exc_info=True)
+        return False
+
+
+async def _get_gate_snapshot(gate_id: str) -> Optional[Dict[str, str]]:
+    """Read gate fields in a short-lived session to avoid stale transaction snapshots."""
+    try:
+        async with async_session_factory() as read_session:
+            result = await read_session.execute(
+                select(
+                    HumanGateModel.status,
+                    HumanGateModel.review_comment,
+                    HumanGateModel.revised_content,
+                ).where(HumanGateModel.id == gate_id)
+            )
+            row = result.one_or_none()
+    except Exception:
+        logger.warning("Failed to read gate %s state, retrying", gate_id, exc_info=True)
+        return None
+
+    if row is None:
+        return None
+
+    status, review_comment, revised_content = row
+    return {
+        "status": status or "pending",
+        "review_comment": review_comment or "",
+        "revised_content": revised_content or "",
+    }
 
 
 def _parse_gates(task: TaskModel) -> Dict[str, dict]:
@@ -2687,9 +2718,26 @@ def _build_repo_context(project) -> str:
 
 async def _fail_task(session: AsyncSession, task: TaskModel, reason: str) -> None:
     """Mark task as failed, broadcast, and send external notification."""
-    task.status = "failed"
-    task.completed_at = datetime.now(timezone.utc)
+    failed_at = datetime.now(timezone.utc)
+    update_result = await session.execute(
+        update(TaskModel)
+        .where(
+            TaskModel.id == task.id,
+            TaskModel.status != "cancelled",
+        )
+        .values(
+            status="failed",
+            completed_at=failed_at,
+        )
+    )
     await session.commit()
+
+    if not update_result.rowcount:
+        logger.info("Skip failing task %s because it is already cancelled", task.id)
+        return
+
+    task.status = "failed"
+    task.completed_at = failed_at
 
     await _safe_broadcast(TASK_STATUS_CHANGED, {
         "task_id": task.id,

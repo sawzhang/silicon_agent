@@ -142,6 +142,40 @@ async def test_fail_task_sets_status_and_broadcasts(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_fail_task_keeps_cancelled_status(monkeypatch):
+    """_fail_task should not override externally cancelled tasks."""
+    task_id = "tt-fail-task-cancelled-guard-1"
+    async with async_session_factory() as session:
+        session.add(TaskModel(id=task_id, title="Already Cancelled", status="cancelled"))
+        await session.commit()
+
+    broadcast = AsyncMock()
+    notify = AsyncMock()
+    monkeypatch.setattr(engine, "_safe_broadcast", broadcast)
+    monkeypatch.setattr(engine, "notify_task_failed", notify)
+    monkeypatch.setattr(engine.event_collector, "record_audit", AsyncMock())
+
+    async with async_session_factory() as session:
+        task = await session.get(TaskModel, task_id)
+        assert task is not None
+        await engine._fail_task(session, task, "should be ignored")  # type: ignore[arg-type]
+
+    async with async_session_factory() as session:
+        task = await session.get(TaskModel, task_id)
+        assert task is not None
+        assert task.status == "cancelled"
+
+    broadcast.assert_not_awaited()
+    notify.assert_not_awaited()
+
+    async with async_session_factory() as session:
+        task = await session.get(TaskModel, task_id)
+        if task:
+            await session.delete(task)
+        await session.commit()
+
+
+@pytest.mark.asyncio
 async def test_complete_task_sets_status_and_broadcasts(monkeypatch):
     """_complete_task sets status=completed, broadcasts, calls notify."""
     task_id = "tt-complete-task-1"

@@ -1,6 +1,8 @@
 """Tests for core engine functions: circuit breaker, task claim, state transitions, gates."""
 from __future__ import annotations
 
+import asyncio
+import time
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -59,16 +61,16 @@ async def test_handle_gate_approved(monkeypatch):
     monkeypatch.setattr(engine, "_close_started_system_log", AsyncMock())
     monkeypatch.setattr(engine, "_safe_broadcast", AsyncMock())
     monkeypatch.setattr(engine, "notify_gate_created", AsyncMock())
+    monkeypatch.setattr(
+        engine,
+        "_get_gate_snapshot",
+        AsyncMock(return_value={
+            "status": "approved",
+            "review_comment": "looks good",
+            "revised_content": "",
+        }),
+    )
     monkeypatch.setattr(engine, "_running", True)
-
-    # We'll approve the gate by monkeypatching session.refresh to set gate.status="approved"
-    approve_calls = [0]
-
-    async def _auto_approve_refresh(obj):
-        if isinstance(obj, HumanGateModel):
-            approve_calls[0] += 1
-            obj.status = "approved"
-            obj.review_comment = "looks good"
 
     monkeypatch.setattr(engine.settings, "WORKER_GATE_POLL_INTERVAL", 0.001)
     monkeypatch.setattr(engine.settings, "WORKER_GATE_MAX_WAIT_SECONDS", 60.0)
@@ -76,7 +78,6 @@ async def test_handle_gate_approved(monkeypatch):
     async with async_session_factory() as session:
         task = await session.get(TaskModel, task_id)
         stage = await session.get(TaskStageModel, stage_id)
-        session.refresh = _auto_approve_refresh  # type: ignore
 
         result = await engine._handle_gate(
             session=session,
@@ -122,19 +123,22 @@ async def test_handle_gate_rejected(monkeypatch):
     monkeypatch.setattr(engine, "_close_started_system_log", AsyncMock())
     monkeypatch.setattr(engine, "_safe_broadcast", AsyncMock())
     monkeypatch.setattr(engine, "notify_gate_created", AsyncMock())
+    monkeypatch.setattr(
+        engine,
+        "_get_gate_snapshot",
+        AsyncMock(return_value={
+            "status": "rejected",
+            "review_comment": "not good enough",
+            "revised_content": "",
+        }),
+    )
     monkeypatch.setattr(engine, "_running", True)
     monkeypatch.setattr(engine.settings, "WORKER_GATE_POLL_INTERVAL", 0.001)
     monkeypatch.setattr(engine.settings, "WORKER_GATE_MAX_WAIT_SECONDS", 60.0)
 
-    async def _auto_reject_refresh(obj):
-        if isinstance(obj, HumanGateModel):
-            obj.status = "rejected"
-            obj.review_comment = "not good enough"
-
     async with async_session_factory() as session:
         task = await session.get(TaskModel, task_id)
         stage = await session.get(TaskStageModel, stage_id)
-        session.refresh = _auto_reject_refresh  # type: ignore
 
         result = await engine._handle_gate(
             session=session,
@@ -206,6 +210,177 @@ async def test_handle_gate_timeout(monkeypatch):
     assert result["result"] == "timeout"
 
     # Cleanup
+    async with async_session_factory() as session:
+        gates = await session.execute(
+            select(HumanGateModel).where(HumanGateModel.task_id == task_id)
+        )
+        for g in gates.scalars().all():
+            await session.delete(g)
+        stage = await session.get(TaskStageModel, stage_id)
+        if stage:
+            await session.delete(stage)
+        task = await session.get(TaskModel, task_id)
+        if task:
+            await session.delete(task)
+        await session.commit()
+
+
+@pytest.mark.asyncio
+async def test_handle_gate_approved_from_external_session_with_stale_worker_session(monkeypatch):
+    """Gate approved in another session should be observed during wait polling."""
+    task_id = "tt-gate-approved-short-session-task"
+    stage_id = "tt-gate-approved-short-session-stage"
+
+    async with async_session_factory() as session:
+        session.add(TaskModel(id=task_id, title="Gate Approved Short Session", status="running"))
+        session.add(TaskStageModel(
+            id=stage_id,
+            task_id=task_id,
+            stage_name="review",
+            agent_role="review",
+            status="running",
+        ))
+        await session.commit()
+
+    monkeypatch.setattr(engine, "_emit_system_log", AsyncMock(return_value="log-1"))
+    monkeypatch.setattr(engine, "_close_started_system_log", AsyncMock())
+    monkeypatch.setattr(engine, "_safe_broadcast", AsyncMock())
+    monkeypatch.setattr(engine, "notify_gate_created", AsyncMock())
+    monkeypatch.setattr(engine, "_running", True)
+    monkeypatch.setattr(engine.settings, "WORKER_GATE_POLL_INTERVAL", 0.001)
+    monkeypatch.setattr(engine.settings, "WORKER_GATE_MAX_WAIT_SECONDS", 0.2)
+
+    async def _approve_gate_once_created() -> None:
+        deadline = time.monotonic() + 1.0
+        while time.monotonic() < deadline:
+            async with async_session_factory() as updater:
+                gate_result = await updater.execute(
+                    select(HumanGateModel).where(HumanGateModel.task_id == task_id)
+                )
+                gate = gate_result.scalars().first()
+                if gate:
+                    gate.status = "approved"
+                    gate.review_comment = "approved externally"
+                    await updater.commit()
+                    return
+            await asyncio.sleep(0.002)
+        raise AssertionError("Expected gate to be created before approval update")
+
+    updater_task = asyncio.create_task(_approve_gate_once_created())
+
+    async def _stale_refresh(_obj):
+        # Simulate a long-lived worker session that cannot see external updates via refresh.
+        return None
+
+    async with async_session_factory() as session:
+        task = await session.get(TaskModel, task_id)
+        stage = await session.get(TaskStageModel, stage_id)
+        session.refresh = _stale_refresh  # type: ignore[assignment]
+
+        result = await engine._handle_gate(
+            session=session,
+            task=task,  # type: ignore[arg-type]
+            stage=stage,  # type: ignore[arg-type]
+            gate_type="human_approve",
+            stage_output="output text",
+        )
+
+    await updater_task
+    assert result["result"] == "approved"
+    assert result["comment"] == "approved externally"
+
+    async with async_session_factory() as session:
+        gates = await session.execute(
+            select(HumanGateModel).where(HumanGateModel.task_id == task_id)
+        )
+        for g in gates.scalars().all():
+            await session.delete(g)
+        stage = await session.get(TaskStageModel, stage_id)
+        if stage:
+            await session.delete(stage)
+        task = await session.get(TaskModel, task_id)
+        if task:
+            await session.delete(task)
+        await session.commit()
+
+
+@pytest.mark.asyncio
+async def test_handle_gate_cancelled_from_external_session_with_stale_worker_session(monkeypatch):
+    """Task cancelled in another session should stop gate wait promptly."""
+    task_id = "tt-gate-cancel-short-session-task"
+    stage_id = "tt-gate-cancel-short-session-stage"
+
+    async with async_session_factory() as session:
+        session.add(TaskModel(id=task_id, title="Gate Cancel Short Session", status="running"))
+        session.add(TaskStageModel(
+            id=stage_id,
+            task_id=task_id,
+            stage_name="review",
+            agent_role="review",
+            status="running",
+        ))
+        await session.commit()
+
+    monkeypatch.setattr(engine, "_emit_system_log", AsyncMock(return_value="log-1"))
+    monkeypatch.setattr(engine, "_close_started_system_log", AsyncMock())
+    monkeypatch.setattr(engine, "_safe_broadcast", AsyncMock())
+    monkeypatch.setattr(engine, "notify_gate_created", AsyncMock())
+    monkeypatch.setattr(engine, "_running", True)
+    monkeypatch.setattr(engine.settings, "WORKER_GATE_POLL_INTERVAL", 0.001)
+    monkeypatch.setattr(engine.settings, "WORKER_GATE_MAX_WAIT_SECONDS", 0.2)
+
+    async def _cancel_task_once_gate_created() -> None:
+        deadline = time.monotonic() + 1.0
+        while time.monotonic() < deadline:
+            async with async_session_factory() as updater:
+                gate_result = await updater.execute(
+                    select(HumanGateModel.id).where(HumanGateModel.task_id == task_id)
+                )
+                gate_id = gate_result.scalars().first()
+                if gate_id:
+                    task_obj = await updater.get(TaskModel, task_id)
+                    assert task_obj is not None
+                    task_obj.status = "cancelled"
+                    await updater.commit()
+                    return
+            await asyncio.sleep(0.002)
+        raise AssertionError("Expected gate to be created before cancellation update")
+
+    updater_task = asyncio.create_task(_cancel_task_once_gate_created())
+
+    class _FakeStatusResult:
+        @staticmethod
+        def scalar_one_or_none():
+            return "running"
+
+    async with async_session_factory() as session:
+        task = await session.get(TaskModel, task_id)
+        stage = await session.get(TaskStageModel, stage_id)
+
+        async def _stale_refresh(_obj):
+            return None
+
+        original_execute = session.execute
+
+        async def _stale_execute(stmt, *args, **kwargs):
+            if "SELECT tasks.status" in str(stmt):
+                return _FakeStatusResult()
+            return await original_execute(stmt, *args, **kwargs)
+
+        session.refresh = _stale_refresh  # type: ignore[assignment]
+        session.execute = _stale_execute  # type: ignore[assignment]
+
+        result = await engine._handle_gate(
+            session=session,
+            task=task,  # type: ignore[arg-type]
+            stage=stage,  # type: ignore[arg-type]
+            gate_type="human_approve",
+            stage_output="output text",
+        )
+
+    await updater_task
+    assert result["result"] == "cancelled"
+
     async with async_session_factory() as session:
         gates = await session.execute(
             select(HumanGateModel).where(HumanGateModel.task_id == task_id)
@@ -437,20 +612,20 @@ async def test_maybe_insert_dynamic_gate_low_confidence_approved(monkeypatch):
     monkeypatch.setattr(engine, "_running", True)
     monkeypatch.setattr(engine, "_safe_broadcast", AsyncMock())
     monkeypatch.setattr(engine, "notify_gate_created", AsyncMock())
-
-    approve_calls = [0]
+    monkeypatch.setattr(
+        engine,
+        "_get_gate_snapshot",
+        AsyncMock(return_value={
+            "status": "approved",
+            "review_comment": "",
+            "revised_content": "",
+        }),
+    )
 
     async with async_session_factory() as session:
         task = await session.get(TaskModel, task_id)
         stage = await session.get(TaskStageModel, stage_id)
         stage.output_structured = {"confidence": 0.3}
-
-        async def _auto_approve_refresh(obj):
-            if isinstance(obj, HumanGateModel):
-                approve_calls[0] += 1
-                obj.status = "approved"
-
-        session.refresh = _auto_approve_refresh  # type: ignore
 
         result = await engine._maybe_insert_dynamic_gate(
             session, task, stage, "low confidence output"  # type: ignore[arg-type]
@@ -494,17 +669,20 @@ async def test_maybe_insert_dynamic_gate_low_confidence_rejected(monkeypatch):
     monkeypatch.setattr(engine, "_running", True)
     monkeypatch.setattr(engine, "_safe_broadcast", AsyncMock())
     monkeypatch.setattr(engine, "notify_gate_created", AsyncMock())
+    monkeypatch.setattr(
+        engine,
+        "_get_gate_snapshot",
+        AsyncMock(return_value={
+            "status": "rejected",
+            "review_comment": "",
+            "revised_content": "",
+        }),
+    )
 
     async with async_session_factory() as session:
         task = await session.get(TaskModel, task_id)
         stage = await session.get(TaskStageModel, stage_id)
         stage.output_structured = {"confidence": 0.2}
-
-        async def _auto_reject_refresh(obj):
-            if isinstance(obj, HumanGateModel):
-                obj.status = "rejected"
-
-        session.refresh = _auto_reject_refresh  # type: ignore
 
         result = await engine._maybe_insert_dynamic_gate(
             session, task, stage, "low confidence output"  # type: ignore[arg-type]
@@ -548,20 +726,22 @@ async def test_handle_gate_revised(monkeypatch):
     monkeypatch.setattr(engine, "_close_started_system_log", AsyncMock())
     monkeypatch.setattr(engine, "_safe_broadcast", AsyncMock())
     monkeypatch.setattr(engine, "notify_gate_created", AsyncMock())
+    monkeypatch.setattr(
+        engine,
+        "_get_gate_snapshot",
+        AsyncMock(return_value={
+            "status": "revised",
+            "review_comment": "please revise this section",
+            "revised_content": "new version of the content",
+        }),
+    )
     monkeypatch.setattr(engine, "_running", True)
     monkeypatch.setattr(engine.settings, "WORKER_GATE_POLL_INTERVAL", 0.001)
     monkeypatch.setattr(engine.settings, "WORKER_GATE_MAX_WAIT_SECONDS", 60.0)
 
-    async def _auto_revise_refresh(obj):
-        if isinstance(obj, HumanGateModel):
-            obj.status = "revised"
-            obj.review_comment = "please revise this section"
-            obj.revised_content = "new version of the content"
-
     async with async_session_factory() as session:
         task = await session.get(TaskModel, task_id)
         stage = await session.get(TaskStageModel, stage_id)
-        session.refresh = _auto_revise_refresh  # type: ignore
 
         result = await engine._handle_gate(
             session=session,
@@ -731,6 +911,15 @@ async def test_check_interactive_planning_gate_rejected(monkeypatch):
     monkeypatch.setattr(engine.settings, "WORKER_GATE_MAX_WAIT_SECONDS", 30.0)
     monkeypatch.setattr(engine, "_safe_broadcast", AsyncMock())
     monkeypatch.setattr(engine, "notify_gate_created", AsyncMock())
+    monkeypatch.setattr(
+        engine,
+        "_get_gate_snapshot",
+        AsyncMock(return_value={
+            "status": "rejected",
+            "review_comment": "rejected plan",
+            "revised_content": "",
+        }),
+    )
     monkeypatch.setattr(engine, "_running", True)
 
     task_id = "tt-iplan-reject-1"
@@ -745,16 +934,10 @@ async def test_check_interactive_planning_gate_rejected(monkeypatch):
         ))
         await session.commit()
 
-    async def _auto_reject_refresh(obj):
-        if isinstance(obj, HumanGateModel):
-            obj.status = "rejected"
-            obj.review_comment = "rejected plan"
-
     async with async_session_factory() as session:
         task = await session.get(TaskModel, task_id)
         # template=None means the template-name check passes (None is falsy)
         stage = await session.get(TaskStageModel, stage_id)
-        session.refresh = _auto_reject_refresh  # type: ignore
 
         result = await engine._check_interactive_planning(session, task, stage, "plan output")
 
@@ -1107,6 +1290,15 @@ async def test_handle_gate_existing_pending_gate(monkeypatch):
     monkeypatch.setattr(engine, "_close_started_system_log", AsyncMock())
     monkeypatch.setattr(engine, "_safe_broadcast", AsyncMock())
     monkeypatch.setattr(engine, "notify_gate_created", AsyncMock())
+    monkeypatch.setattr(
+        engine,
+        "_get_gate_snapshot",
+        AsyncMock(return_value={
+            "status": "approved",
+            "review_comment": "",
+            "revised_content": "",
+        }),
+    )
     monkeypatch.setattr(engine, "_running", True)
     monkeypatch.setattr(engine.settings, "WORKER_GATE_POLL_INTERVAL", 0.001)
     monkeypatch.setattr(engine.settings, "WORKER_GATE_MAX_WAIT_SECONDS", 30.0)
@@ -1123,14 +1315,9 @@ async def test_handle_gate_existing_pending_gate(monkeypatch):
         session.add(existing)
         await session.commit()
 
-    async def _auto_approve_refresh(obj):
-        if isinstance(obj, HumanGateModel):
-            obj.status = "approved"
-
     async with async_session_factory() as session:
         task = await session.get(TaskModel, task_id)
         stage = await session.get(TaskStageModel, stage_id)
-        session.refresh = _auto_approve_refresh  # type: ignore
 
         result = await engine._handle_gate(
             session=session,
@@ -1353,6 +1540,15 @@ async def test_check_interactive_planning_gate_revised(monkeypatch):
     monkeypatch.setattr(engine.settings, "WORKER_GATE_MAX_WAIT_SECONDS", 30.0)
     monkeypatch.setattr(engine, "_safe_broadcast", AsyncMock())
     monkeypatch.setattr(engine, "notify_gate_created", AsyncMock())
+    monkeypatch.setattr(
+        engine,
+        "_get_gate_snapshot",
+        AsyncMock(return_value={
+            "status": "revised",
+            "review_comment": "please add more details",
+            "revised_content": "",
+        }),
+    )
     monkeypatch.setattr(engine, "_running", True)
 
     task_id = "tt-iplan-revised-1"
@@ -1366,15 +1562,9 @@ async def test_check_interactive_planning_gate_revised(monkeypatch):
         ))
         await session.commit()
 
-    async def _auto_revised_refresh(obj):
-        if isinstance(obj, HumanGateModel):
-            obj.status = "revised"
-            obj.review_comment = "please add more details"
-
     async with async_session_factory() as session:
         task = await session.get(TaskModel, task_id)
         stage = await session.get(TaskStageModel, stage_id)
-        session.refresh = _auto_revised_refresh  # type: ignore
 
         result = await engine._check_interactive_planning(session, task, stage, "plan output")
 
