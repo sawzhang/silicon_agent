@@ -50,7 +50,7 @@ class BoxLiteSandboxBackend:
     """
 
     def __init__(self) -> None:
-        self._boxes: dict[str, Any] = {}  # task_id → BoxLiteRuntime
+        self._boxes: dict[str, Any] = {}  # "role:task_id" → BoxLiteRuntime
 
     # ------------------------------------------------------------------
     # SandboxBackend protocol
@@ -63,8 +63,16 @@ class BoxLiteSandboxBackend:
         workspace: str,
         workspace_source: str = "fallback",
         image: Optional[str] = None,
+        role: Optional[str] = None,
+        cpus: Optional[int] = None,
+        memory_mib: Optional[int] = None,
+        mount_mode: str = "rw",
     ) -> SandboxCreateResult:
-        """Create a BoxLite micro-VM for a task."""
+        """Create a BoxLite micro-VM for a task.
+
+        When *role* is provided, the sandbox is keyed by ``role:task_id``
+        so that different roles within the same task get separate VMs.
+        """
         from skillkit.runtime.boxlite import BoxLiteRuntime  # noqa: PLC0415
 
         def _failed(*, error_code: str, error_message: str) -> SandboxCreateResult:
@@ -88,14 +96,17 @@ class BoxLiteSandboxBackend:
         await sem.acquire()
 
         resolved_image = image or settings.SANDBOX_IMAGE
-        sandbox_name = f"sa-boxlite-{task_id[:12]}"
+        role_tag = role or "default"
+        sandbox_name = f"sa-boxlite-{role_tag}-{task_id[:8]}"
+        resolved_cpus = cpus if cpus is not None else int(settings.SANDBOX_CPUS)
+        resolved_memory = memory_mib if memory_mib is not None else getattr(settings, "SANDBOX_MEMORY_MIB", 4096)
 
         try:
             runtime = BoxLiteRuntime(
                 image=resolved_image,
-                memory_mib=getattr(settings, "SANDBOX_MEMORY_MIB", 4096),
-                cpus=int(settings.SANDBOX_CPUS),
-                volumes=[(workspace, "/workspace", "rw")],
+                memory_mib=resolved_memory,
+                cpus=resolved_cpus,
+                volumes=[(workspace, "/workspace", mount_mode)],
                 working_dir="/workspace",
                 auto_destroy=False,
             )
@@ -115,14 +126,19 @@ class BoxLiteSandboxBackend:
                 error_message=str(e),
             )
 
+        box_key = f"{role_tag}:{task_id}"
         info = SandboxInfo(
             task_id=task_id,
             sandbox_name=sandbox_name,
+            role=role,
             extra={"runtime": runtime},
         )
-        self._boxes[task_id] = runtime
+        self._boxes[box_key] = runtime
 
-        logger.info("BoxLite sandbox ready: %s (image=%s)", sandbox_name, resolved_image)
+        logger.info(
+            "BoxLite sandbox ready: %s (image=%s, cpus=%d, mem=%dMiB, mount=%s)",
+            sandbox_name, resolved_image, resolved_cpus, resolved_memory, mount_mode,
+        )
         return SandboxCreateResult(
             info=info,
             workspace=workspace,
@@ -223,23 +239,52 @@ class BoxLiteSandboxBackend:
             return SandboxResult(error=f"BoxLite execution error: {e}", streamed=True)
 
     async def destroy(self, task_id: str) -> None:
-        """Destroy a task's BoxLite VM."""
-        runtime = self._boxes.pop(task_id, None)
+        """Destroy all BoxLite VMs for a task (across all roles)."""
+        keys_to_remove = [k for k in self._boxes if k.endswith(f":{task_id}")]
+        # Also check for legacy plain task_id keys (backward compat)
+        if task_id in self._boxes:
+            keys_to_remove.append(task_id)
+        for key in keys_to_remove:
+            runtime = self._boxes.pop(key, None)
+            if runtime is not None:
+                try:
+                    await runtime.destroy()
+                except Exception:
+                    logger.warning("Failed to destroy BoxLite VM %s", key, exc_info=True)
+                _get_semaphore().release()
+                logger.info("Destroyed BoxLite sandbox: %s", key)
+
+    async def destroy_by_key(self, key: str) -> None:
+        """Destroy a specific BoxLite VM by composite key (``role:task_id``)."""
+        runtime = self._boxes.pop(key, None)
         if runtime is not None:
             try:
                 await runtime.destroy()
             except Exception:
-                logger.warning("Failed to destroy BoxLite VM for task %s", task_id, exc_info=True)
+                logger.warning("Failed to destroy BoxLite VM %s", key, exc_info=True)
             _get_semaphore().release()
-            logger.info("Destroyed BoxLite sandbox for task %s", task_id)
+            logger.info("Destroyed BoxLite sandbox: %s", key)
 
     async def destroy_all(self) -> None:
         """Destroy all managed BoxLite VMs."""
-        task_ids = list(self._boxes.keys())
-        for task_id in task_ids:
-            await self.destroy(task_id)
+        keys = list(self._boxes.keys())
+        for key in keys:
+            await self.destroy_by_key(key)
 
     def get_info(self, task_id: str) -> Optional[SandboxInfo]:
+        # Try composite keys first (role:task_id)
+        for key, runtime in self._boxes.items():
+            if key.endswith(f":{task_id}"):
+                role = key.split(":", 1)[0] if ":" in key else None
+                if role == "default":
+                    role = None
+                return SandboxInfo(
+                    task_id=task_id,
+                    sandbox_name=f"sa-boxlite-{role or 'default'}-{task_id[:8]}",
+                    role=role,
+                    extra={"runtime": runtime},
+                )
+        # Legacy plain key fallback
         runtime = self._boxes.get(task_id)
         if runtime is None:
             return None

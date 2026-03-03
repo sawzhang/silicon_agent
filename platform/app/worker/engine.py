@@ -501,6 +501,69 @@ async def _prepare_runtime_workspace(
     return str(workspace_path), "tmp_cloned", branch_name
 
 
+def _get_sandbox_roles() -> set[str]:
+    """Return the set of roles that should use sandbox execution.
+
+    Reads from ``SANDBOX_ROLES`` setting (JSON list).  Falls back to
+    ``{"coding", "test"}`` if the setting is missing or malformed.
+    """
+    try:
+        return set(json.loads(settings.SANDBOX_ROLES))
+    except Exception:
+        return {"coding", "test"}
+
+
+async def _setup_role_sandbox(
+    task: TaskModel,
+    role: str,
+    workspace_path: Optional[str],
+    workspace_source_hint: str,
+) -> tuple[Any, Any, Optional[str]]:
+    """Create or reuse sandbox for a specific role in a task.
+
+    Returns ``(sandbox_info, sandbox_mgr, sandbox_required_error)``.
+    """
+    if not settings.SANDBOX_ENABLED:
+        return None, None, None
+    sandbox_roles = _get_sandbox_roles()
+    if role not in sandbox_roles:
+        return None, None, None
+
+    from app.worker.sandbox import get_sandbox_manager  # noqa: PLC0415
+
+    sandbox_mgr = get_sandbox_manager()
+
+    resolved_workspace, workspace_source = _resolve_sandbox_workspace(
+        str(task.id),
+        workspace_path,
+        workspace_source_hint,
+    )
+
+    sandbox_image = None
+    project = getattr(task, "project", None)
+    if project and getattr(project, "sandbox_image", None):
+        sandbox_image = project.sandbox_image
+
+    try:
+        result = await sandbox_mgr.get_or_create_role_sandbox(
+            str(task.id),
+            role,
+            workspace=resolved_workspace,
+            workspace_source=workspace_source,
+            image=sandbox_image,
+        )
+    except Exception as exc:
+        logger.warning(
+            "Role sandbox creation failed for task %s role %s: %s",
+            task.id, role, exc,
+        )
+        return None, sandbox_mgr, f"role_sandbox_create_failed: {exc}"
+
+    if result.info:
+        return result.info, sandbox_mgr, None
+    return None, sandbox_mgr, f"{result.error_code}: {result.error_message}"
+
+
 async def _setup_sandbox(
     task: TaskModel,
     workspace_path: Optional[str],
@@ -945,10 +1008,13 @@ async def _cleanup_runtime_resources(
         except Exception:
             logger.warning("Temporary workspace cleanup failed for task %s", task.id, exc_info=True)
 
-    # Clean up sandbox container
-    if sandbox_mgr and sandbox_info:
+    # Clean up sandbox containers (both task-level and per-role)
+    if sandbox_mgr:
         try:
-            await sandbox_mgr.destroy(str(task.id))
+            if hasattr(sandbox_mgr, "destroy_role_sandboxes"):
+                await sandbox_mgr.destroy_role_sandboxes(str(task.id))
+            elif sandbox_info:
+                await sandbox_mgr.destroy(str(task.id))
         except Exception:
             logger.warning("Sandbox cleanup failed for task %s", task.id, exc_info=True)
 
@@ -1615,16 +1681,26 @@ async def _execute_single_stage(
                 }
 
     # Determine working directory: all stages share the same task workspace
-    _CODE_ROLES = {"coding", "test"}
+    _sandbox_roles = _get_sandbox_roles()
     effective_workdir = workspace_path if workspace_path else None
     fallback_mode = _resolve_sandbox_fallback_mode()
 
+    # Phase 3: Per-role sandbox — if sandbox_info is None, try role-level creation
+    if sandbox_info is None and stage.agent_role in _sandbox_roles:
+        role_info, _, role_error = await _setup_role_sandbox(
+            task, stage.agent_role, workspace_path, "given",
+        )
+        if role_info is not None:
+            sandbox_info = role_info
+        elif sandbox_required_error is None and role_error:
+            sandbox_required_error = role_error
+
     # Route to sandbox container or in-process execution
-    use_sandbox = sandbox_info is not None and stage.agent_role in _CODE_ROLES
+    use_sandbox = sandbox_info is not None and stage.agent_role in _sandbox_roles
 
     if (
         settings.SANDBOX_ENABLED
-        and stage.agent_role in _CODE_ROLES
+        and stage.agent_role in _sandbox_roles
         and not use_sandbox
         and fallback_mode == "strict"
     ):

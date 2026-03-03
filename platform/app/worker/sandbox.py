@@ -28,6 +28,7 @@ from app.worker.sandbox_backend import (
     SandboxCreateResult,
     SandboxInfo,
     SandboxResult,
+    get_role_resource_profile,
 )
 
 logger = logging.getLogger(__name__)
@@ -97,8 +98,17 @@ class DockerSandboxBackend:
         workspace: str,
         workspace_source: str = "fallback",
         image: Optional[str] = None,
+        role: Optional[str] = None,
+        cpus: Optional[int] = None,
+        memory_mib: Optional[int] = None,
+        mount_mode: str = "rw",
     ) -> SandboxCreateResult:
-        """Create a Docker container for a task."""
+        """Create a Docker container for a task.
+
+        The *role*, *cpus*, *memory_mib*, and *mount_mode* parameters are
+        accepted for interface compatibility with ``BoxLiteSandboxBackend`` but
+        are currently ignored by the Docker backend.
+        """
 
         def _failed(
             *,
@@ -535,6 +545,7 @@ class SandboxManager:
 
     def __init__(self) -> None:
         self._backend = _create_backend()
+        self._role_sandboxes: dict[str, SandboxInfo] = {}  # "role:task_id" → SandboxInfo
 
     # --- Proxy every method to the backend ---
 
@@ -552,6 +563,45 @@ class SandboxManager:
             workspace_source=workspace_source,
             image=image,
         )
+
+    async def get_or_create_role_sandbox(
+        self,
+        task_id: str,
+        role: str,
+        *,
+        workspace: str,
+        workspace_source: str = "fallback",
+        image: Optional[str] = None,
+    ) -> SandboxCreateResult:
+        """Get existing sandbox for (role, task) or create a new one.
+
+        Role-specific resource profiles are resolved from
+        ``SANDBOX_ROLE_RESOURCES`` configuration.
+        """
+        cache_key = f"{role}:{task_id}"
+        if cache_key in self._role_sandboxes:
+            info = self._role_sandboxes[cache_key]
+            return SandboxCreateResult(
+                info=info,
+                workspace=workspace,
+                workspace_source=workspace_source,
+            )
+
+        profile = get_role_resource_profile(role)
+        result = await self._backend.create(
+            task_id,
+            workspace=workspace,
+            workspace_source=workspace_source,
+            image=image or profile.image,
+            role=role,
+            cpus=profile.cpus,
+            memory_mib=profile.memory_mib,
+            mount_mode=profile.mount_mode,
+        )
+        if result.info:
+            result.info.role = role
+            self._role_sandboxes[cache_key] = result.info
+        return result
 
     async def execute_stage(
         self,
@@ -589,7 +639,16 @@ class SandboxManager:
     async def destroy(self, task_id: str) -> None:
         await self._backend.destroy(task_id)
 
+    async def destroy_role_sandboxes(self, task_id: str) -> None:
+        """Destroy all role sandboxes for a task."""
+        keys_to_remove = [k for k in self._role_sandboxes if k.endswith(f":{task_id}")]
+        for key in keys_to_remove:
+            self._role_sandboxes.pop(key, None)
+        # Delegate actual VM/container cleanup to the backend
+        await self._backend.destroy(task_id)
+
     async def destroy_all(self) -> None:
+        self._role_sandboxes.clear()
         await self._backend.destroy_all()
 
     def get_info(self, task_id: str) -> Optional[SandboxInfo]:

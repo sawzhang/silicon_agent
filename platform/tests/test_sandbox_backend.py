@@ -151,3 +151,86 @@ class TestSandboxManagerDelegation:
 
         result = mgr.get_info("t1")
         assert result is expected_info
+
+
+# ---------------------------------------------------------------------------
+# Per-role sandbox management on SandboxManager
+# ---------------------------------------------------------------------------
+
+
+class TestSandboxManagerRoleSandboxes:
+    @pytest.mark.asyncio
+    async def test_get_or_create_creates_on_first_call(self) -> None:
+        from app.worker.sandbox import SandboxManager
+
+        expected_info = SandboxInfo(task_id="t1", sandbox_name="coding-box", role="coding")
+        expected_result = SandboxCreateResult(
+            info=expected_info, workspace="/tmp/ws",
+        )
+        mock_backend = AsyncMock()
+        mock_backend.create = AsyncMock(return_value=expected_result)
+
+        mgr = SandboxManager()
+        mgr._backend = mock_backend
+
+        with patch("app.worker.sandbox.get_role_resource_profile") as mock_profile:
+            mock_profile.return_value = MagicMock(cpus=2, memory_mib=4096, image=None, mount_mode="rw")
+            result = await mgr.get_or_create_role_sandbox("t1", "coding", workspace="/tmp/ws")
+
+        assert result.info is expected_info
+        assert "coding:t1" in mgr._role_sandboxes
+
+    @pytest.mark.asyncio
+    async def test_get_or_create_reuses_on_second_call(self) -> None:
+        from app.worker.sandbox import SandboxManager
+
+        expected_info = SandboxInfo(task_id="t1", sandbox_name="coding-box", role="coding")
+        expected_result = SandboxCreateResult(
+            info=expected_info, workspace="/tmp/ws",
+        )
+        mock_backend = AsyncMock()
+        mock_backend.create = AsyncMock(return_value=expected_result)
+
+        mgr = SandboxManager()
+        mgr._backend = mock_backend
+
+        with patch("app.worker.sandbox.get_role_resource_profile") as mock_profile:
+            mock_profile.return_value = MagicMock(cpus=2, memory_mib=4096, image=None, mount_mode="rw")
+            r1 = await mgr.get_or_create_role_sandbox("t1", "coding", workspace="/tmp/ws")
+            r2 = await mgr.get_or_create_role_sandbox("t1", "coding", workspace="/tmp/ws")
+
+        assert r1.info is r2.info
+        # Backend should only be called once
+        mock_backend.create.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_destroy_role_sandboxes_clears_all_roles(self) -> None:
+        from app.worker.sandbox import SandboxManager
+
+        mock_backend = AsyncMock()
+        mgr = SandboxManager()
+        mgr._backend = mock_backend
+
+        mgr._role_sandboxes["coding:t1"] = SandboxInfo(task_id="t1", sandbox_name="c")
+        mgr._role_sandboxes["test:t1"] = SandboxInfo(task_id="t1", sandbox_name="t")
+        mgr._role_sandboxes["coding:t2"] = SandboxInfo(task_id="t2", sandbox_name="c2")
+
+        await mgr.destroy_role_sandboxes("t1")
+
+        assert "coding:t1" not in mgr._role_sandboxes
+        assert "test:t1" not in mgr._role_sandboxes
+        assert "coding:t2" in mgr._role_sandboxes
+
+    @pytest.mark.asyncio
+    async def test_destroy_all_clears_role_cache(self) -> None:
+        from app.worker.sandbox import SandboxManager
+
+        mock_backend = AsyncMock()
+        mgr = SandboxManager()
+        mgr._backend = mock_backend
+
+        mgr._role_sandboxes["coding:t1"] = SandboxInfo(task_id="t1", sandbox_name="c")
+        await mgr.destroy_all()
+
+        assert len(mgr._role_sandboxes) == 0
+        mock_backend.destroy_all.assert_called_once()

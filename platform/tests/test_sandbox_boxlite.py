@@ -126,17 +126,135 @@ class TestBoxLiteBackendCreate:
 # ---------------------------------------------------------------------------
 
 
+class TestBoxLiteBackendCreateWithRole:
+    """Tests for create() with role, cpus, memory_mib, mount_mode parameters."""
+
+    @pytest.mark.asyncio
+    async def test_create_with_role_uses_composite_key(self, tmp_path: Path) -> None:
+        workspace = str(tmp_path)
+        backend = BoxLiteSandboxBackend()
+
+        mock_runtime = AsyncMock()
+        mock_runtime.start = AsyncMock()
+        mock_runtime.is_ready = AsyncMock(return_value=True)
+        mock_runtime.destroy = AsyncMock()
+
+        with patch(
+            "skillkit.runtime.boxlite.BoxLiteRuntime",
+            return_value=mock_runtime,
+        ):
+            result = await backend.create(
+                "task-1", workspace=workspace, role="coding",
+            )
+
+        assert result.info is not None
+        assert result.info.role == "coding"
+        assert "coding" in result.info.sandbox_name
+        # Stored under composite key
+        assert "coding:task-1" in backend._boxes
+
+    @pytest.mark.asyncio
+    async def test_create_with_custom_resources(self, tmp_path: Path) -> None:
+        workspace = str(tmp_path)
+        backend = BoxLiteSandboxBackend()
+
+        mock_runtime = AsyncMock()
+        mock_runtime.start = AsyncMock()
+        mock_runtime.is_ready = AsyncMock(return_value=True)
+
+        captured_args: dict = {}
+
+        def capture_runtime(**kwargs):
+            captured_args.update(kwargs)
+            return mock_runtime
+
+        with patch(
+            "skillkit.runtime.boxlite.BoxLiteRuntime",
+            side_effect=capture_runtime,
+        ):
+            result = await backend.create(
+                "task-2",
+                workspace=workspace,
+                role="test",
+                cpus=4,
+                memory_mib=8192,
+                mount_mode="ro",
+            )
+
+        assert result.info is not None
+        assert captured_args["cpus"] == 4
+        assert captured_args["memory_mib"] == 8192
+        assert captured_args["volumes"] == [(workspace, "/workspace", "ro")]
+
+    @pytest.mark.asyncio
+    async def test_create_without_role_uses_default_key(self, tmp_path: Path) -> None:
+        workspace = str(tmp_path)
+        backend = BoxLiteSandboxBackend()
+
+        mock_runtime = AsyncMock()
+        mock_runtime.start = AsyncMock()
+        mock_runtime.is_ready = AsyncMock(return_value=True)
+
+        with patch(
+            "skillkit.runtime.boxlite.BoxLiteRuntime",
+            return_value=mock_runtime,
+        ):
+            result = await backend.create("task-3", workspace=workspace)
+
+        assert result.info is not None
+        assert "default" in result.info.sandbox_name
+        assert "default:task-3" in backend._boxes
+
+    @pytest.mark.asyncio
+    async def test_different_roles_same_task_separate_vms(self, tmp_path: Path) -> None:
+        workspace = str(tmp_path)
+        backend = BoxLiteSandboxBackend()
+
+        mock_runtime_1 = AsyncMock()
+        mock_runtime_1.start = AsyncMock()
+        mock_runtime_1.is_ready = AsyncMock(return_value=True)
+
+        mock_runtime_2 = AsyncMock()
+        mock_runtime_2.start = AsyncMock()
+        mock_runtime_2.is_ready = AsyncMock(return_value=True)
+
+        runtimes = iter([mock_runtime_1, mock_runtime_2])
+
+        with patch(
+            "skillkit.runtime.boxlite.BoxLiteRuntime",
+            side_effect=lambda **kw: next(runtimes),
+        ):
+            r1 = await backend.create("task-4", workspace=workspace, role="coding")
+            r2 = await backend.create("task-4", workspace=workspace, role="test")
+
+        assert r1.info is not None
+        assert r2.info is not None
+        assert r1.info.sandbox_name != r2.info.sandbox_name
+        assert "coding:task-4" in backend._boxes
+        assert "test:task-4" in backend._boxes
+
+
 class TestBoxLiteBackendDestroy:
     @pytest.mark.asyncio
-    async def test_destroy_removes_runtime(self) -> None:
+    async def test_destroy_removes_all_role_runtimes_for_task(self) -> None:
         backend = BoxLiteSandboxBackend()
-        mock_runtime = AsyncMock()
-        mock_runtime.destroy = AsyncMock()
-        backend._boxes["task-1"] = mock_runtime
+        rt_coding = AsyncMock()
+        rt_coding.destroy = AsyncMock()
+        rt_test = AsyncMock()
+        rt_test.destroy = AsyncMock()
+        rt_other = AsyncMock()
+        rt_other.destroy = AsyncMock()
+        backend._boxes["coding:task-1"] = rt_coding
+        backend._boxes["test:task-1"] = rt_test
+        backend._boxes["coding:task-2"] = rt_other
 
         await backend.destroy("task-1")
-        mock_runtime.destroy.assert_called_once()
-        assert "task-1" not in backend._boxes
+        rt_coding.destroy.assert_called_once()
+        rt_test.destroy.assert_called_once()
+        rt_other.destroy.assert_not_called()
+        assert "coding:task-1" not in backend._boxes
+        assert "test:task-1" not in backend._boxes
+        assert "coding:task-2" in backend._boxes
 
     @pytest.mark.asyncio
     async def test_destroy_nonexistent_task_is_noop(self) -> None:
@@ -150,7 +268,7 @@ class TestBoxLiteBackendDestroy:
         rt1.destroy = AsyncMock()
         rt2 = AsyncMock()
         rt2.destroy = AsyncMock()
-        backend._boxes = {"t1": rt1, "t2": rt2}
+        backend._boxes = {"coding:t1": rt1, "test:t2": rt2}
 
         await backend.destroy_all()
         rt1.destroy.assert_called_once()
@@ -171,11 +289,12 @@ class TestBoxLiteBackendGetInfo:
     def test_get_info_returns_info_for_known(self) -> None:
         backend = BoxLiteSandboxBackend()
         mock_runtime = MagicMock()
-        backend._boxes["task-1"] = mock_runtime
+        backend._boxes["coding:task-1"] = mock_runtime
 
         info = backend.get_info("task-1")
         assert info is not None
         assert info.task_id == "task-1"
+        assert info.role == "coding"
         assert info.extra["runtime"] is mock_runtime
 
 

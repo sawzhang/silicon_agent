@@ -81,10 +81,17 @@ class Settings(BaseSettings):
     SANDBOX_NETWORK: str = "sa-sandbox-net"
     SANDBOX_AGENT_PORT: int = 9090
     SANDBOX_READONLY_ROOT: bool = True
-    SANDBOX_MAX_CONCURRENT: int = 4
+    SANDBOX_MAX_CONCURRENT: int = 16
     SANDBOX_WORKSPACE_BASE_DIR: str = "/tmp/silicon_agent/tasks"
     SANDBOX_FALLBACK_MODE: str = "graceful"
     SANDBOX_MEMORY_MIB: int = 4096  # BoxLite memory limit (MiB); Docker uses SANDBOX_MEMORY
+    # Per-role sandbox resource profiles (JSON)
+    # Format: {"role": {"cpus": N, "memory_mib": N, "image": "...", "mount_mode": "rw|ro"}}
+    # Roles not listed use SANDBOX_CPUS/SANDBOX_MEMORY_MIB defaults
+    # Roles with null value don't get sandbox (run in-process)
+    SANDBOX_ROLE_RESOURCES: str = "{}"
+    # Which roles can use sandbox (JSON list)
+    SANDBOX_ROLES: str = '["coding", "test"]'
     SANDBOX_DUMP_MODEL_API_RESPONSE: bool = True
     SANDBOX_MODEL_API_RAW_LOG_HOST_DIR: str = "/tmp/silicon_agent/model_api_logs"
 

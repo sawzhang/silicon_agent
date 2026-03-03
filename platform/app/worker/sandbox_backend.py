@@ -6,9 +6,13 @@ allowing ``SandboxManager`` to switch between them via configuration.
 
 from __future__ import annotations
 
+import json
+import logging
 import time
 from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable, Optional, Protocol, runtime_checkable
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -21,6 +25,7 @@ class SandboxInfo:
 
     task_id: str
     sandbox_name: str  # human-readable identifier (container name or box id)
+    role: str | None = None  # agent role this sandbox serves (e.g. "coding", "test")
     created_at: float = field(default_factory=time.monotonic)
     extra: dict[str, Any] = field(default_factory=dict)
 
@@ -41,6 +46,52 @@ class SandboxInfo:
     @property
     def port(self) -> int:
         return int(self.extra.get("port", 0))
+
+
+@dataclass
+class RoleResourceProfile:
+    """Resource profile for a specific agent role's sandbox."""
+
+    cpus: int = 2
+    memory_mib: int = 4096
+    image: str | None = None  # None → use SANDBOX_IMAGE
+    mount_mode: str = "rw"  # "rw" or "ro"
+
+
+def get_role_resource_profile(role: str) -> RoleResourceProfile:
+    """Parse SANDBOX_ROLE_RESOURCES for a given role, fall back to defaults.
+
+    The config is a JSON object mapping role names to resource overrides::
+
+        {"test": {"cpus": 4, "memory_mib": 4096}, "review": {"mount_mode": "ro"}}
+
+    Missing keys within a role entry fall back to ``RoleResourceProfile`` defaults.
+    Roles not present in the mapping return a plain default profile.
+    """
+    from app.config import settings  # noqa: PLC0415
+
+    raw = getattr(settings, "SANDBOX_ROLE_RESOURCES", "{}")
+    try:
+        mapping = json.loads(raw)
+    except (json.JSONDecodeError, TypeError):
+        logger.warning("Invalid SANDBOX_ROLE_RESOURCES JSON, using defaults")
+        mapping = {}
+
+    if not isinstance(mapping, dict):
+        return RoleResourceProfile()
+
+    role_cfg = mapping.get(role)
+    if role_cfg is None:
+        return RoleResourceProfile()
+    if not isinstance(role_cfg, dict):
+        return RoleResourceProfile()
+
+    return RoleResourceProfile(
+        cpus=int(role_cfg.get("cpus", 2)),
+        memory_mib=int(role_cfg.get("memory_mib", 4096)),
+        image=role_cfg.get("image"),
+        mount_mode=str(role_cfg.get("mount_mode", "rw")),
+    )
 
 
 @dataclass
@@ -80,6 +131,10 @@ class SandboxBackend(Protocol):
         workspace: str,
         workspace_source: str = "fallback",
         image: Optional[str] = None,
+        role: Optional[str] = None,
+        cpus: Optional[int] = None,
+        memory_mib: Optional[int] = None,
+        mount_mode: str = "rw",
     ) -> SandboxCreateResult:
         """Create a sandbox for a task, mounting ``workspace``."""
         ...
