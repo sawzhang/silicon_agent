@@ -17,6 +17,7 @@ import app.models.project  # noqa: F401
 import app.models.task_log  # noqa: F401
 import app.models.skill_feedback  # noqa: F401
 import app.models.trigger  # noqa: F401
+import app.models.integration  # noqa: F401
 
 logger = logging.getLogger(__name__)
 

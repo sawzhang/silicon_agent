@@ -23,19 +23,24 @@ class TriggerService:
         source: str,
         event_type: str,
         payload: dict,
+        project_id: Optional[str] = None,
     ) -> Optional[str]:
         """处理外部事件，匹配规则并创建任务。
+
+        Args:
+            project_id: 项目级 webhook 传入时，只匹配该项目的规则。
 
         Returns:
             创建的 task_id，或 None（未触发）。
         """
         # 查找匹配的启用规则，按创建时间升序确保「首条命中」顺序确定
-        result = await self.session.execute(
-            select(TriggerRuleModel).where(
-                TriggerRuleModel.source == source,
-                TriggerRuleModel.enabled.is_(True),
-            ).order_by(TriggerRuleModel.created_at)
+        query = select(TriggerRuleModel).where(
+            TriggerRuleModel.source == source,
+            TriggerRuleModel.enabled.is_(True),
         )
+        if project_id is not None:
+            query = query.where(TriggerRuleModel.project_id == project_id)
+        result = await self.session.execute(query.order_by(TriggerRuleModel.created_at))
         rules = result.scalars().all()
 
         # 过滤 event_type（支持通配符 "*"）
@@ -45,7 +50,10 @@ class TriggerService:
         ]
 
         if not matched_rules:
-            await self._log_event(source, event_type, payload, None, None, "skipped_no_rule")
+            await self._log_event(
+                source, event_type, payload, None, None, "skipped_no_rule",
+                project_id=project_id,
+            )
             logger.info("触发器：无匹配规则 source=%s event=%s", source, event_type)
             return None
 
@@ -59,14 +67,20 @@ class TriggerService:
         for rule in matched_rules:
             # 1. 过滤器检查
             if not _passes_filters(rule.filters or {}, payload):
-                await self._log_event(source, event_type, payload, rule.id, None, "skipped_filter")
+                await self._log_event(
+                    source, event_type, payload, rule.id, None, "skipped_filter",
+                    project_id=project_id,
+                )
                 logger.info("触发器：过滤器未通过 rule=%s", rule.name)
                 continue
 
             # 2. 去重检查
             dedup_key = _render_template(rule.dedup_key_template or "", payload) or None
             if dedup_key and await self._is_duplicate(rule, dedup_key):
-                await self._log_event(source, event_type, payload, rule.id, dedup_key, "skipped_dedup")
+                await self._log_event(
+                    source, event_type, payload, rule.id, dedup_key, "skipped_dedup",
+                    project_id=project_id,
+                )
                 logger.info("触发器：去重跳过 rule=%s dedup_key=%s", rule.name, dedup_key)
                 continue
 
@@ -82,7 +96,10 @@ class TriggerService:
                 project_id=rule.project_id,
             ))
 
-            await self._log_event(source, event_type, payload, rule.id, dedup_key, "triggered", task.id)
+            await self._log_event(
+                source, event_type, payload, rule.id, dedup_key, "triggered", task.id,
+                project_id=project_id,
+            )
             logger.info(
                 "触发器：创建任务成功 rule=%s task_id=%s title=%s",
                 rule.name, task.id, title,
@@ -115,6 +132,7 @@ class TriggerService:
         dedup_key: Optional[str],
         result: str,
         task_id: Optional[str] = None,
+        project_id: Optional[str] = None,
     ) -> None:
         event = TriggerEventModel(
             source=source,
@@ -124,6 +142,7 @@ class TriggerService:
             dedup_key=dedup_key,
             result=result,
             task_id=task_id,
+            project_id=project_id,
         )
         self.session.add(event)
         await self.session.commit()
@@ -164,6 +183,25 @@ class TriggerService:
         await self.session.commit()
         return True
 
+    async def list_rules_by_project(self, project_id: str) -> list[TriggerRuleModel]:
+        result = await self.session.execute(
+            select(TriggerRuleModel)
+            .where(TriggerRuleModel.project_id == project_id)
+            .order_by(TriggerRuleModel.created_at.desc())
+        )
+        return list(result.scalars().all())
+
+    async def list_events_by_project(
+        self, project_id: str, limit: int = 50
+    ) -> list[TriggerEventModel]:
+        result = await self.session.execute(
+            select(TriggerEventModel)
+            .where(TriggerEventModel.project_id == project_id)
+            .order_by(TriggerEventModel.created_at.desc())
+            .limit(limit)
+        )
+        return list(result.scalars().all())
+
     async def list_events(self, limit: int = 50) -> list[TriggerEventModel]:
         result = await self.session.execute(
             select(TriggerEventModel)
@@ -171,6 +209,114 @@ class TriggerService:
             .limit(limit)
         )
         return list(result.scalars().all())
+
+    async def simulate_event(
+        self,
+        source: str,
+        event_type: str,
+        payload: dict,
+    ) -> dict:
+        """模拟事件处理（dry-run），不创建任务，返回匹配详情。
+
+        Returns dict with keys:
+            matched_rule, result, filter_passed, dedup_blocked, dedup_key,
+            rendered_title, rendered_desc
+        """
+        result = await self.session.execute(
+            select(TriggerRuleModel).where(
+                TriggerRuleModel.source == source,
+                TriggerRuleModel.enabled.is_(True),
+            ).order_by(TriggerRuleModel.created_at)
+        )
+        rules = result.scalars().all()
+        matched_rules = [r for r in rules if r.event_type == "*" or r.event_type == event_type]
+
+        if not matched_rules:
+            return {
+                "matched_rule": None,
+                "result": "skipped_no_rule",
+                "filter_passed": False,
+                "dedup_blocked": False,
+                "dedup_key": None,
+                "rendered_title": None,
+                "rendered_desc": None,
+            }
+
+        last: dict = {}
+        for rule in matched_rules:
+            filter_passed = _passes_filters(rule.filters or {}, payload)
+            dedup_key = _render_template(rule.dedup_key_template or "", payload) or None
+            dedup_blocked = (
+                await self._is_duplicate(rule, dedup_key) if dedup_key else False
+            )
+
+            if not filter_passed:
+                last = {
+                    "matched_rule": rule,
+                    "result": "skipped_filter",
+                    "filter_passed": False,
+                    "dedup_blocked": False,
+                    "dedup_key": dedup_key,
+                    "rendered_title": _render_template(rule.title_template, payload),
+                    "rendered_desc": _render_template(rule.desc_template or "", payload) or None,
+                }
+                continue
+
+            if dedup_blocked:
+                last = {
+                    "matched_rule": rule,
+                    "result": "skipped_dedup",
+                    "filter_passed": True,
+                    "dedup_blocked": True,
+                    "dedup_key": dedup_key,
+                    "rendered_title": _render_template(rule.title_template, payload),
+                    "rendered_desc": _render_template(rule.desc_template or "", payload) or None,
+                }
+                continue
+
+            # 首条命中
+            return {
+                "matched_rule": rule,
+                "result": "would_trigger",
+                "filter_passed": True,
+                "dedup_blocked": False,
+                "dedup_key": dedup_key,
+                "rendered_title": _render_template(rule.title_template, payload),
+                "rendered_desc": _render_template(rule.desc_template or "", payload) or None,
+            }
+
+        return last
+
+    async def test_rule(self, rule_id: str, payload: dict) -> Optional[dict]:
+        """对指定规则进行 dry-run 测试，不创建任务。
+
+        Returns None 如果规则不存在，否则返回匹配详情 dict。
+        """
+        rule = await self.session.get(TriggerRuleModel, rule_id)
+        if rule is None:
+            return None
+
+        filter_passed = _passes_filters(rule.filters or {}, payload)
+        dedup_key = _render_template(rule.dedup_key_template or "", payload) or None
+        dedup_blocked = await self._is_duplicate(rule, dedup_key) if dedup_key else False
+
+        would_trigger = filter_passed and not dedup_blocked
+        result_str = (
+            "would_trigger" if would_trigger
+            else ("skipped_dedup" if filter_passed else "skipped_filter")
+        )
+
+        return {
+            "rule_id": rule.id,
+            "rule_name": rule.name,
+            "filter_passed": filter_passed,
+            "dedup_blocked": dedup_blocked,
+            "dedup_key": dedup_key,
+            "rendered_title": _render_template(rule.title_template, payload),
+            "rendered_desc": _render_template(rule.desc_template or "", payload) or None,
+            "would_trigger": would_trigger,
+            "result": result_str,
+        }
 
 
 # ── 工具函数 ──────────────────────────────────────────────────────────────────
@@ -205,17 +351,101 @@ def _flatten(d: dict, prefix: str = "") -> dict:
     return result
 
 
-def _passes_filters(filters: dict, payload: dict) -> bool:
+def _eval_leaf(node: dict, payload: dict) -> bool:
+    """对单个叶子条件节点求值。"""
+    t = node.get("type", "")
+    v = node.get("value")
+    flat = _flatten(payload)
+
+    if t == "labels":
+        payload_labels: list = flat.get("labels") or flat.get("issue.fields.labels") or []
+        if isinstance(payload_labels, list):
+            payload_label_names = [
+                lb if isinstance(lb, str) else lb.get("name", "") for lb in payload_labels
+            ]
+        else:
+            payload_label_names = []
+        return any(lb in payload_label_names for lb in (v or []))
+
+    if t == "branch":
+        branch = (
+            flat.get("branch")
+            or flat.get("object_attributes.target_branch")
+            or flat.get("ref", "").replace("refs/heads/", "")
+        )
+        return branch == v
+
+    if t == "title_contains":
+        title = (
+            flat.get("title")
+            or flat.get("issue_title")
+            or flat.get("object_attributes.title")
+            or flat.get("issue.fields.summary", "")
+        )
+        return str(v or "").lower() in str(title).lower()
+
+    if t == "author_not":
+        author = (
+            flat.get("author")
+            or flat.get("user.username")
+            or flat.get("object_attributes.author_id")
+            or flat.get("issue.fields.reporter.name", "")
+        )
+        return str(author) not in [str(a) for a in (v or [])]
+
+    # 未知类型：放行
+    return True
+
+
+def _eval_filter_node(node: dict, payload: dict) -> bool:
+    """递归对布尔表达式树节点求值。
+
+    分支节点（有 op 键）：
+        {"op": "and", "conditions": [...]}  — 全部为真
+        {"op": "or",  "conditions": [...]}  — 任一为真
+        {"op": "not", "conditions": [...]}  — 对所有子节点 AND 后取反
+
+    叶子节点（无 op 键）：
+        {"type": "labels"|"branch"|"title_contains"|"author_not", "value": ...}
     """
-    支持的过滤规则：
-    - labels: list[str]       payload 中至少包含一个指定标签
-    - branch: str             分支精确匹配
-    - title_contains: str     标题包含关键词（不区分大小写）
-    - author_not: list[str]   排除指定作者
+    op = node.get("op")
+    if op is None:
+        return _eval_leaf(node, payload)
+    conditions: list = node.get("conditions") or []
+    if op == "and":
+        return all(_eval_filter_node(c, payload) for c in conditions)
+    if op == "or":
+        return any(_eval_filter_node(c, payload) for c in conditions)
+    if op == "not":
+        return not all(_eval_filter_node(c, payload) for c in conditions)
+    # 未知 op：放行
+    return True
+
+
+def _passes_filters(filters: dict, payload: dict) -> bool:
+    """对过滤规则求值，兼容旧式平铺格式和新式布尔表达式树格式。
+
+    旧式（向后兼容）：
+        {"labels": [...], "branch": "main", "title_contains": "...", "author_not": [...]}
+        所有条件 AND 逻辑。
+
+    新式（布尔表达式树，根节点含 "op" 键）：
+        {"op": "or", "conditions": [
+            {"op": "and", "conditions": [
+                {"type": "branch", "value": "main"},
+                {"type": "labels", "value": ["urgent"]}
+            ]},
+            {"type": "title_contains", "value": "hotfix"}
+        ]}
     """
     if not filters:
         return True
 
+    # 新式：根节点含 "op" 键 → 使用表达式树求值
+    if "op" in filters:
+        return _eval_filter_node(filters, payload)
+
+    # 旧式：平铺 AND 逻辑
     flat = _flatten(payload)
 
     # labels 过滤：payload 中的 labels 列表需包含规则指定的至少一个标签

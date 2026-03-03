@@ -1,0 +1,891 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Silicon Agent Platform — Technical Architecture Overview</title>
+<style>
+  :root {
+    --bg: #0f1117;
+    --card: #1a1d27;
+    --card-hover: #1e2230;
+    --border: #2a2d3a;
+    --accent-blue: #4f8ff7;
+    --accent-purple: #a78bfa;
+    --accent-green: #34d399;
+    --accent-orange: #fb923c;
+    --accent-red: #f87171;
+    --accent-cyan: #22d3ee;
+    --accent-yellow: #facc15;
+    --accent-pink: #f472b6;
+    --text: #e2e8f0;
+    --text-dim: #94a3b8;
+    --text-muted: #64748b;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: var(--bg); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; padding: 40px 20px; }
+  .container { max-width: 1500px; margin: 0 auto; }
+  h1 { text-align: center; font-size: 30px; font-weight: 700; margin-bottom: 4px; background: linear-gradient(135deg, var(--accent-cyan), var(--accent-blue), var(--accent-purple), var(--accent-pink)); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+  .subtitle { text-align: center; color: var(--text-dim); font-size: 14px; margin-bottom: 12px; }
+  .subtitle2 { text-align: center; color: var(--text-muted); font-size: 12px; margin-bottom: 48px; }
+  .section-title { font-size: 18px; font-weight: 600; margin: 56px 0 20px; padding-left: 12px; border-left: 3px solid var(--accent-cyan); }
+  .section-subtitle { font-size: 13px; color: var(--text-muted); margin: -14px 0 20px 16px; }
+  code { background: rgba(255,255,255,0.06); padding: 1px 6px; border-radius: 3px; font-family: 'SF Mono', Menlo, monospace; font-size: 11px; }
+
+  /* Tags */
+  .tag { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 10px; font-weight: 600; letter-spacing: 0.3px; }
+  .tag-green { background: rgba(52,211,153,0.15); color: var(--accent-green); }
+  .tag-blue { background: rgba(79,143,247,0.15); color: var(--accent-blue); }
+  .tag-orange { background: rgba(251,146,60,0.15); color: var(--accent-orange); }
+  .tag-red { background: rgba(248,113,113,0.15); color: var(--accent-red); }
+  .tag-purple { background: rgba(167,139,250,0.15); color: var(--accent-purple); }
+  .tag-cyan { background: rgba(34,211,238,0.15); color: var(--accent-cyan); }
+  .tag-yellow { background: rgba(250,204,21,0.15); color: var(--accent-yellow); }
+  .tag-pink { background: rgba(244,114,182,0.15); color: var(--accent-pink); }
+
+  /* Cards */
+  .grid-2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(380px, 1fr)); gap: 16px; margin: 20px 0; }
+  .grid-3 { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; margin: 20px 0; }
+  .grid-4 { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; margin: 20px 0; }
+  .gcard { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 20px; transition: background 0.2s; }
+  .gcard:hover { background: var(--card-hover); }
+  .gcard-title { font-size: 14px; font-weight: 600; margin-bottom: 10px; display: flex; align-items: center; gap: 8px; }
+  .gcard-body { font-size: 12px; color: var(--text-dim); line-height: 1.7; }
+  .gcard-body ul { padding-left: 16px; margin-top: 6px; }
+  .gcard-body li { margin-bottom: 3px; }
+
+  /* ASCII */
+  .ascii { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 24px; margin: 20px 0; overflow-x: auto; font-family: 'SF Mono', Menlo, Consolas, monospace; font-size: 11px; line-height: 1.55; color: var(--text-dim); white-space: pre; }
+
+  /* Table */
+  .qa-table { width: 100%; border-collapse: collapse; margin: 16px 0; font-size: 12px; }
+  .qa-table th { text-align: left; padding: 10px 14px; font-weight: 600; background: rgba(79,143,247,0.08); border-bottom: 2px solid var(--border); color: var(--accent-blue); font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; }
+  .qa-table td { padding: 10px 14px; border-bottom: 1px solid var(--border); color: var(--text-dim); vertical-align: top; }
+  .qa-table tr:hover td { background: rgba(255,255,255,0.02); }
+
+  /* Stats */
+  .stat-row { display: flex; gap: 12px; margin: 20px 0; flex-wrap: wrap; }
+  .stat-card { flex: 1; min-width: 120px; background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 16px; text-align: center; }
+  .stat-value { font-size: 26px; font-weight: 700; }
+  .stat-label { font-size: 10px; color: var(--text-muted); margin-top: 4px; }
+
+  /* Loop Container */
+  .lc { background: var(--card); border: 1px solid var(--border); border-radius: 14px; padding: 28px; margin: 20px 0; position: relative; overflow: hidden; }
+  .lc::before { content: ''; position: absolute; top: 0; left: 0; width: 100%; height: 3px; }
+  .lc-blue::before { background: linear-gradient(90deg, var(--accent-blue), var(--accent-cyan)); }
+  .lc-green::before { background: linear-gradient(90deg, var(--accent-green), var(--accent-cyan)); }
+  .lc-orange::before { background: linear-gradient(90deg, var(--accent-orange), var(--accent-pink)); }
+  .lc-purple::before { background: linear-gradient(90deg, var(--accent-purple), var(--accent-pink)); }
+  .lc-red::before { background: linear-gradient(90deg, var(--accent-red), var(--accent-orange)); }
+  .lc-cyan::before { background: linear-gradient(90deg, var(--accent-cyan), var(--accent-green)); }
+  .lc-title { font-size: 15px; font-weight: 700; margin-bottom: 16px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .badge { font-size: 10px; padding: 2px 8px; border-radius: 10px; font-weight: 600; }
+  .badge-cyan { background: rgba(34,211,238,0.15); color: var(--accent-cyan); }
+  .badge-green { background: rgba(52,211,153,0.15); color: var(--accent-green); }
+  .badge-orange { background: rgba(251,146,60,0.15); color: var(--accent-orange); }
+  .badge-red { background: rgba(248,113,113,0.15); color: var(--accent-red); }
+  .badge-purple { background: rgba(167,139,250,0.15); color: var(--accent-purple); }
+  .badge-blue { background: rgba(79,143,247,0.15); color: var(--accent-blue); }
+
+  /* Layer Rows */
+  .layer-stack { display: flex; flex-direction: column; gap: 0; margin: 20px 0; }
+  .layer-row { display: flex; align-items: stretch; min-height: 56px; }
+  .layer-label { width: 160px; flex-shrink: 0; display: flex; align-items: center; justify-content: flex-end; padding-right: 20px; font-size: 11px; font-weight: 600; }
+  .layer-content { flex: 1; padding: 10px 20px; border-bottom: 1px solid rgba(255,255,255,0.04); display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .lbox { padding: 7px 12px; border-radius: 8px; font-size: 11px; border: 1px solid; line-height: 1.4; }
+  .lbox .lt { font-weight: 600; }
+  .lbox .ls { font-size: 10px; opacity: 0.7; margin-top: 1px; }
+  .c-blue { border-color: rgba(79,143,247,0.3); background: rgba(79,143,247,0.08); color: var(--accent-blue); }
+  .c-green { border-color: rgba(52,211,153,0.3); background: rgba(52,211,153,0.08); color: var(--accent-green); }
+  .c-purple { border-color: rgba(167,139,250,0.3); background: rgba(167,139,250,0.08); color: var(--accent-purple); }
+  .c-orange { border-color: rgba(251,146,60,0.3); background: rgba(251,146,60,0.08); color: var(--accent-orange); }
+  .c-red { border-color: rgba(248,113,113,0.3); background: rgba(248,113,113,0.08); color: var(--accent-red); }
+  .c-cyan { border-color: rgba(34,211,238,0.3); background: rgba(34,211,238,0.08); color: var(--accent-cyan); }
+  .c-yellow { border-color: rgba(250,204,21,0.3); background: rgba(250,204,21,0.08); color: var(--accent-yellow); }
+  .c-pink { border-color: rgba(244,114,182,0.3); background: rgba(244,114,182,0.08); color: var(--accent-pink); }
+  .c-dim { border-color: var(--border); background: rgba(255,255,255,0.03); color: var(--text-dim); }
+
+  /* Flow Arrow */
+  .harrow { display: inline-flex; align-items: center; color: var(--text-muted); font-size: 14px; flex-shrink: 0; padding: 0 2px; }
+
+  @media (max-width: 768px) {
+    .grid-2, .grid-3, .grid-4 { grid-template-columns: 1fr; }
+    .layer-label { width: 100px; font-size: 10px; }
+    .stat-card { min-width: 100px; }
+  }
+</style>
+</head>
+<body>
+<div class="container">
+
+<h1>Silicon Agent Platform</h1>
+<p class="subtitle">Technical Architecture Overview</p>
+<p class="subtitle2">AI-Driven SDLC 自动化平台 &mdash; 从事件触发到代码交付的全链路架构大图</p>
+
+<!-- ═══════════════════════════════════════════ -->
+<!--  STATS OVERVIEW                            -->
+<!-- ═══════════════════════════════════════════ -->
+<div class="stat-row">
+  <div class="stat-card"><div class="stat-value" style="color:var(--accent-cyan);">15</div><div class="stat-label">数据库模型</div></div>
+  <div class="stat-card"><div class="stat-value" style="color:var(--accent-blue);">19</div><div class="stat-label">后端服务</div></div>
+  <div class="stat-card"><div class="stat-value" style="color:var(--accent-green);">14</div><div class="stat-label">API 路由组</div></div>
+  <div class="stat-card"><div class="stat-value" style="color:var(--accent-purple);">16</div><div class="stat-label">Worker 模块</div></div>
+  <div class="stat-card"><div class="stat-value" style="color:var(--accent-orange);">7</div><div class="stat-label">Agent 角色</div></div>
+  <div class="stat-card"><div class="stat-value" style="color:var(--accent-pink);">24</div><div class="stat-label">Skills</div></div>
+  <div class="stat-card"><div class="stat-value" style="color:var(--accent-yellow);">15</div><div class="stat-label">前端页面</div></div>
+  <div class="stat-card"><div class="stat-value" style="color:var(--accent-red);">783+</div><div class="stat-label">测试用例</div></div>
+</div>
+
+<!-- ═══════════════════════════════════════════ -->
+<!--  1. SYSTEM ARCHITECTURE ASCII              -->
+<!-- ═══════════════════════════════════════════ -->
+<div class="section-title">1. 系统全景架构图</div>
+<div class="section-subtitle">从用户/外部事件到 Agent 执行的完整数据流</div>
+
+<div class="ascii">
+┌────────────────────────────────────────────────────────────────────────────────────────────────────┐
+│                                    EXTERNAL SYSTEMS                                                │
+│                                                                                                    │
+│   ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌────────────────┐  ┌──────────────┐  │
+│   │  GitHub   │  │  GitLab  │  │   Jira   │  │  Cron    │  │  LLM Provider  │  │ Slack/飞书   │  │
+│   │ Webhook   │  │ Webhook  │  │ Webhook  │  │ Schedule │  │ OpenAI / etc   │  │ 钉钉 Notify  │  │
+│   └─────┬────┘  └─────┬────┘  └─────┬────┘  └────┬─────┘  └───────┬────────┘  └──────▲───────┘  │
+│         │              │              │            │                │                   │          │
+└─────────┼──────────────┼──────────────┼────────────┼────────────────┼───────────────────┼──────────┘
+          │              │              │            │                │                   │
+          ▼              ▼              ▼            ▼                │                   │
+┌─────────────────────────────────────────────────────────────────────┼───────────────────┼──────────┐
+│                          PLATFORM (FastAPI + Python 3.11)          │                   │          │
+│                                                                     │                   │          │
+│  ┌─ Middleware Stack ────────────────────────────────────────────┐  │                   │          │
+│  │  CORS → RequestLogging → ErrorHandler → JWTAuth (optional)   │  │                   │          │
+│  └──────────────────────────────────────────────────────────────┘  │                   │          │
+│                                                                     │                   │          │
+│  ┌─ Webhook Handlers ──────────────────┐  ┌─ REST API /api/v1/ ─────────────────────┐ │          │
+│  │ /webhooks/github[/{project_id}]     │  │                                          │ │          │
+│  │ /webhooks/gitlab[/{project_id}]     │  │  tasks · agents · gates · templates     │ │          │
+│  │ /webhooks/jira[/{project_id}]       │  │  projects · skills · kpi · audit        │ │          │
+│  │         │                           │  │  triggers · integrations · llm-probe    │ │          │
+│  │         │  Signature Verify         │  │  circuit-breaker · task-logs · auth     │ │          │
+│  │         │  Payload Normalize        │  │                                          │ │          │
+│  │         ▼                           │  └──────────────┬───────────────────────────┘ │          │
+│  │  ┌──────────────┐                  │                  │                              │          │
+│  │  │ TriggerService│                  │                  │                              │          │
+│  │  │ bool-tree     │                  │                  ▼                              │          │
+│  │  │ filter+dedup  │─── create ──────────▶ ┌─── Services (19) ─────────────────────┐  │          │
+│  │  └──────────────┘   task           │    │ TaskService · AgentService             │  │          │
+│  └─────────────────────────────────────┘    │ GateService · TemplateService          │  │          │
+│                                              │ ProjectService · IntegrationService    │  │          │
+│  ┌─ Cron Scheduler ──┐                      │ TriggerService · KPIService            │  │          │
+│  │ 60s poll interval  │── create task ──────▶│ SkillService · AuditService            │  │          │
+│  │ croniter evaluate  │                      │ CircuitBreakerService · TaskLogService │  │          │
+│  └────────────────────┘                      │ LLMProbeService · RepoAnalyzer · ...   │  │          │
+│                                              └──────────────┬────────────────────────┘  │          │
+│                                                              │                           │          │
+│                                              ┌───────────────▼────────────────────────┐  │          │
+│                                              │          Database Layer                 │  │          │
+│  ┌─ WebSocket ──────┐                       │  SQLite (dev) / PostgreSQL (prod)      │  │          │
+│  │ /ws endpoint     │                       │  15 Models · Auto-migration on startup │  │          │
+│  │ Redis pub/sub    │                       │  selectinload for async relationships  │  │          │
+│  │ (fallback: local)│                       └────────────────────────────────────────┘  │          │
+│  │ 14 event types   │                                                                   │          │
+│  └────────┬─────────┘                                                                   │          │
+│           │                                                                              │          │
+│  ═════════╪══════════════════════════════════════════════════════════════════════════════ │          │
+│           │                      WORKER ENGINE                                           │          │
+│           │                                                                              │          │
+│  ┌────────┼─────────────────────────────────────────────────────────────────────────────┐│          │
+│  │        │  ┌──────────────┐    ┌───────────────────────┐    ┌─────────────────────┐  ││          │
+│  │   WS   │  │  Task Poller │    │   Dual-Mode Engine    │    │     Executor        │  ││          │
+│  │ events │  │  5s interval │───▶│                       │───▶│                     │──┼┼──── LLM  │
+│  │   ◀────┤  │  atomic claim│    │  Linear: order-based  │    │  Prompt Assembly    │  ││   calls  │
+│  │        │  └──────────────┘    │  DAG: StageGraph      │    │  AgentRunner.chat() │  ││          │
+│  │        │                      │                       │    │  Tool Execution     │  ││          │
+│  │        │  ┌──────────────┐    │  Condition Check      │    │  Structured Output  │  ││          │
+│  │        │  │ Gate Handler │◀───│  Gate Insert/Poll     │    │  Self-Eval Loop     │  ││          │
+│  │        │  │ 3s poll      │───▶│  Circuit Breaker ×4   │    │                     │──┼┼── Notify │
+│  │        │  │ approve/     │    │  Dynamic Routing      │    └─────────┬───────────┘  ││          │
+│  │        │  │ reject/revise│    │  Interactive Planning  │              │               ││          │
+│  │        │  └──────────────┘    └───────────────────────┘              │               ││          │
+│  │        │                                                              │               ││          │
+│  │        │  ┌──────────────────────────────────────────────────────────┘               ││          │
+│  │        │  │                                                                          ││          │
+│  │        │  │  ┌─ Sandbox ───────────┐  ┌─ Worktree ──────────┐  ┌─ Memory ────────┐ ││          │
+│  │        │  │  │ Docker per-task     │  │ git worktree add    │  │ 4 categories    │ ││          │
+│  │        │  └─▶│ agent_server :9090  │  │ commit+push         │  │ Role RBAC       │ ││          │
+│  │        │     │ NDJSON streaming    │  │ gh pr create        │  │ 3 sources       │ ││          │
+│  │        │     │ 7-layer security    │  │ crash recovery      │  │ FIFO eviction   │ ││          │
+│  │        │     └─────────────────────┘  └─────────────────────┘  └─────────────────┘ ││          │
+│  │        │                                                                            ││          │
+│  │        │  ┌─ Post-Completion ──────────────────────────────────────────────────────┐││          │
+│  │        │  │ Memory Extract (LLM) · Skill Metrics · KPI Record · Audit Log         │││          │
+│  │        │  │ Worktree: commit → push → PR · External Notify · Cleanup              │││          │
+│  │        │  └────────────────────────────────────────────────────────────────────────┘││          │
+│  └────────┼────────────────────────────────────────────────────────────────────────────┘│          │
+│           │                                                                              │          │
+└───────────┼──────────────────────────────────────────────────────────────────────────────┘          │
+            │                                                                                         │
+            │  WebSocket                                                                              │
+            ▼                                                                                         │
+┌─────────────────────────────────────────────────────────────────────────────────────────────────────┘
+│
+│  ┌─ FRONTEND (React 18 + Vite + TypeScript strict) ─────────────────────────────────────────────┐
+│  │                                                                                               │
+│  │   ┌─ Routing (15 pages) ─────────────────────────────────────────────────────────────────┐   │
+│  │   │ /dashboard · /tasks · /tasks/:id · /projects · /projects/:id · /gates · /skills      │   │
+│  │   │ /skills/:name · /cockpit · /kpi · /roi · /audit · /task-logs · /config · /cb         │   │
+│  │   └──────────────────────────────────────────────────────────────────────────────────────┘   │
+│  │                                                                                               │
+│  │   ┌─ State ──────────────────────┐   ┌─ Data ──────────────────────┐                        │
+│  │   │ Zustand (5 stores)           │   │ React Query (13 services)   │                        │
+│  │   │ agentStore · activityStore   │◀──│ tasks · agents · gates      │                        │
+│  │   │ notificationStore            │ WS│ templates · projects · kpi  │                        │
+│  │   │ stageLogStore                │   │ skills · audit · triggers   │                        │
+│  │   │ taskLogStreamStore           │   │ integrations · llm-probe   │                        │
+│  │   └──────────────────────────────┘   └─────────────────────────────┘                        │
+│  │                                                                                               │
+│  │   ┌─ UI ────────────────────────────────────────────────────────────────────────────────┐   │
+│  │   │ Ant Design + ProComponents · ECharts · react-markdown · BasicLayout (sidebar+topbar)│   │
+│  │   │ PipelineView · ReActTimeline · AgentCard · GateApprovalCard · KPIChart · ActivityFeed│  │
+│  │   └──────────────────────────────────────────────────────────────────────────────────────┘   │
+│  └───────────────────────────────────────────────────────────────────────────────────────────────┘
+│
+└──────────────────────────────────────────────────────────────────────────────────────────────────────</div>
+
+<!-- ═══════════════════════════════════════════ -->
+<!--  2. TECH STACK LAYERS                      -->
+<!-- ═══════════════════════════════════════════ -->
+<div class="section-title">2. 技术栈分层架构</div>
+<div class="section-subtitle">从用户界面到基础设施的 7 层结构</div>
+
+<div class="layer-stack">
+  <div class="layer-row">
+    <div class="layer-label" style="color:var(--accent-cyan);">Presentation<br>展示层</div>
+    <div class="layer-content">
+      <div class="lbox c-cyan"><div class="lt">React 18</div><div class="ls">TypeScript strict</div></div>
+      <div class="lbox c-cyan"><div class="lt">Ant Design + Pro</div><div class="ls">UI 组件库</div></div>
+      <div class="lbox c-cyan"><div class="lt">ECharts</div><div class="ls">KPI 图表</div></div>
+      <div class="lbox c-cyan"><div class="lt">Vite 5</div><div class="ls">构建 + HMR</div></div>
+    </div>
+  </div>
+  <div class="layer-row">
+    <div class="layer-label" style="color:var(--accent-blue);">State<br>状态层</div>
+    <div class="layer-content">
+      <div class="lbox c-blue"><div class="lt">React Query</div><div class="ls">服务端数据缓存 (13 services)</div></div>
+      <div class="lbox c-blue"><div class="lt">Zustand</div><div class="ls">实时状态 (5 stores)</div></div>
+      <div class="lbox c-blue"><div class="lt">WebSocket Hook</div><div class="ls">自动重连 + 心跳</div></div>
+    </div>
+  </div>
+  <div class="layer-row">
+    <div class="layer-label" style="color:var(--accent-green);">API<br>接口层</div>
+    <div class="layer-content">
+      <div class="lbox c-green"><div class="lt">REST /api/v1/</div><div class="ls">14 路由组</div></div>
+      <div class="lbox c-green"><div class="lt">WebSocket /ws</div><div class="ls">14 事件类型</div></div>
+      <div class="lbox c-green"><div class="lt">Webhooks</div><div class="ls">GitHub / GitLab / Jira</div></div>
+      <div class="lbox c-dim"><div class="lt">Middleware</div><div class="ls">CORS · Log · Error · JWT</div></div>
+    </div>
+  </div>
+  <div class="layer-row">
+    <div class="layer-label" style="color:var(--accent-purple);">Service<br>业务层</div>
+    <div class="layer-content">
+      <div class="lbox c-purple"><div class="lt">19 Services</div><div class="ls">Task · Agent · Gate · Template ...</div></div>
+      <div class="lbox c-purple"><div class="lt">Trigger Engine</div><div class="ls">bool-tree filter + dedup + cron</div></div>
+      <div class="lbox c-purple"><div class="lt">Integration</div><div class="ls">LLM Client · Notifier · EventCollector</div></div>
+    </div>
+  </div>
+  <div class="layer-row">
+    <div class="layer-label" style="color:var(--accent-orange);">Worker<br>引擎层</div>
+    <div class="layer-content">
+      <div class="lbox c-orange"><div class="lt">Engine</div><div class="ls">Linear + DAG 双模式</div></div>
+      <div class="lbox c-orange"><div class="lt">Executor</div><div class="ls">Prompt → LLM → Tools</div></div>
+      <div class="lbox c-orange"><div class="lt">Compressor</div><div class="ls">L0/L1/L2 滑动窗口</div></div>
+      <div class="lbox c-orange"><div class="lt">Memory</div><div class="ls">4 类 × 角色 RBAC</div></div>
+      <div class="lbox c-orange"><div class="lt">Graph</div><div class="ls">DAG + 失败重定向</div></div>
+      <div class="lbox c-orange"><div class="lt">Failure</div><div class="ls">6 类分类 + Ralph Loop</div></div>
+    </div>
+  </div>
+  <div class="layer-row">
+    <div class="layer-label" style="color:var(--accent-red);">Isolation<br>隔离层</div>
+    <div class="layer-content">
+      <div class="lbox c-red"><div class="lt">Docker Sandbox</div><div class="ls">per-task 容器 · 7 层安全</div></div>
+      <div class="lbox c-red"><div class="lt">Git Worktree</div><div class="ls">per-task 分支 · PR 创建</div></div>
+      <div class="lbox c-red"><div class="lt">Tool Policy</div><div class="ls">白名单 · 路径沙箱 · 参数校验</div></div>
+    </div>
+  </div>
+  <div class="layer-row">
+    <div class="layer-label" style="color:var(--accent-yellow);">Infrastructure<br>基础设施</div>
+    <div class="layer-content">
+      <div class="lbox c-yellow"><div class="lt">PostgreSQL 16</div><div class="ls">生产数据库</div></div>
+      <div class="lbox c-yellow"><div class="lt">Redis 7</div><div class="ls">WS pub/sub</div></div>
+      <div class="lbox c-yellow"><div class="lt">Docker Engine</div><div class="ls">Sandbox 管理</div></div>
+      <div class="lbox c-yellow"><div class="lt">SQLite + WAL</div><div class="ls">开发/测试</div></div>
+      <div class="lbox c-dim"><div class="lt">GitHub Actions</div><div class="ls">8 CI jobs</div></div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════ -->
+<!--  3. API ENDPOINT MAP                       -->
+<!-- ═══════════════════════════════════════════ -->
+<div class="section-title">3. API 端点全景</div>
+
+<div class="grid-2">
+  <div class="gcard">
+    <div class="gcard-title" style="color:var(--accent-green);">&#127760; REST API <code>/api/v1/</code></div>
+    <div class="gcard-body">
+      <table class="qa-table" style="margin:0;">
+        <tr><th>路由组</th><th>前缀</th><th>功能</th></tr>
+        <tr><td><span class="tag tag-blue">tasks</span></td><td>/tasks</td><td>任务 CRUD、重试、批量创建、PRD 拆解</td></tr>
+        <tr><td><span class="tag tag-cyan">agents</span></td><td>/agents</td><td>7 角色 Agent 管理</td></tr>
+        <tr><td><span class="tag tag-green">gates</span></td><td>/gates</td><td>人工审批 approve/reject/revise</td></tr>
+        <tr><td><span class="tag tag-purple">templates</span></td><td>/templates</td><td>Pipeline 模板 CRUD + 版本控制</td></tr>
+        <tr><td><span class="tag tag-orange">projects</span></td><td>/projects</td><td>项目管理 + 仓库分析</td></tr>
+        <tr><td><span class="tag tag-yellow">integrations</span></td><td>/projects/{id}/integrations</td><td>项目级 Webhook 集成配置</td></tr>
+        <tr><td><span class="tag tag-pink">triggers</span></td><td>/triggers</td><td>触发规则 CRUD + 事件日志 + dry-run</td></tr>
+        <tr><td><span class="tag tag-cyan">skills</span></td><td>/skills</td><td>Skill 目录 + 版本管理</td></tr>
+        <tr><td><span class="tag tag-blue">kpi</span></td><td>/kpi</td><td>KPI 指标 + ROI 分析</td></tr>
+        <tr><td><span class="tag tag-red">circuit-breaker</span></td><td>/circuit-breaker</td><td>熔断器状态、触发、恢复</td></tr>
+        <tr><td><span class="tag tag-purple">audit</span></td><td>/audit</td><td>审计日志</td></tr>
+        <tr><td><span class="tag tag-orange">task-logs</span></td><td>/task-logs</td><td>Stage 执行日志</td></tr>
+        <tr><td><span class="tag tag-green">llm</span></td><td>/llm</td><td>LLM 探活</td></tr>
+        <tr><td><span class="tag tag-yellow">auth</span></td><td>/auth</td><td>JWT Token 签发</td></tr>
+      </table>
+    </div>
+  </div>
+  <div class="gcard">
+    <div class="gcard-title" style="color:var(--accent-orange);">&#128268; Webhook + WebSocket + Health</div>
+    <div class="gcard-body">
+      <strong>Webhook 端点（事件入口）：</strong>
+      <table class="qa-table" style="margin:8px 0;">
+        <tr><th>来源</th><th>全局</th><th>项目级</th><th>验签</th></tr>
+        <tr><td>GitHub</td><td><code>/webhooks/github</code></td><td><code>/{project_id}</code></td><td>HMAC-SHA256</td></tr>
+        <tr><td>GitLab</td><td><code>/webhooks/gitlab</code></td><td><code>/{project_id}</code></td><td>Token Header</td></tr>
+        <tr><td>Jira</td><td><code>/webhooks/jira</code></td><td><code>/{project_id}</code></td><td>HMAC-SHA256</td></tr>
+      </table>
+      <strong>WebSocket：</strong><br>
+      <code>ws://host/ws</code> — 14 种事件类型，Redis pub/sub 广播<br>
+      前端自动重连（3s） + 心跳（30s）<br><br>
+      <strong>Health：</strong><br>
+      <code>GET /health</code> &rarr; <code>{"status": "ok"}</code>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════ -->
+<!--  4. DATA MODEL                             -->
+<!-- ═══════════════════════════════════════════ -->
+<div class="section-title">4. 数据模型关系图</div>
+<div class="section-subtitle">15 个 SQLAlchemy Model + 核心关联关系</div>
+
+<div class="ascii">
+                           ┌─────────────────────────┐
+                           │     ProjectModel         │
+                           │  ───────────────────     │
+                           │  id · name · repo_url    │
+                           │  tech_stack · branch     │
+                           │  sandbox_image           │
+                           └────┬────────┬────────────┘
+                                │        │
+                    FK (project_id)      FK (project_id)
+                                │        │
+           ┌────────────────────▼──┐  ┌──▼───────────────────────┐
+           │ ProjectIntegrationModel│  │     TriggerRuleModel     │
+           │  ──────────────────── │  │  ─────────────────────── │
+           │  provider · secret    │  │  source · event_type     │
+           │  access_token         │  │  filters (JSON bool-tree)│
+           │  enabled              │  │  template_id · dedup     │
+           │  UQ(project,provider) │  │  cron_expr · enabled     │
+           └───────────────────────┘  └────┬──────────────────────┘
+                                            │
+                                            │ logs
+                                            ▼
+                                     ┌──────────────────────┐
+                                     │  TriggerEventModel   │
+                                     │  result · payload    │
+                                     │  dedup_key · task_id │
+                                     └──────────────────────┘
+
+  ┌───────────────────┐       ┌───────────────────────────────────────────────────┐
+  │ TaskTemplateModel  │       │                  TaskModel                        │
+  │  ────────────────  │  FK   │  ───────────────────────────────────────────────  │
+  │  stages (JSON)     │◀──────│  id · title · description · status               │
+  │  gates (JSON)      │       │  total_tokens · total_cost_rmb                   │
+  │  version · parent  │       │  template_id · project_id                        │
+  │  estimated_hours   │       │  branch_name · pr_url · plan · routing_decisions │
+  └───────────────────┘       └────────────────┬──────────────────────────────────┘
+                                                │
+                                   CASCADE      │     FK (task_id)
+                                                │
+                                 ┌──────────────▼──────────────┐
+                                 │       TaskStageModel         │
+                                 │  ─────────────────────────── │
+                                 │  stage_name · agent_role     │
+                                 │  status · tokens_used        │
+                                 │  output_summary · error_msg  │
+                                 │  output_structured (JSON)    │
+                                 │  self_assessment_score       │
+                                 │  failure_category            │
+                                 └──────────────────────────────┘
+
+  ┌───────────────────┐  ┌───────────────────┐  ┌───────────────────────────────┐
+  │    AgentModel      │  │  HumanGateModel   │  │       TaskStageLogModel       │
+  │  ────────────────  │  │  ───────────────  │  │  ─────────────────────────── │
+  │  role (unique)     │  │  gate_type        │  │  task_id · stage_id          │
+  │  display_name      │  │  task_id · status │  │  event_type · command        │
+  │  model_name        │  │  review_comment   │  │  request_body · response     │
+  │  config (JSON)     │  │  is_dynamic       │  │  duration_ms · result        │
+  │  current_task_id   │  │  revised_content  │  │  output_summary              │
+  └───────────────────┘  └───────────────────┘  └───────────────────────────────┘
+
+  ┌────────────────────┐  ┌────────────────────┐  ┌────────────────────┐
+  │    SkillModel       │  │  SkillFeedbackModel │  │   KPIMetricModel   │
+  │  ────────────────── │  │  ────────────────── │  │  ──────────────── │
+  │  name · layer       │  │  skill_name · role  │  │  metric_name      │
+  │  applicable_roles   │  │  feedback_type      │  │  value · unit     │
+  │  content · version  │──│  tokens · duration  │  │  agent_role       │
+  │  ↓ SkillVersionModel│  └────────────────────┘  └────────────────────┘
+  └────────────────────┘
+                           ┌────────────────────┐  ┌────────────────────┐
+                           │   AuditLogModel     │  │CircuitBreakerModel │
+                           │  action_type        │  │  level · status    │
+                           │  risk_level         │  │  triggered_by      │
+                           │  action_detail      │  │  trigger_reason    │
+                           └────────────────────┘  └────────────────────┘</div>
+
+<!-- ═══════════════════════════════════════════ -->
+<!--  5. WORKER PIPELINE                        -->
+<!-- ═══════════════════════════════════════════ -->
+<div class="section-title">5. Worker 引擎 — 任务处理 Pipeline</div>
+<div class="section-subtitle">16 个模块协作的核心任务执行流程</div>
+
+<div class="lc lc-orange">
+  <div class="lc-title">engine.py 核心循环 <span class="badge badge-orange">5s POLL</span></div>
+
+  <div class="ascii" style="margin:0; border:none; padding:16px 0;">
+  Poll DB (5s)──▶ Claim Task (atomic) ──▶ Setup Phase ──▶ Stage Loop ──▶ Finalize
+       │               │                      │               │              │
+       │          pending→claimed         ┌────┴────┐     For each stage:    │
+       │          →running               │         │     ┌──────────────┐  │
+       │                              Worktree  Sandbox  │ ① Condition  │  ├─ commit+push
+       │                              clone/    Docker   │ ② Model pick │  ├─ create PR
+       │                              checkout  create   │ ③ Prompt asm │  ├─ extract memory
+       │                                                 │ ④ LLM chat   │  ├─ skill metrics
+       │                                  Memory load    │ ⑤ Self-eval  │  ├─ KPI record
+       │                                  (RBAC)         │ ⑥ CB check   │  ├─ audit log
+       │                                                 │ ⑦ Gate check │  ├─ notify
+       │                                                 │ ⑧ Routing    │  └─ cleanup
+       │                                                 └──────────────┘
+       │
+  Timeout: WORKER_TASK_TIMEOUT (1800s)</div>
+</div>
+
+<div class="grid-3" style="margin-top:0;">
+  <div class="gcard">
+    <div class="gcard-title" style="color:var(--accent-blue);">&#128203; 16 个 Worker 模块</div>
+    <div class="gcard-body">
+      <table class="qa-table" style="margin:0;">
+        <tr><th>模块</th><th>职责</th></tr>
+        <tr><td><code>engine.py</code></td><td>核心调度器（~1100 行）</td></tr>
+        <tr><td><code>executor.py</code></td><td>单 stage 执行器</td></tr>
+        <tr><td><code>agents.py</code></td><td>Agent 池 + 多模型路由</td></tr>
+        <tr><td><code>prompts.py</code></td><td>7 角色 System Prompt</td></tr>
+        <tr><td><code>compressor.py</code></td><td>L0/L1/L2 上下文压缩</td></tr>
+        <tr><td><code>memory.py</code></td><td>项目记忆（4 类 × RBAC）</td></tr>
+        <tr><td><code>memory_extractor.py</code></td><td>LLM 知识提取</td></tr>
+        <tr><td><code>graph.py</code></td><td>DAG 执行引擎</td></tr>
+        <tr><td><code>conditions.py</code></td><td>条件跳过逻辑</td></tr>
+        <tr><td><code>contracts.py</code></td><td>结构化输出提取</td></tr>
+        <tr><td><code>failure.py</code></td><td>6 类故障分类 + 反思</td></tr>
+        <tr><td><code>worktree.py</code></td><td>Git Worktree 隔离</td></tr>
+        <tr><td><code>sandbox.py</code></td><td>Docker 容器沙箱</td></tr>
+        <tr><td><code>stage_tracker.py</code></td><td>Stage 事件追踪</td></tr>
+        <tr><td><code>scheduler.py</code></td><td>Cron 调度器</td></tr>
+      </table>
+    </div>
+  </div>
+  <div class="gcard">
+    <div class="gcard-title" style="color:var(--accent-purple);">&#129504; 7 Agent 角色 &times; 工具矩阵</div>
+    <div class="gcard-body">
+      <table class="qa-table" style="margin:0;">
+        <tr><th>角色</th><th>read</th><th>write</th><th>exec</th><th>script</th><th>skill</th></tr>
+        <tr><td style="color:var(--accent-cyan);">orchestrator</td><td>&#9679;</td><td></td><td>&#9679;</td><td></td><td>&#9679;</td></tr>
+        <tr><td style="color:var(--accent-green);">spec</td><td>&#9679;</td><td>&#9679;</td><td></td><td></td><td>&#9679;</td></tr>
+        <tr><td style="color:var(--accent-blue);">coding</td><td>&#9679;</td><td>&#9679;</td><td>&#9679;</td><td>&#9679;</td><td>&#9679;</td></tr>
+        <tr><td style="color:var(--accent-orange);">test</td><td>&#9679;</td><td>&#9679;</td><td>&#9679;</td><td>&#9679;</td><td>&#9679;</td></tr>
+        <tr><td style="color:var(--accent-purple);">review</td><td>&#9679;</td><td></td><td>&#9679;</td><td></td><td>&#9679;</td></tr>
+        <tr><td style="color:var(--accent-pink);">smoke</td><td>&#9679;</td><td></td><td>&#9679;</td><td></td><td>&#9679;</td></tr>
+        <tr><td style="color:var(--accent-yellow);">doc</td><td>&#9679;</td><td>&#9679;</td><td></td><td></td><td>&#9679;</td></tr>
+      </table>
+      <div style="margin-top:10px; font-size:11px; color:var(--text-muted);">
+        24 Skills 按 8 目录组织：orchestrator(4) · spec(3) · coding(4) · test(4) · review(3) · smoke(2) · doc(3) · shared(1)
+      </div>
+    </div>
+  </div>
+  <div class="gcard">
+    <div class="gcard-title" style="color:var(--accent-green);">&#128260; 5 个内置 Pipeline 模板</div>
+    <div class="gcard-body">
+      <div style="margin-bottom:10px;">
+        <strong style="color:var(--accent-cyan);">full_pipeline</strong> (9 stages, 3 gates)<br>
+        <div style="font-size:10px; margin-top:4px; display:flex; flex-wrap:wrap; gap:3px; align-items:center;">
+          <span class="tag tag-cyan">parse</span><span class="harrow">&rarr;</span>
+          <span class="tag tag-green">spec</span><span class="harrow">&rarr;</span>
+          <span class="tag tag-yellow">&#9881; gate</span><span class="harrow">&rarr;</span>
+          <span class="tag tag-blue">code</span><span class="harrow">&rarr;</span>
+          <span class="tag tag-orange">test</span><span class="harrow">&rarr;</span>
+          <span class="tag tag-yellow">&#9881; gate</span><span class="harrow">&rarr;</span>
+          <span class="tag tag-purple">review</span><span class="harrow">&rarr;</span>
+          <span class="tag tag-pink">smoke</span><span class="harrow">&rarr;</span>
+          <span class="tag tag-green">doc</span><span class="harrow">&rarr;</span>
+          <span class="tag tag-yellow">&#9881; gate</span>
+        </div>
+      </div>
+      <div style="margin-bottom:8px;">
+        <strong style="color:var(--accent-orange);">quick_fix</strong> (4 stages, 0 gates)<br>
+        <div style="font-size:10px; margin-top:4px;">parse &rarr; code &rarr; test &rarr; review</div>
+      </div>
+      <div style="margin-bottom:8px;">
+        <strong style="color:var(--text-dim);">doc_only</strong> (2 stages) &middot; <strong style="color:var(--text-dim);">review_only</strong> (2 stages) &middot; <strong style="color:var(--text-dim);">custom</strong> (可变)
+      </div>
+      <div style="padding:8px; border-radius:6px; background:rgba(251,146,60,0.06); border:1px solid rgba(251,146,60,0.15); margin-top:8px; font-size:11px;">
+        双模式执行：同 order &rarr; 并行；有 depends_on &rarr; DAG
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════ -->
+<!--  6. FRONTEND ARCHITECTURE                  -->
+<!-- ═══════════════════════════════════════════ -->
+<div class="section-title">6. 前端架构</div>
+<div class="section-subtitle">React 18 + Vite + TypeScript strict + Ant Design</div>
+
+<div class="grid-2">
+  <div class="gcard">
+    <div class="gcard-title" style="color:var(--accent-cyan);">&#128187; 15 页面路由</div>
+    <div class="gcard-body">
+      <table class="qa-table" style="margin:0;">
+        <tr><th>路由</th><th>页面</th><th>功能</th></tr>
+        <tr><td><code>/dashboard</code></td><td>Dashboard</td><td>总览指标 + 活动流</td></tr>
+        <tr><td><code>/tasks</code></td><td>Tasks</td><td>任务列表 + 筛选</td></tr>
+        <tr><td><code>/tasks/:id</code></td><td>TaskDetail</td><td>Pipeline 可视化 + Stage 详情</td></tr>
+        <tr><td><code>/projects</code></td><td>Projects</td><td>项目列表</td></tr>
+        <tr><td><code>/projects/:id</code></td><td>ProjectDetail</td><td>集成 / 触发规则 / 事件历史</td></tr>
+        <tr><td><code>/gates</code></td><td>Gates</td><td>人工审批队列</td></tr>
+        <tr><td><code>/cockpit</code></td><td>Cockpit</td><td>Agent 实时状态驾驶舱</td></tr>
+        <tr><td><code>/skills</code></td><td>Skills</td><td>Skill 目录</td></tr>
+        <tr><td><code>/kpi</code></td><td>KPI</td><td>指标图表</td></tr>
+        <tr><td><code>/roi</code></td><td>ROI</td><td>投资回报分析</td></tr>
+        <tr><td><code>/audit</code></td><td>Audit</td><td>审计日志</td></tr>
+        <tr><td><code>/task-logs</code></td><td>TaskLogs</td><td>Stage 执行日志</td></tr>
+        <tr><td><code>/circuit-breaker</code></td><td>CB</td><td>熔断器控制</td></tr>
+        <tr><td><code>/config</code></td><td>Config</td><td>系统配置</td></tr>
+      </table>
+    </div>
+  </div>
+  <div class="gcard">
+    <div class="gcard-title" style="color:var(--accent-blue);">&#128260; 状态管理模式</div>
+    <div class="gcard-body">
+      <div style="padding:10px; border-radius:8px; border:1px solid rgba(79,143,247,0.2); background:rgba(79,143,247,0.05); margin-bottom:12px;">
+        <strong style="color:var(--accent-blue);">React Query</strong> — 服务端数据（13 个 service 模块）<br>
+        <span style="font-size:11px; color:var(--text-muted);">tasks · agents · gates · templates · projects · skills · kpi · audit · triggers · integrations · taskLogs · llmProbe</span>
+      </div>
+      <div style="padding:10px; border-radius:8px; border:1px solid rgba(167,139,250,0.2); background:rgba(167,139,250,0.05); margin-bottom:12px;">
+        <strong style="color:var(--accent-purple);">Zustand</strong> — 实时状态（5 个 store）<br>
+        <span style="font-size:11px; color:var(--text-muted);">agentStore · activityStore · notificationStore · stageLogStore · taskLogStreamStore</span>
+      </div>
+      <div style="padding:10px; border-radius:8px; border:1px solid rgba(34,211,238,0.2); background:rgba(34,211,238,0.05);">
+        <strong style="color:var(--accent-cyan);">WebSocket</strong> — 桥梁<br>
+        <span style="font-size:11px; color:var(--text-muted);">task_update &rarr; React Query invalidation<br>agent_status &rarr; Zustand update<br>gate_created &rarr; Notification push</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════ -->
+<!--  7. WEBSOCKET EVENT FLOW                   -->
+<!-- ═══════════════════════════════════════════ -->
+<div class="section-title">7. WebSocket 事件流</div>
+<div class="section-subtitle">14 种后端事件 &rarr; 映射 &rarr; 前端处理</div>
+
+<div class="ascii">
+  Backend Events                    Mapping                    Frontend Actions
+  ──────────────                    ───────                    ────────────────
+  agent:status_changed   ──────▶  agent_status    ──────▶  Zustand agentStore update
+  agent:session_update   ──────▶  agent_status    ──────▶  Zustand agentStore update
+
+  task:created           ──────▶  task_update     ──────▶  React Query invalidation
+  task:status_changed    ──────▶  task_update     ──────▶  React Query invalidation
+  task:stage_update      ──────▶  task_update     ──────▶  React Query invalidation
+
+  task:stage_log         ──────▶  stage_log       ──────▶  Zustand stageLogStore append
+  task:log_stream_update ──────▶  task_log_stream ──────▶  Zustand taskLogStreamStore
+
+  gate:created           ──────▶  gate_created    ──────▶  Notification + React Query
+  gate:approved          ──────▶  gate_resolved   ──────▶  Notification + React Query
+  gate:rejected          ──────▶  gate_resolved   ──────▶  Notification + React Query
+  gate:revised           ──────▶  gate_resolved   ──────▶  Notification + React Query
+
+  circuit_breaker:*      ──────▶  activity        ──────▶  Zustand activityStore
+  kpi:update             ──────▶  activity        ──────▶  Zustand activityStore
+
+  Transport: Redis Pub/Sub (prod) │ In-process fallback (dev)</div>
+
+<!-- ═══════════════════════════════════════════ -->
+<!--  8. EXTERNAL CONNECTIONS                   -->
+<!-- ═══════════════════════════════════════════ -->
+<div class="section-title">8. 外部系统连接</div>
+
+<div class="grid-3">
+  <div class="gcard">
+    <div class="gcard-title" style="color:var(--accent-blue);">&#129302; LLM Provider</div>
+    <div class="gcard-body">
+      <strong>方向：</strong>Outbound HTTPS<br>
+      <strong>用途：</strong>
+      <ul>
+        <li>Agent 对话（SkillKit AgentRunner）</li>
+        <li>上下文压缩（L1 bullet points）</li>
+        <li>结构化输出提取</li>
+        <li>失败反思（Ralph Loop V2）</li>
+        <li>记忆提取</li>
+        <li>动态路由决策</li>
+      </ul>
+      <strong>兼容：</strong>OpenAI API / MiniMax / Gemini / Claude
+    </div>
+  </div>
+  <div class="gcard">
+    <div class="gcard-title" style="color:var(--accent-green);">&#128187; Git Forges</div>
+    <div class="gcard-body">
+      <strong>Inbound：</strong>Webhook（事件触发）<br>
+      <strong>Outbound：</strong>
+      <ul>
+        <li>git clone/fetch/push（SSH/HTTPS）</li>
+        <li><code>gh pr create</code>（GitHub CLI）</li>
+        <li>支持 GitHub.com + GitHub Enterprise</li>
+        <li>GitLab Webhook + Jira Webhook</li>
+      </ul>
+      <strong>认证：</strong>GITHUB_TOKEN / GHE_TOKEN / SSH Key
+    </div>
+  </div>
+  <div class="gcard">
+    <div class="gcard-title" style="color:var(--accent-orange);">&#128232; 通知 & 基础设施</div>
+    <div class="gcard-body">
+      <strong>通知（Outbound）：</strong>
+      <ul>
+        <li>Slack / 飞书 / 钉钉 Webhook</li>
+        <li>事件：task_completed, task_failed, gate_created</li>
+      </ul>
+      <strong>基础设施：</strong>
+      <ul>
+        <li>PostgreSQL 16（asyncpg, prod）</li>
+        <li>Redis 7（WS pub/sub）</li>
+        <li>Docker Engine（sandbox 容器管理）</li>
+        <li>croniter（cron 表达式计算）</li>
+      </ul>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════ -->
+<!--  9. CONFIGURATION PHASES                   -->
+<!-- ═══════════════════════════════════════════ -->
+<div class="section-title">9. Feature Flag 分阶段演进</div>
+<div class="section-subtitle">通过配置开关渐进式启用高级能力</div>
+
+<div class="layer-stack">
+  <div class="layer-row">
+    <div class="layer-label" style="color:var(--accent-green);">Phase 1<br>基础增强</div>
+    <div class="layer-content">
+      <div class="lbox c-green"><div class="lt">STAGE_CONTRACTS_ENABLED</div><div class="ls">结构化输出契约</div></div>
+      <div class="lbox c-green"><div class="lt">FAILURE_AUTO_RETRY_CATEGORIES</div><div class="ls">自动重试策略</div></div>
+      <div class="lbox c-green"><div class="lt">GATE_DEFAULT_MAX_RETRIES</div><div class="ls">Gate 反馈循环</div></div>
+    </div>
+  </div>
+  <div class="layer-row">
+    <div class="layer-label" style="color:var(--accent-blue);">Phase 2<br>智能化</div>
+    <div class="layer-content">
+      <div class="lbox c-blue"><div class="lt">CONDITIONS_ENABLED</div><div class="ls">条件跳过逻辑</div></div>
+      <div class="lbox c-blue"><div class="lt">DYNAMIC_GATE_ENABLED</div><div class="ls">信心驱动动态 Gate</div></div>
+      <div class="lbox c-blue"><div class="lt">EVALUATOR_DEFAULT_MIN_CONFIDENCE</div><div class="ls">自评循环阈值</div></div>
+    </div>
+  </div>
+  <div class="layer-row">
+    <div class="layer-label" style="color:var(--accent-purple);">Phase 3<br>高级编排</div>
+    <div class="layer-content">
+      <div class="lbox c-purple"><div class="lt">GRAPH_EXECUTION_ENABLED</div><div class="ls">DAG 图执行</div></div>
+      <div class="lbox c-purple"><div class="lt">INTERACTIVE_PLANNING_ENABLED</div><div class="ls">规划-审批-执行</div></div>
+      <div class="lbox c-purple"><div class="lt">DYNAMIC_ROUTING_ENABLED</div><div class="ls">LLM 动态路由</div></div>
+      <div class="lbox c-purple"><div class="lt">TEMPLATE_VERSIONING_ENABLED</div><div class="ls">模板版本控制</div></div>
+    </div>
+  </div>
+  <div class="layer-row">
+    <div class="layer-label" style="color:var(--accent-orange);">学习层</div>
+    <div class="layer-content">
+      <div class="lbox c-orange"><div class="lt">SKILL_FEEDBACK_ENABLED</div><div class="ls">Skill 效能分析</div></div>
+      <div class="lbox c-orange"><div class="lt">SKILL_REFLECTION_ENABLED</div><div class="ls">失败结构化反思</div></div>
+      <div class="lbox c-orange"><div class="lt">MEMORY_ENABLED</div><div class="ls">项目记忆持久化</div></div>
+    </div>
+  </div>
+  <div class="layer-row">
+    <div class="layer-label" style="color:var(--accent-red);">隔离层</div>
+    <div class="layer-content">
+      <div class="lbox c-red"><div class="lt">SANDBOX_ENABLED</div><div class="ls">Docker 容器沙箱</div></div>
+      <div class="lbox c-red"><div class="lt">WORKTREE_ENABLED</div><div class="ls">Git Worktree 隔离</div></div>
+      <div class="lbox c-red"><div class="lt">JWT_ENABLED</div><div class="ls">JWT 认证</div></div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════ -->
+<!-- 10. CI/CD PIPELINE                         -->
+<!-- ═══════════════════════════════════════════ -->
+<div class="section-title">10. CI/CD Pipeline</div>
+
+<div class="grid-2">
+  <div class="gcard">
+    <div class="gcard-title" style="color:var(--accent-green);">&#9881; CI Jobs (ci.yml)</div>
+    <div class="gcard-body">
+      <table class="qa-table" style="margin:0;">
+        <tr><th>Job</th><th>条件</th><th>执行</th></tr>
+        <tr><td><span class="tag tag-cyan">changed-scope</span></td><td>Always</td><td>路径过滤</td></tr>
+        <tr><td><span class="tag tag-orange">pr-size-check</span></td><td>PR only</td><td>diff &gt; 1000 行 &rarr; FAIL</td></tr>
+        <tr><td><span class="tag tag-red">secret-scan</span></td><td>Always</td><td>TruffleHog 密钥扫描</td></tr>
+        <tr><td><span class="tag tag-purple">backend-lint</span></td><td>backend &Delta;</td><td>ruff check</td></tr>
+        <tr><td><span class="tag tag-blue">backend-compile</span></td><td>backend &Delta;</td><td>compileall 编译检查</td></tr>
+        <tr><td><span class="tag tag-green">backend-test</span></td><td>backend &Delta;</td><td>pytest + cov &ge; 80%</td></tr>
+        <tr><td><span class="tag tag-cyan">frontend-check</span></td><td>frontend &Delta;</td><td>tsc + vite build</td></tr>
+        <tr><td><span class="tag tag-pink">frontend-unit-test</span></td><td>frontend &Delta;</td><td>vitest + coverage</td></tr>
+      </table>
+    </div>
+  </div>
+  <div class="gcard">
+    <div class="gcard-title" style="color:var(--accent-pink);">&#128736; E2E + Deploy (e2e.yml)</div>
+    <div class="gcard-body">
+      <strong>触发：</strong>Push to master + manual<br>
+      <strong>流程：</strong>
+      <ul>
+        <li>Docker Compose build + up (app + PG + Redis)</li>
+        <li>Health check polling (30 &times; 2s = 60s)</li>
+        <li>5 个端点冒烟测试 (curl)</li>
+        <li>失败：dump 容器日志</li>
+        <li>清理：docker compose down -v</li>
+      </ul>
+      <strong>Branch Protection (master)：</strong>
+      <ul>
+        <li>&#9989; backend-lint</li>
+        <li>&#9989; backend-test</li>
+        <li>&#9989; frontend-check</li>
+      </ul>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════ -->
+<!-- 11. DOCKER DEPLOYMENT                      -->
+<!-- ═══════════════════════════════════════════ -->
+<div class="section-title">11. Docker 部署架构</div>
+
+<div class="ascii">
+  ┌─── docker-compose.yml ──────────────────────────────────────────────────────────┐
+  │                                                                                  │
+  │  ┌─────────────────────────────────┐                                            │
+  │  │          app (FastAPI)           │                                            │
+  │  │  python:3.11-slim               │                                            │
+  │  │  Port: 8000                     │                                            │
+  │  │                                  │       ┌────────────────────────────────┐   │
+  │  │  Volumes:                        │       │                                │   │
+  │  │    memory_data → /app/memory    │       │     Docker Socket (bind)       │   │
+  │  │    worktree_data → /data/wt     │       │     /var/run/docker.sock       │   │
+  │  │    /var/run/docker.sock (bind)  │       │           │                    │   │
+  │  │                                  │       │           ▼                    │   │
+  │  │  depends_on:                     │       │  ┌──────────────────────────┐  │   │
+  │  │    postgres (healthy)            │       │  │  Sandbox Containers      │  │   │
+  │  │    redis (healthy)               │       │  │  (created on demand)     │  │   │
+  │  └──────────┬────────┬─────────────┘       │  │                          │  │   │
+  │             │        │                      │  │  Dockerfile.base         │  │   │
+  │             │        │                      │  │  Dockerfile.coding       │  │   │
+  │             │        │                      │  │  Dockerfile.test         │  │   │
+  │             ▼        ▼                      │  │                          │  │   │
+  │  ┌──────────────┐ ┌──────────────┐         │  │  Network: sa-sandbox-net │  │   │
+  │  │ PostgreSQL 16│ │   Redis 7    │         │  └──────────────────────────┘  │   │
+  │  │ :5432        │ │   :6379      │         └────────────────────────────────┘   │
+  │  │ pgdata vol   │ │ redisdata vol│                                              │
+  │  │ pg_isready   │ │ redis-cli    │                                              │
+  │  │  healthcheck │ │  healthcheck │                                              │
+  │  └──────────────┘ └──────────────┘                                              │
+  └──────────────────────────────────────────────────────────────────────────────────┘</div>
+
+<!-- ═══════════════════════════════════════════ -->
+<!-- 12. STARTUP SEQUENCE                       -->
+<!-- ═══════════════════════════════════════════ -->
+<div class="section-title">12. 应用启动序列</div>
+
+<div class="lc lc-cyan">
+  <div class="lc-title"><code>main.py lifespan()</code> <span class="badge badge-cyan">STARTUP</span></div>
+  <div style="display:flex; flex-wrap:wrap; gap:8px; align-items:center; font-size:12px;">
+    <div class="lbox c-cyan"><div class="lt">① init_db</div><div class="ls">建表 + 自动迁移</div></div>
+    <span class="harrow">&rarr;</span>
+    <div class="lbox c-blue"><div class="lt">② hydrate_skillkit</div><div class="ls">LLM→OPENAI 变量</div></div>
+    <span class="harrow">&rarr;</span>
+    <div class="lbox c-green"><div class="lt">③ ensure_agents</div><div class="ls">创建 7 个 Agent</div></div>
+    <span class="harrow">&rarr;</span>
+    <div class="lbox c-purple"><div class="lt">④ seed_templates</div><div class="ls">内置模板</div></div>
+    <span class="harrow">&rarr;</span>
+    <div class="lbox c-orange"><div class="lt">⑤ seed_demo</div><div class="ls">演示数据</div></div>
+    <span class="harrow">&rarr;</span>
+    <div class="lbox c-pink"><div class="lt">⑥ sync_skills</div><div class="ls">文件系统扫描</div></div>
+    <span class="harrow">&rarr;</span>
+    <div class="lbox c-yellow"><div class="lt">⑦ validate_tools</div><div class="ls">工具映射校验</div></div>
+    <span class="harrow">&rarr;</span>
+    <div class="lbox c-red"><div class="lt">⑧ init_bridge</div><div class="ls">SkillKit 初始化</div></div>
+    <span class="harrow">&rarr;</span>
+    <div class="lbox c-cyan"><div class="lt">⑨ ws_manager</div><div class="ls">Redis 连接</div></div>
+    <span class="harrow">&rarr;</span>
+    <div class="lbox c-blue"><div class="lt">⑩ log_pipeline</div><div class="ls">批量日志写入</div></div>
+    <span class="harrow">&rarr;</span>
+    <div class="lbox c-green"><div class="lt">⑪ start_worker</div><div class="ls">后台任务引擎</div></div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════ -->
+<!-- 13. DOC INDEX                              -->
+<!-- ═══════════════════════════════════════════ -->
+<div class="section-title">13. 文档索引</div>
+
+<div class="grid-2">
+  <div class="gcard">
+    <div class="gcard-title" style="color:var(--accent-cyan);">&#128196; 架构可视化文档 (docs/)</div>
+    <div class="gcard-body">
+      <table class="qa-table" style="margin:0;">
+        <tr><th>文档</th><th>内容</th></tr>
+        <tr><td><strong style="color:var(--accent-green);">architecture-overview.html</strong></td><td>技术架构大图（本文档）</td></tr>
+        <tr><td>context-flow-diagram.html</td><td>多 Agent 上下文传递机制（7 章节）</td></tr>
+        <tr><td>skillkit-architecture.html</td><td>SkillKit Agent 架构拆解（14 章节）</td></tr>
+        <tr><td>qa-ci-architecture.html</td><td>质量保障与 CI 体系（15 章节）</td></tr>
+        <tr><td>agentic-engineering-highlights.html</td><td>Agentic Engineering 技术亮点（16 项）</td></tr>
+      </table>
+    </div>
+  </div>
+  <div class="gcard">
+    <div class="gcard-title" style="color:var(--accent-purple);">&#128218; 设计文档 (docs/design/)</div>
+    <div class="gcard-body">
+      <table class="qa-table" style="margin:0;">
+        <tr><th>文档</th></tr>
+        <tr><td>SITC_Agent管理平台前后端设计方案_v1.0</td></tr>
+        <tr><td>SITC_SkillKit适配分析与Agent管理平台设计_v1.0</td></tr>
+        <tr><td>SITC_数字员工集群完整设计方案_v1.0</td></tr>
+        <tr><td>SITC_硅基Agent战略演进白皮书_v1.0</td></tr>
+        <tr><td>SITC_硅基Agent技术落地方案_v1.0</td></tr>
+        <tr><td>SITC_硅基Agent行业洞察与商业化路径_v1.0</td></tr>
+        <tr><td>agent-driven-sdlc-analysis.md</td></tr>
+      </table>
+    </div>
+  </div>
+</div>
+
+<div style="text-align:center; padding:40px 0 10px; color:var(--text-muted); font-size:11px;">
+  Silicon Agent Platform — Technical Architecture Overview &mdash; Generated 2026-03-03
+</div>
+
+</div>
+</body>
+</html>

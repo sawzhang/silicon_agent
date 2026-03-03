@@ -8,6 +8,7 @@ from app.models.template import TaskTemplateModel
 from app.models.project import ProjectModel
 from app.models.task_log import TaskStageLogModel
 from app.models.skill_feedback import SkillFeedbackModel
+from app.models.integration import ProjectIntegrationModel
 
 __all__ = [
     "AgentModel",
@@ -22,4 +23,5 @@ __all__ = [
     "ProjectModel",
     "TaskStageLogModel",
     "SkillFeedbackModel",
+    "ProjectIntegrationModel",
 ]
