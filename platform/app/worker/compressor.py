@@ -17,6 +17,7 @@ logger = logging.getLogger(__name__)
 # Fallback truncation limits when LLM is unavailable
 _L0_FALLBACK_CHARS = 200
 _L1_FALLBACK_CHARS = 1500
+_L2_MAX_CHARS = 20_000  # Hard cap on full-text prior output to prevent token explosion
 
 
 @dataclass
@@ -54,12 +55,12 @@ class CompressionResult:
         for i, co in enumerate(self.outputs):
             # Phase 1.5: Override distance-based compression for specified stages
             if full_context_stages and co.stage_name in full_context_stages:
-                text = co.l2
+                text = _cap_l2(co.l2)
             else:
                 distance = current_index - i - 1  # how far back this stage is
                 if distance <= 0:
-                    # Immediately preceding stage → full text
-                    text = co.l2
+                    # Immediately preceding stage → full text (capped)
+                    text = _cap_l2(co.l2)
                 elif distance == 1:
                     # Next-nearest → L1 bullet points
                     # Phase 1.1: Use structured summary when available
@@ -76,6 +77,13 @@ class CompressionResult:
                         text = f"[概要] {co.l0}"
             result.append({"stage": co.stage_name, "output": text})
         return result
+
+
+def _cap_l2(text: str) -> str:
+    """Cap L2 full text to prevent unbounded token injection."""
+    if len(text) <= _L2_MAX_CHARS:
+        return text
+    return text[:_L2_MAX_CHARS] + "\n...(输出已截断)"
 
 
 async def compress_stage_output(

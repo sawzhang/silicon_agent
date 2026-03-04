@@ -29,12 +29,12 @@ _agents: dict[str, AgentRunner] = {}
 
 # Roles that need more turns for deep exploration / code generation
 _MAX_TURNS: dict[str, int] = {
-    "spec": 20,
-    "coding": 20,
-    "doc": 20,
-    "test": 20,
+    "spec": 5,
+    "coding": 8,
+    "doc": 5,
+    "test": 8,
 }
-_DEFAULT_MAX_TURNS = 10
+_DEFAULT_MAX_TURNS = 5
 
 # Per-role tool whitelist (SkillKit built-in: read, write, execute, execute_script, skill)
 ROLE_TOOLS: dict[str, set[str]] = {

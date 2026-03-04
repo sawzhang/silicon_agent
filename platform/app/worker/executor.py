@@ -168,8 +168,8 @@ def _is_signoff_stage(stage_name: str) -> bool:
 
 
 def _output_summary_limit(stage_name: str) -> int:
-    # Use a unified summary cap across all stages to avoid stage-specific truncation.
-    return 200_000
+    # Cap stage output stored in DB to limit downstream prior-context injection.
+    return 50_000
 
 
 def _format_tool_digest(tool_items: list[dict[str, str]], limit: int = 6) -> str:

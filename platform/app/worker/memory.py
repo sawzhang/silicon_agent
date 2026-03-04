@@ -116,7 +116,12 @@ class ProjectMemoryStore:
 
         if not parts:
             return None
-        return "\n\n".join(parts)
+        text = "\n\n".join(parts)
+        # Enforce MEMORY_MAX_CONTEXT_TOKENS (~4 chars per token)
+        max_chars = settings.MEMORY_MAX_CONTEXT_TOKENS * 4
+        if len(text) > max_chars:
+            text = text[:max_chars] + "\n...(记忆已截断)"
+        return text
 
     def get_all_entries(self, category: str) -> List[MemoryEntry]:
         return self._load_category(category)
