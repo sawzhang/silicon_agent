@@ -155,6 +155,7 @@ async def test_create_task(client):
     assert data["title"] == "TT Create Test"
     assert data["description"] == "A simple task"
     assert data["status"] == "pending"
+    assert data["target_branch"] == f"silicon_agent/{data['id'].rsplit('-', 1)[-1]}"
     assert "id" in data
     assert "created_at" in data
     assert data["stages"] == []
@@ -403,6 +404,7 @@ async def test_batch_create(client):
     assert "TT Batch 2" in titles
     for t in data["tasks"]:
         assert t["status"] == "pending"
+        assert t["target_branch"] == f"silicon_agent/{t['id'].rsplit('-', 1)[-1]}"
 
     # Cleanup
     task_ids = [t["id"] for t in data["tasks"]]

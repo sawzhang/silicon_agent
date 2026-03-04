@@ -68,7 +68,7 @@ export interface TaskCreateRequest {
   description: string;
   template_id?: string;
   project_id?: string;
-  target_branch: string;
+  target_branch?: string;
   yunxiao_task_id?: string;
 }
 
@@ -99,7 +99,7 @@ export interface BatchTaskItem {
   description?: string;
   template_id?: string;
   project_id?: string;
-  target_branch: string;
+  target_branch?: string;
   yunxiao_task_id?: string;
 }
 
