@@ -12,7 +12,14 @@ from app.worker.executor import infer_tool_status
 def _make_runner(workspace: Path) -> SandboxedAgentRunner:
     runner = object.__new__(SandboxedAgentRunner)
     runner.default_cwd = str(workspace)
-    runner.allowed_tools = {"read", "write", "execute", "execute_script", "skill"}
+    runner.allowed_tools = {
+        "read",
+        "write",
+        "apply_patch",
+        "execute",
+        "execute_script",
+        "skill",
+    }
     return runner
 
 
@@ -89,6 +96,26 @@ async def test_read_with_bad_json_arguments_returns_validation_error(tmp_path: P
     assert "Invalid arguments for tool read" in result
     assert "JSON decode error:" in result
     assert "function.arguments" in result
+
+
+@pytest.mark.asyncio
+async def test_apply_patch_tool_blocks_workspace_escape(tmp_path: Path):
+    runner = _make_runner(tmp_path)
+    result = await runner._execute_tool(
+        {
+            "name": "apply_patch",
+            "arguments": json.dumps(
+                {
+                    "operation": {
+                        "type": "update_file",
+                        "path": "../outside.txt",
+                        "diff": "-unsafe\n+safe",
+                    }
+                }
+            ),
+        }
+    )
+    assert "escapes workspace" in result
 
 
 def test_infer_tool_status_treats_read_errors_as_failed():

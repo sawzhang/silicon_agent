@@ -11,6 +11,7 @@ import uuid
 from typing import Any, Optional
 
 from app.websocket.events import TASK_LOG_STREAM_UPDATE
+from sandbox.tool_policy import ToolExecutionPolicyMixin
 
 logger = logging.getLogger(__name__)
 
@@ -40,6 +41,9 @@ def summarize_tool_command(tool_name: str, args: dict[str, Any]) -> str:
     if tool_name == "write":
         path = str(args.get("path") or "").strip()
         return f"write {path}".strip()
+    if tool_name == "apply_patch":
+        path = ToolExecutionPolicyMixin.summarize_apply_patch_target(args)
+        return f"apply_patch {path}".strip()
     if tool_name == "skill":
         skill_name = str(args.get("name") or "").strip()
         return f"skill:{skill_name}" if skill_name else "skill"

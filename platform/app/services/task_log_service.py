@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.task_log import TaskStageLogModel
 from app.schemas.task_log import TaskLogListResponse, TaskLogResponse
+from sandbox.tool_policy import ToolExecutionPolicyMixin
 
 _SENSITIVE_KEYWORDS = {
     "api_key",
@@ -44,6 +45,9 @@ class TaskLogService:
         if tool_name == "write":
             path = str(command_args.get("path") or "").strip()
             return f"write {path}".strip()
+        if tool_name == "apply_patch":
+            path = ToolExecutionPolicyMixin.summarize_apply_patch_target(command_args)
+            return f"apply_patch {path}".strip()
         if tool_name == "skill":
             name = str(command_args.get("name") or "").strip()
             return f"skill:{name}" if name else "skill"

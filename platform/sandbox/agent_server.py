@@ -377,6 +377,23 @@ class ContainerAgentRunner(ToolExecutionPolicyMixin, AgentRunner):
             }
         )
 
+    def _resolve_workspace_path(self, path: str) -> tuple[str, str | None]:
+        """Resolve relative tool paths against workspace safely."""
+        if not self.default_cwd or not path:
+            return path, None
+
+        raw = Path(path)
+        if raw.is_absolute():
+            return str(raw), None
+
+        workspace = Path(self.default_cwd).resolve()
+        candidate = (workspace / raw).resolve()
+        try:
+            candidate.relative_to(workspace)
+        except ValueError:
+            return path, f"Error: Path escapes workspace: {path}"
+        return str(candidate), None
+
     @staticmethod
     def _to_jsonable(value: Any) -> Any:
         if hasattr(value, "model_dump"):
@@ -462,6 +479,39 @@ class ContainerAgentRunner(ToolExecutionPolicyMixin, AgentRunner):
 
     async def _execute_tool(self, tool_call, on_output=None):
         return await self._execute_tool_with_policy(tool_call, on_output=on_output)
+
+    def _preprocess_validated_tool_call(
+        self,
+        *,
+        tool_name: str,
+        args: dict[str, Any],
+        tool_call: dict[str, Any],
+    ) -> tuple[dict[str, Any], dict[str, Any], str | None, str | None]:
+        if not self.default_cwd or tool_name not in ("read", "write", "apply_patch"):
+            return tool_call, args, None, None
+
+        if tool_name == "apply_patch":
+            rewritten_args, error = self.rewrite_apply_patch_paths(
+                args=args,
+                resolve_workspace_path=self._resolve_workspace_path,
+            )
+            if error:
+                return tool_call, args, error, None
+            if rewritten_args != args:
+                args = rewritten_args
+                tool_call = {**tool_call, "arguments": json.dumps(args, ensure_ascii=False)}
+            return tool_call, args, None, None
+
+        path = str(args.get("path") or "")
+        resolved_path, error = self._resolve_workspace_path(path)
+        if error:
+            return tool_call, args, error, None
+        if resolved_path != path:
+            args = dict(args)
+            args["path"] = resolved_path
+            tool_call = {**tool_call, "arguments": json.dumps(args, ensure_ascii=False)}
+
+        return tool_call, args, None, None
 
     def _on_tool_validation_error(
         self,

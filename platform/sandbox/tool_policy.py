@@ -16,6 +16,7 @@ from typing import Any
 DEFAULT_FALLBACK_CORE_TOOLS: set[str] = {
     "read",
     "write",
+    "apply_patch",
     "execute",
     "execute_script",
     "skill",
@@ -26,6 +27,9 @@ DEFAULT_FALLBACK_TOOL_ARGUMENT_HINTS: dict[str, str] = {
     "execute_script": '{"script":"<shell script>","cwd":"<optional path>"}',
     "read": '{"path":"<file path>"}',
     "write": '{"path":"<file path>","content":"<file content>"}',
+    "apply_patch": (
+        '{"operation":{"type":"update_file","path":"<file path>","diff":"-old\\\\n+new"}}'
+    ),
     "skill": '{"name":"<skill name>","arguments":"<optional string>"}',
 }
 
@@ -220,6 +224,41 @@ class ToolExecutionPolicyMixin:
         tool_call: dict[str, Any],
     ) -> tuple[dict[str, Any], dict[str, Any], str | None, str | None]:
         return tool_call, args, None, None
+
+    def rewrite_apply_patch_paths(
+        self,
+        *,
+        args: dict[str, Any],
+        resolve_workspace_path: Callable[[str], tuple[str, str | None]],
+    ) -> tuple[dict[str, Any], str | None]:
+        """Resolve apply_patch target paths to workspace-anchored absolute paths."""
+        operation = args.get("operation")
+        if not isinstance(operation, dict):
+            return args, None
+
+        raw_path = str(operation.get("path") or "").strip()
+        if not raw_path:
+            return args, None
+
+        resolved_path, error = resolve_workspace_path(raw_path)
+        if error:
+            return args, error
+        if resolved_path == raw_path:
+            return args, None
+
+        rewritten_args = dict(args)
+        rewritten_operation = dict(operation)
+        rewritten_operation["path"] = resolved_path
+        rewritten_args["operation"] = rewritten_operation
+        return rewritten_args, None
+
+    @staticmethod
+    def summarize_apply_patch_target(args: dict[str, Any]) -> str:
+        """Extract first apply_patch target path for concise logs."""
+        operation = args.get("operation")
+        if not isinstance(operation, dict):
+            return ""
+        return str(operation.get("path") or "").strip()
 
     async def _execute_tool_with_policy(self, tool_call, on_output=None) -> str:
         name = str(tool_call.get("name", ""))

@@ -36,15 +36,15 @@ _MAX_TURNS: dict[str, int] = {
 }
 _DEFAULT_MAX_TURNS = 10
 
-# Per-role tool whitelist (SkillKit built-in: read, write, execute, execute_script, skill)
+# Per-role tool whitelist (SkillKit built-ins, including apply_patch)
 ROLE_TOOLS: dict[str, set[str]] = {
     "orchestrator": {"read", "execute", "skill"},
-    "spec":         {"read", "write", "skill"},
-    "coding":       {"read", "write", "execute", "execute_script", "skill"},
-    "test":         {"read", "write", "execute", "execute_script", "skill"},
+    "spec":         {"read", "write", "apply_patch", "skill"},
+    "coding":       {"read", "write", "apply_patch", "execute", "execute_script", "skill"},
+    "test":         {"read", "write", "apply_patch", "execute", "execute_script", "skill"},
     "review":       {"read", "execute", "skill"},
     "smoke":        {"read", "execute", "skill"},
-    "doc":          {"read", "write", "skill"},
+    "doc":          {"read", "write", "apply_patch", "skill"},
 }
 _ALL_TOOLS: set[str] = set()
 _TOOL_ARGUMENT_HINTS: dict[str, str] = {}
@@ -472,14 +472,25 @@ class SandboxedAgentRunner(ToolExecutionPolicyMixin, _BaseRunner):  # type: igno
         args: dict[str, Any],
         tool_call: dict[str, Any],
     ) -> tuple[dict[str, Any], dict[str, Any], str | None, str | None]:
-        if not self.default_cwd or tool_name not in ("read", "write"):
+        if not self.default_cwd or tool_name not in ("read", "write", "apply_patch"):
+            return tool_call, args, None, None
+
+        if tool_name == "apply_patch":
+            rewritten_args, error = self.rewrite_apply_patch_paths(
+                args=args,
+                resolve_workspace_path=self._resolve_workspace_path,
+            )
+            if error:
+                return tool_call, args, error, None
+            if rewritten_args != args:
+                args = rewritten_args
+                tool_call = {**tool_call, "arguments": json.dumps(args, ensure_ascii=False)}
             return tool_call, args, None, None
 
         path = str(args.get("path") or "")
         resolved_path, error = self._resolve_workspace_path(path)
         if error:
             return tool_call, args, error, None
-
         if resolved_path != path:
             args = dict(args)
             args["path"] = resolved_path

@@ -27,11 +27,13 @@ def test_spec_no_execute():
     assert "execute_script" not in tools
     assert "read" in tools
     assert "write" in tools
+    assert "apply_patch" in tools
 
 
 def test_review_readonly():
     tools = ROLE_TOOLS["review"]
     assert "write" not in tools
+    assert "apply_patch" not in tools
     assert "execute_script" not in tools
     assert "read" in tools
     assert "execute" in tools
@@ -42,11 +44,13 @@ def test_doc_no_execute():
     assert "execute" not in tools
     assert "execute_script" not in tools
     assert "write" in tools
+    assert "apply_patch" in tools
 
 
 def test_orchestrator_no_write():
     tools = ROLE_TOOLS["orchestrator"]
     assert "write" not in tools
+    assert "apply_patch" not in tools
     assert "execute_script" not in tools
 
 
@@ -55,6 +59,12 @@ def test_validate_role_tools_raises_on_unknown(monkeypatch):
     monkeypatch.setattr(agents_mod, "ROLE_TOOLS", {"coding": {"read", "write"}})
     with pytest.raises(RuntimeError):
         agents_mod.validate_role_tools_or_raise(fail_on_unknown=True)
+
+
+def test_roles_with_write_also_have_apply_patch():
+    for role, tools in ROLE_TOOLS.items():
+        if "write" in tools:
+            assert "apply_patch" in tools, f"Role {role} has write but missing apply_patch"
 
 
 def test_create_runner_does_not_pass_model_to_agentrunner(monkeypatch, tmp_path):

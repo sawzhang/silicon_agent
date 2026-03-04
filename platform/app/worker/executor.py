@@ -21,6 +21,7 @@ from app.websocket.events import AGENT_STATUS_CHANGED, TASK_LOG_STREAM_UPDATE, T
 from app.websocket.manager import ws_manager
 from app.worker.agents import get_agent, get_agent_text_only
 from app.worker.prompts import StageContext, build_user_prompt
+from sandbox.tool_policy import ToolExecutionPolicyMixin
 
 logger = logging.getLogger(__name__)
 
@@ -136,6 +137,9 @@ def _summarize_tool_command(tool_name: str, args: dict[str, Any]) -> str:
     if tool_name == "write":
         path = str(args.get("path") or "").strip()
         return f"write {path}".strip()
+    if tool_name == "apply_patch":
+        path = ToolExecutionPolicyMixin.summarize_apply_patch_target(args)
+        return f"apply_patch {path}".strip()
     if tool_name == "skill":
         skill_name = str(args.get("name") or "").strip()
         return f"skill:{skill_name}" if skill_name else "skill"

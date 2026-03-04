@@ -6,11 +6,13 @@ from typing import Dict, Optional, Union
 logger = logging.getLogger(__name__)
 
 try:
-    from skillkit import AgentRunner  # type: ignore[import-untyped]
+    from skillkit import AgentRunner, SkillsConfig, SkillsEngine  # type: ignore[import-untyped]
     SKILLKIT_AVAILABLE = True
 except ImportError:
     SKILLKIT_AVAILABLE = False
     AgentRunner = None
+    SkillsConfig = None
+    SkillsEngine = None
 
 AGENT_ROLES = ["orchestrator", "spec", "coding", "test", "review", "smoke", "doc"]
 
@@ -61,9 +63,34 @@ class SkillKitBridge:
     def __init__(self) -> None:
         self._runner = None
 
+    @staticmethod
+    def _build_runner():
+        """Build AgentRunner across SkillKit API variants."""
+        if AgentRunner is None:
+            raise RuntimeError("SkillKit AgentRunner unavailable")
+
+        # Preferred path for current SkillKit versions.
+        create = getattr(AgentRunner, "create", None)
+        if callable(create):
+            try:
+                return create(skill_dirs=[])
+            except TypeError:
+                logger.warning("AgentRunner.create signature changed, trying compatibility path")
+
+        # Legacy SkillKit versions accepted a no-arg constructor.
+        try:
+            return AgentRunner()
+        except TypeError:
+            # Newer SkillKit requires AgentRunner(engine=...).
+            if SkillsEngine is None or SkillsConfig is None:
+                raise
+            logger.info("Building SkillsEngine for AgentRunner(engine=...) compatibility")
+            engine = SkillsEngine(config=SkillsConfig(skill_dirs=[]))
+            return AgentRunner(engine=engine)
+
     async def initialize(self) -> None:
         if SKILLKIT_AVAILABLE and AgentRunner is not None:
-            self._runner = AgentRunner()
+            self._runner = self._build_runner()
             logger.info("SkillKit AgentRunner initialized")
         else:
             logger.warning("SkillKit not available")
