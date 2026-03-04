@@ -272,14 +272,21 @@ async def test_list_tasks_with_title_filter():
 async def test_create_task_without_template():
     """Lines 81-121: create_task without template_id."""
     session = _make_session()
-    created_task = _make_task(id="new-task-1", title="No Template")
+    created_task = _make_task(
+        id="new-task-1",
+        title="No Template",
+        target_branch="silicon_agent/1",
+    )
     session.execute.return_value = _mock_result(scalar_one=created_task)
     svc = TaskService(session)
     result = await svc.create_task(TaskCreateRequest(title="No Template"))
     assert result.id == "new-task-1"
+    assert result.target_branch == "silicon_agent/1"
     session.add.assert_called()
     session.flush.assert_called_once()
     session.commit.assert_called_once()
+    created_model = session.add.call_args_list[0].args[0]
+    assert created_model.target_branch == f"silicon_agent/{created_model.id.rsplit('-', 1)[-1]}"
 
 
 @pytest.mark.asyncio
