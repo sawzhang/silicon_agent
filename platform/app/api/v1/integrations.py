@@ -10,7 +10,12 @@ from app.schemas.integration import (
     IntegrationResponse,
     IntegrationUpdateRequest,
 )
-from app.schemas.trigger import TriggerEventResponse, TriggerRuleResponse
+from app.schemas.trigger import (
+    MockWebhookRequest,
+    MockWebhookResponse,
+    TriggerEventResponse,
+    TriggerRuleResponse,
+)
 from app.services.integration_service import IntegrationService
 from app.services.trigger_service import TriggerService
 
@@ -113,3 +118,19 @@ async def list_project_trigger_events(
 ):
     events = await service.list_events_by_project(project_id, limit=limit)
     return [TriggerEventResponse.model_validate(e) for e in events]
+
+
+# ── 模拟 Webhook 触发 ────────────────────────────────────────────────────────
+
+
+@router.post(
+    "/{project_id}/mock-webhook",
+    response_model=MockWebhookResponse,
+)
+async def mock_webhook(
+    project_id: str,
+    request: MockWebhookRequest,
+    service: TriggerService = Depends(get_trigger_service),
+):
+    """模拟 webhook 触发，跳过 HMAC 验签，直接调用 process_event()。"""
+    return await service.mock_webhook(project_id, request)

@@ -7,6 +7,7 @@ import ProjectInfoTab from './tabs/ProjectInfoTab';
 import IntegrationConfigTab from './tabs/IntegrationConfigTab';
 import TriggerRulesTab from './tabs/TriggerRulesTab';
 import TriggerEventsTab from './tabs/TriggerEventsTab';
+import MockWebhookTab from './tabs/MockWebhookTab';
 
 const ProjectDetail: React.FC = () => {
   const { id } = useParams<{ id: string }>();
@@ -47,6 +48,11 @@ const ProjectDetail: React.FC = () => {
       key: 'events',
       label: '事件历史',
       children: <TriggerEventsTab projectId={project.id} />,
+    },
+    {
+      key: 'mock-webhook',
+      label: '模拟触发',
+      children: <MockWebhookTab projectId={project.id} />,
     },
   ];
 

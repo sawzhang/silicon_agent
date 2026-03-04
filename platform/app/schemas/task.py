@@ -14,6 +14,7 @@ class TaskCreateRequest(BaseModel):
     project_id: Optional[str] = None
     target_branch: Optional[str] = None
     yunxiao_task_id: Optional[str] = None
+    github_issue_number: Optional[int] = None
 
 
 class TaskStageResponse(BaseModel):
@@ -66,6 +67,7 @@ class TaskDetailResponse(BaseModel):
     project_name: Optional[str] = None
     target_branch: Optional[str] = None
     yunxiao_task_id: Optional[str] = None
+    github_issue_number: Optional[int] = None
 
     @field_validator("total_tokens", mode="before")
     @classmethod

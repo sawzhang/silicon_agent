@@ -115,3 +115,32 @@ class TriggerSimulateResponse(BaseModel):
     dedup_key: Optional[str]
     rendered_title: Optional[str]
     rendered_desc: Optional[str]
+
+
+# ── Mock Webhook ─────────────────────────────────────────────────────────────
+
+
+class MockWebhookRequest(BaseModel):
+    source: str = Field(
+        default="github",
+        description="事件来源: github | gitlab | jira | webhook",
+    )
+    event_type: str = Field(..., description="事件类型，如 issues.opened, push, pull_request.opened")
+    title: str = Field(..., description="Issue / PR / 提交标题")
+    body: Optional[str] = Field(None, description="Issue / PR body 正文")
+    number: Optional[int] = Field(None, description="Issue / PR 编号")
+    author: Optional[str] = Field(None, description="触发人")
+    ref: Optional[str] = Field(None, description="分支引用，如 refs/heads/main")
+    labels: Optional[list[str]] = Field(None, description="标签列表")
+    extra: Optional[dict[str, Any]] = Field(None, description="额外自定义字段，会合并进 payload")
+    dry_run: bool = Field(default=False, description="为 true 时仅预览匹配结果，不创建任务")
+
+
+class MockWebhookResponse(BaseModel):
+    dry_run: bool
+    matched: bool
+    result: str  # triggered | would_trigger | skipped_no_rule | skipped_filter | skipped_dedup
+    task_id: Optional[str] = None
+    rendered_title: Optional[str] = None
+    rendered_desc: Optional[str] = None
+    matched_rule: Optional[TriggerRuleResponse] = None

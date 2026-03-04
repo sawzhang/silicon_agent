@@ -73,3 +73,28 @@ export interface TriggerTestResult {
   would_trigger: boolean;
   result: string;
 }
+
+// ── Mock Webhook ──────────────────────────────────────
+
+export interface MockWebhookRequest {
+  source?: string;
+  event_type: string;
+  title: string;
+  body?: string;
+  number?: number;
+  author?: string;
+  ref?: string;
+  labels?: string[];
+  extra?: Record<string, unknown>;
+  dry_run?: boolean;
+}
+
+export interface MockWebhookResponse {
+  dry_run: boolean;
+  matched: boolean;
+  result: string;
+  task_id?: string | null;
+  rendered_title?: string | null;
+  rendered_desc?: string | null;
+  matched_rule?: TriggerRule | null;
+}

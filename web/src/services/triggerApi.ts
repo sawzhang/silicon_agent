@@ -6,6 +6,8 @@ import type {
   TriggerRuleUpdate,
   TriggerTestRequest,
   TriggerTestResult,
+  MockWebhookRequest,
+  MockWebhookResponse,
 } from '@/types/trigger';
 
 // ── 全局触发规则 API ─────────────────────────────────
@@ -48,5 +50,18 @@ export async function listProjectEvents(
   const { data } = await api.get<TriggerEvent[]>(`/projects/${projectId}/triggers/events`, {
     params: { limit },
   });
+  return data;
+}
+
+// ── Mock Webhook API ─────────────────────────────────
+
+export async function mockWebhook(
+  projectId: string,
+  req: MockWebhookRequest,
+): Promise<MockWebhookResponse> {
+  const { data } = await api.post<MockWebhookResponse>(
+    `/projects/${projectId}/mock-webhook`,
+    req,
+  );
   return data;
 }

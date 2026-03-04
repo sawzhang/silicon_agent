@@ -27,6 +27,88 @@ interface Props {
   projectId: string;
 }
 
+function buildSamplePayload(rule: TriggerRule): string {
+  const source = rule.source;
+  const eventType = rule.event_type;
+
+  if (source === 'github') {
+    if (eventType.startsWith('issues')) {
+      return JSON.stringify({
+        action: 'opened',
+        number: 1,
+        title: '示例 Issue 标题',
+        body: '## 问题描述\n请在此填写问题详情',
+        author: 'demo-user',
+        labels: [{ name: 'bug' }],
+        issue: {
+          title: '示例 Issue 标题',
+          body: '## 问题描述\n请在此填写问题详情',
+          number: 1,
+          user: { login: 'demo-user' },
+          labels: [{ name: 'bug' }],
+        },
+      }, null, 2);
+    }
+    if (eventType.startsWith('pull_request')) {
+      return JSON.stringify({
+        action: 'opened',
+        number: 10,
+        title: '示例 PR 标题',
+        author: 'demo-user',
+        branch: 'main',
+        pull_request: {
+          title: '示例 PR 标题',
+          body: '修复了若干问题',
+          number: 10,
+          user: { login: 'demo-user' },
+          head: { ref: 'feature-branch' },
+          base: { ref: 'main' },
+        },
+      }, null, 2);
+    }
+    if (eventType === 'push') {
+      return JSON.stringify({
+        ref: 'refs/heads/main',
+        head_commit: { message: 'fix: 示例提交' },
+        pusher: { name: 'demo-user' },
+      }, null, 2);
+    }
+  }
+
+  if (source === 'gitlab') {
+    return JSON.stringify({
+      object_attributes: {
+        title: '示例 MR/Issue 标题',
+        description: '详细描述',
+        action: 'open',
+        target_branch: 'main',
+      },
+      user: { username: 'demo-user' },
+      labels: [{ title: 'bug' }],
+    }, null, 2);
+  }
+
+  if (source === 'jira') {
+    return JSON.stringify({
+      issue: {
+        key: 'PROJ-100',
+        fields: {
+          summary: '示例 Jira 任务标题',
+          description: '详细描述',
+          labels: ['bug'],
+          reporter: { name: 'demo-user' },
+        },
+      },
+    }, null, 2);
+  }
+
+  return JSON.stringify({
+    title: '示例事件标题',
+    body: '事件详情',
+    author: 'demo-user',
+  }, null, 2);
+}
+
 const TriggerRulesTab: React.FC<Props> = ({ projectId }) => {
   const [createOpen, setCreateOpen] = useState(false);
   const [testModalOpen, setTestModalOpen] = useState(false);
@@ -100,7 +182,7 @@ const TriggerRulesTab: React.FC<Props> = ({ projectId }) => {
             onClick={() => {
               setTestingRule(r);
               setTestResult(null);
-              setTestPayload('{}');
+              setTestPayload(buildSamplePayload(r));
               setTestModalOpen(true);
             }}
           >

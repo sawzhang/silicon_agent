@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.trigger import TriggerEventModel, TriggerRuleModel
 from app.schemas.task import TaskCreateRequest
+from app.schemas.trigger import MockWebhookRequest, MockWebhookResponse, TriggerRuleResponse
 from app.services.task_service import TaskService
 
 logger = logging.getLogger(__name__)
@@ -107,6 +108,56 @@ class TriggerService:
             return task.id
 
         return None
+
+    async def mock_webhook(
+        self,
+        project_id: str,
+        request: MockWebhookRequest,
+    ) -> MockWebhookResponse:
+        """模拟 webhook 触发，跳过 HMAC 验签。
+
+        dry_run=True 时仅预览匹配结果，不创建任务。
+        dry_run=False 时直接调用 process_event() 创建任务。
+        """
+        payload = _build_normalized_payload(request)
+
+        if request.dry_run:
+            sim = await self.simulate_event(
+                source=request.source,
+                event_type=request.event_type,
+                payload=payload,
+            )
+            matched_rule = sim.get("matched_rule")
+            rule_resp = (
+                TriggerRuleResponse.model_validate(matched_rule)
+                if matched_rule else None
+            )
+            return MockWebhookResponse(
+                dry_run=True,
+                matched=sim["result"] == "would_trigger",
+                result=sim["result"],
+                rendered_title=sim.get("rendered_title"),
+                rendered_desc=sim.get("rendered_desc"),
+                matched_rule=rule_resp,
+            )
+
+        task_id = await self.process_event(
+            source=request.source,
+            event_type=request.event_type,
+            payload=payload,
+            project_id=project_id,
+        )
+
+        if task_id and request.number is not None:
+            task_service = TaskService(self.session)
+            await task_service.update_github_issue_number(task_id, request.number)
+
+        return MockWebhookResponse(
+            dry_run=False,
+            matched=task_id is not None,
+            result="triggered" if task_id else "skipped_no_rule",
+            task_id=task_id,
+        )
 
     async def _is_duplicate(self, rule: TriggerRuleModel, dedup_key: str) -> bool:
         """检查去重窗口内是否已有相同 dedup_key 的触发记录。"""
@@ -420,6 +471,97 @@ def _eval_filter_node(node: dict, payload: dict) -> bool:
         return not all(_eval_filter_node(c, payload) for c in conditions)
     # 未知 op：放行
     return True
+
+
+def _build_normalized_payload(request: MockWebhookRequest) -> dict:
+    """将 MockWebhookRequest 转为标准化的 webhook payload dict。
+
+    构造一个类似真实 GitHub/GitLab webhook 的 payload 结构，
+    使 trigger_service 的过滤器和模板渲染能正常工作。
+    """
+    payload: dict = {
+        "action": request.event_type.split(".")[-1] if "." in request.event_type else "opened",
+        "title": request.title,
+    }
+
+    source = request.source.lower()
+
+    if source == "github":
+        issue_or_pr: dict = {
+            "title": request.title,
+            "body": request.body or "",
+            "number": request.number,
+            "user": {"login": request.author or "mock-user"},
+        }
+        if request.labels:
+            issue_or_pr["labels"] = [{"name": lb} for lb in request.labels]
+
+        if request.event_type.startswith("issues"):
+            payload["issue"] = issue_or_pr
+        elif request.event_type.startswith("pull_request"):
+            issue_or_pr["head"] = {"ref": request.ref or "feature-branch"}
+            issue_or_pr["base"] = {"ref": "main"}
+            payload["pull_request"] = issue_or_pr
+        elif request.event_type == "push":
+            payload["ref"] = request.ref or "refs/heads/main"
+            payload["head_commit"] = {"message": request.title}
+            payload["pusher"] = {"name": request.author or "mock-user"}
+        else:
+            payload["issue"] = issue_or_pr
+
+    elif source == "gitlab":
+        payload["object_attributes"] = {
+            "title": request.title,
+            "description": request.body or "",
+            "action": payload["action"],
+        }
+        if request.ref:
+            payload["object_attributes"]["target_branch"] = request.ref.replace(
+                "refs/heads/", ""
+            )
+        if request.author:
+            payload["user"] = {"username": request.author}
+        if request.labels:
+            payload["labels"] = [{"title": lb} for lb in request.labels]
+
+    elif source == "jira":
+        payload["issue"] = {
+            "key": f"MOCK-{request.number or 0}",
+            "fields": {
+                "summary": request.title,
+                "description": request.body or "",
+                "labels": request.labels or [],
+                "reporter": {"name": request.author or "mock-user"},
+            },
+        }
+
+    else:
+        payload["body"] = request.body or ""
+        payload["author"] = request.author or "mock-user"
+        if request.labels:
+            payload["labels"] = request.labels
+        if request.ref:
+            payload["ref"] = request.ref
+
+    if request.number is not None:
+        payload["number"] = request.number
+
+    # 提升常用字段到顶层，方便模板渲染（Python format_map 不支持 {a.b} 语法）
+    if request.body and "body" not in payload:
+        payload["body"] = request.body
+    if request.author and "author" not in payload:
+        payload["author"] = request.author
+    if request.ref:
+        branch = request.ref.replace("refs/heads/", "")
+        if "branch" not in payload:
+            payload["branch"] = branch
+    if request.labels and "labels" not in payload:
+        payload["labels"] = request.labels
+
+    if request.extra:
+        payload.update(request.extra)
+
+    return payload
 
 
 def _passes_filters(filters: dict, payload: dict) -> bool:

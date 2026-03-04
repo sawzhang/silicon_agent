@@ -88,6 +88,7 @@ class TaskService:
             project_id=request.project_id,
             target_branch=request.target_branch,
             yunxiao_task_id=request.yunxiao_task_id,
+            github_issue_number=request.github_issue_number,
         )
         self.session.add(task)
         await self.session.flush()
@@ -134,6 +135,15 @@ class TaskService:
         if task is None:
             return None
         return self._task_to_response(task)
+
+    async def update_github_issue_number(self, task_id: str, number: int) -> None:
+        result = await self.session.execute(
+            select(TaskModel).where(TaskModel.id == task_id)
+        )
+        task = result.scalar_one_or_none()
+        if task:
+            task.github_issue_number = number
+            await self.session.commit()
 
     async def get_stages(self, task_id: str) -> List[TaskStageResponse]:
         result = await self.session.execute(
@@ -514,4 +524,5 @@ class TaskService:
             project_name=task.project.display_name if task.project else None,
             target_branch=task.target_branch,
             yunxiao_task_id=task.yunxiao_task_id,
+            github_issue_number=getattr(task, "github_issue_number", None),
         )

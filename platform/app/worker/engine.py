@@ -881,6 +881,9 @@ async def _finalize_task_resources(
                     response_body={"branch": branch},
                 )
                 pr_body = f"Automated PR for task: {task.title}\n\nTask ID: {task.id}"
+                issue_num = getattr(task, "github_issue_number", None)
+                if issue_num:
+                    pr_body += f"\n\nFixes #{issue_num}"
                 if worktree_mgr and worktree_path:
                     pr_url = await worktree_mgr.create_pr(
                         task_id=str(task.id),
@@ -2671,7 +2674,11 @@ def _build_repo_context(project) -> str:
     if project.tech_stack:
         parts.append(f"### 技术栈\n{', '.join(project.tech_stack)}")
     if project.repo_tree:
-        parts.append(f"### 目录结构\n{project.repo_tree}")
+        tree = project.repo_tree
+        _REPO_TREE_MAX_CHARS = 3000
+        if len(tree) > _REPO_TREE_MAX_CHARS:
+            tree = tree[:_REPO_TREE_MAX_CHARS] + "\n...(目录树已截断)"
+        parts.append(f"### 目录结构\n{tree}")
     if project.repo_url:
         branch = project.branch or "main"
         parts.append(f"### 仓库\n{project.repo_url} (branch: {branch})")
