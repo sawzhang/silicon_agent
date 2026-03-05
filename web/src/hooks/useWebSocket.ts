@@ -5,6 +5,7 @@ import { useActivityStore } from '@/stores/activityStore';
 import { useNotificationStore } from '@/stores/notificationStore';
 import { useStageLogStore } from '@/stores/stageLogStore';
 import { useTaskLogStreamStore } from '@/stores/taskLogStreamStore';
+import { useWSConnectionStore } from '@/stores/wsConnectionStore';
 import type {
   WSMessage,
   WSAgentStatusPayload,
@@ -27,12 +28,15 @@ export function useWebSocket() {
 
   useEffect(() => {
     function connect() {
-      const wsUrl = import.meta.env.VITE_WS_URL || `ws://${window.location.host}/ws`;
+      const wsUrl =
+        import.meta.env.VITE_WS_URL ||
+        `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}/ws`;
       const ws = new WebSocket(wsUrl);
       wsRef.current = ws;
 
       ws.onopen = () => {
         console.log('[WS] Connected');
+        useWSConnectionStore.getState().setConnected();
         heartbeatTimerRef.current = setInterval(() => {
           if (ws.readyState === WebSocket.OPEN) {
             ws.send(JSON.stringify({ type: 'ping' }));
@@ -51,8 +55,12 @@ export function useWebSocket() {
 
       ws.onclose = () => {
         console.log('[WS] Disconnected, reconnecting in 3s...');
+        useWSConnectionStore.getState().setDisconnected();
         cleanup();
-        reconnectTimerRef.current = setTimeout(connect, 3_000);
+        reconnectTimerRef.current = setTimeout(() => {
+          useWSConnectionStore.getState().setReconnecting();
+          connect();
+        }, 3_000);
       };
 
       ws.onerror = () => {

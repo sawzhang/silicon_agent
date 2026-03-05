@@ -1,5 +1,26 @@
-import React, { useMemo } from 'react';
-import { Card, Col, Empty, Row, Spin, Typography, message } from 'antd';
+import React, { useMemo, useState } from 'react';
+import {
+  Alert,
+  Button,
+  Card,
+  Col,
+  Descriptions,
+  Empty,
+  Form,
+  Input,
+  InputNumber,
+  Modal,
+  Row,
+  Space,
+  Spin,
+  Tag,
+  Typography,
+  message,
+} from 'antd';
+import {
+  EditOutlined,
+  ThunderboltOutlined,
+} from '@ant-design/icons';
 import {
   ProForm,
   ProFormDigit,
@@ -10,7 +31,9 @@ import {
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { AGENT_ROLES, ROLE_DISPLAY_NAMES } from '@/utils/constants';
 import { getAgentConfigOptions, listAgents, startAgent, stopAgent, updateConfig } from '@/services/agentApi';
+import { getLLMConfig, updateLLMConfig, probeLLM } from '@/services/llmProbeApi';
 import type { AgentConfigFormValues, AgentStatus } from '@/types/agent';
+import type { LLMConfigUpdateRequest } from '@/types/llmProbe';
 
 const { Title, Paragraph } = Typography;
 
@@ -33,6 +56,48 @@ function buildInitialValues(agent: AgentStatus, fallbackModel?: string): AgentCo
 
 const ConfigPage: React.FC = () => {
   const queryClient = useQueryClient();
+  const [editModalOpen, setEditModalOpen] = useState(false);
+  const [editForm] = Form.useForm<LLMConfigUpdateRequest>();
+
+  const { data: llmConfig, isLoading: llmConfigLoading } = useQuery({
+    queryKey: ['llm-config'],
+    queryFn: getLLMConfig,
+  });
+
+  const llmUpdateMutation = useMutation({
+    mutationFn: updateLLMConfig,
+    onSuccess: () => {
+      message.success('LLM 配置已更新');
+      queryClient.invalidateQueries({ queryKey: ['llm-config'] });
+      setEditModalOpen(false);
+    },
+    onError: () => {
+      message.error('更新 LLM 配置失败');
+    },
+  });
+
+  const probeMutation = useMutation({
+    mutationFn: () => probeLLM({ timeout_ms: 5000 }),
+  });
+
+  const handleEditOpen = () => {
+    editForm.setFieldsValue({
+      base_url: llmConfig?.base_url,
+      model: llmConfig?.model,
+      timeout: llmConfig?.timeout,
+    });
+    setEditModalOpen(true);
+  };
+
+  const handleEditSubmit = async () => {
+    const values = await editForm.validateFields();
+    const payload: LLMConfigUpdateRequest = {};
+    if (values.api_key) payload.api_key = values.api_key;
+    if (values.base_url !== undefined) payload.base_url = values.base_url;
+    if (values.model !== undefined) payload.model = values.model;
+    if (values.timeout !== undefined) payload.timeout = values.timeout;
+    await llmUpdateMutation.mutateAsync(payload);
+  };
 
   const { data: agentsData, isLoading: agentsLoading } = useQuery({
     queryKey: ['agents'],
@@ -91,7 +156,7 @@ const ConfigPage: React.FC = () => {
     value: item,
   }));
 
-  if (agentsLoading || optionsLoading) {
+  if (agentsLoading || optionsLoading || llmConfigLoading) {
     return <Spin size="large" />;
   }
 
@@ -99,12 +164,120 @@ const ConfigPage: React.FC = () => {
     return <Empty description="暂无 Agent 配置数据" />;
   }
 
+  const roleModelEntries = Object.entries(llmConfig?.role_model_map ?? {});
+
   return (
     <div>
       <Title level={4}>Agent 配置中心</Title>
       <Paragraph type="secondary">
         配置项来自后端实时数据，可按角色独立调整模型、推理参数及扩展 Skill 目录。
       </Paragraph>
+
+      {/* LLM 连接配置 */}
+      <Card
+        title="LLM 连接配置"
+        size="small"
+        style={{ marginBottom: 16 }}
+        extra={
+          <Space>
+            <Button
+              icon={<ThunderboltOutlined />}
+              size="small"
+              loading={probeMutation.isPending}
+              onClick={() => probeMutation.mutate()}
+            >
+              探活
+            </Button>
+            <Button icon={<EditOutlined />} size="small" type="primary" onClick={handleEditOpen}>
+              编辑
+            </Button>
+          </Space>
+        }
+      >
+        <Descriptions size="small" column={{ xs: 1, sm: 2, lg: 4 }} bordered>
+          <Descriptions.Item label="Base URL">{llmConfig?.base_url || '-'}</Descriptions.Item>
+          <Descriptions.Item label="默认模型">{llmConfig?.model || '-'}</Descriptions.Item>
+          <Descriptions.Item label="API Key">
+            {llmConfig?.api_key_set ? (
+              <Tag color="green">{llmConfig.api_key_masked}</Tag>
+            ) : (
+              <Tag color="red">未设置</Tag>
+            )}
+          </Descriptions.Item>
+          <Descriptions.Item label="超时(秒)">{llmConfig?.timeout ?? '-'}</Descriptions.Item>
+        </Descriptions>
+
+        {roleModelEntries.length > 0 && (
+          <div style={{ marginTop: 12 }}>
+            <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+              角色模型映射:
+            </Typography.Text>
+            <div style={{ marginTop: 4 }}>
+              {roleModelEntries.map(([role, model]) => (
+                <Tag key={role} style={{ marginBottom: 4 }}>
+                  {ROLE_DISPLAY_NAMES[role] || role}: {model}
+                </Tag>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {probeMutation.data && (
+          <div style={{ marginTop: 12 }}>
+            <Space>
+              <Tag color={probeMutation.data.ok ? 'success' : 'error'}>
+                {probeMutation.data.ok ? '连接正常' : '连接异常'}
+              </Tag>
+              <Tag>延迟: {probeMutation.data.latency_ms}ms</Tag>
+              <Tag>模型: {probeMutation.data.resolved_model || probeMutation.data.requested_model || '-'}</Tag>
+            </Space>
+            {!probeMutation.data.ok && probeMutation.data.error_message && (
+              <Alert type="error" showIcon style={{ marginTop: 8 }} message={probeMutation.data.error_message} />
+            )}
+          </div>
+        )}
+
+        {probeMutation.error && (
+          <Alert
+            type="error"
+            showIcon
+            style={{ marginTop: 12 }}
+            message={(probeMutation.error as any)?.response?.data?.detail || '探活请求失败'}
+          />
+        )}
+      </Card>
+
+      <Modal
+        title="编辑 LLM 连接配置"
+        open={editModalOpen}
+        onCancel={() => setEditModalOpen(false)}
+        onOk={handleEditSubmit}
+        confirmLoading={llmUpdateMutation.isPending}
+        okText="保存"
+        destroyOnClose
+      >
+        <Alert
+          type="info"
+          showIcon
+          style={{ marginBottom: 16 }}
+          message="修改仅在当前运行期间生效，重启后恢复 .env 配置。"
+        />
+        <Form form={editForm} layout="vertical">
+          <Form.Item label="API Key" name="api_key" help="留空表示不修改">
+            <Input.Password placeholder="sk-..." />
+          </Form.Item>
+          <Form.Item label="Base URL" name="base_url" rules={[{ required: true, message: '请输入 Base URL' }]}>
+            <Input placeholder="https://api.openai.com/v1" />
+          </Form.Item>
+          <Form.Item label="默认模型" name="model" rules={[{ required: true, message: '请输入模型名称' }]}>
+            <Input placeholder="gpt-4o" />
+          </Form.Item>
+          <Form.Item label="超时(秒)" name="timeout" rules={[{ required: true, message: '请输入超时时间' }]}>
+            <InputNumber min={1} max={300} style={{ width: '100%' }} />
+          </Form.Item>
+        </Form>
+      </Modal>
+
       <Row gutter={[16, 16]}>
         {AGENT_ROLES.map((roleMeta) => {
           const role = roleMeta.key;

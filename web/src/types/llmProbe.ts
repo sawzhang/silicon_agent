@@ -37,3 +37,19 @@ export interface LLMProbeResponse {
   /** Probe execution timestamp in ISO string format. */
   checked_at: string;
 }
+
+export interface LLMConfigResponse {
+  api_key_set: boolean;
+  api_key_masked: string;
+  base_url: string;
+  model: string;
+  timeout: number;
+  role_model_map: Record<string, string>;
+}
+
+export interface LLMConfigUpdateRequest {
+  api_key?: string;
+  base_url?: string;
+  model?: string;
+  timeout?: number;
+}

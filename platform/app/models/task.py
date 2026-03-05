@@ -33,6 +33,7 @@ class TaskModel(Base):
     target_branch: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
     yunxiao_task_id: Mapped[Optional[str]] = mapped_column(String(100), nullable=True, index=True)
     github_issue_number: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    error_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True, default=None)
 
     # Phase 3.2: Interactive planning
     plan: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)

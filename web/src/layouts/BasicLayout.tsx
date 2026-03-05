@@ -14,9 +14,11 @@ import {
   ProjectOutlined,
   ControlOutlined,
   FundOutlined,
+  ApiOutlined,
 } from '@ant-design/icons';
-import { Badge } from 'antd';
+import { Badge, Space, Tag, Tooltip } from 'antd';
 import { useGateList } from '@/hooks/useGates';
+import { useWSConnectionStore } from '@/stores/wsConnectionStore';
 
 const menuRoutes = {
   routes: [
@@ -32,7 +34,14 @@ const menuRoutes = {
     { path: '/task-logs', name: '任务日志', icon: <FileTextOutlined /> },
     { path: '/config', name: 'Agent配置', icon: <SettingOutlined /> },
     { path: '/circuit-breaker', name: '止损控制', icon: <ThunderboltOutlined /> },
+    { path: '/api-docs', name: 'API 文档', icon: <ApiOutlined /> },
   ],
+};
+
+const WS_STATUS_CONFIG = {
+  connected: { color: 'success' as const, label: '已连接' },
+  disconnected: { color: 'error' as const, label: '已断开' },
+  reconnecting: { color: 'warning' as const, label: '重连中...' },
 };
 
 const BasicLayout: React.FC = () => {
@@ -40,6 +49,9 @@ const BasicLayout: React.FC = () => {
   const location = useLocation();
   const { data: pendingGates } = useGateList({ status: 'pending' });
   const pendingGateCount = pendingGates?.length ?? 0;
+  const wsStatus = useWSConnectionStore((s) => s.status);
+  const wsRetryCount = useWSConnectionStore((s) => s.retryCount);
+  const statusCfg = WS_STATUS_CONFIG[wsStatus];
 
   return (
     <ProLayout
@@ -48,15 +60,37 @@ const BasicLayout: React.FC = () => {
       fixSiderbar
       location={{ pathname: location.pathname }}
       route={menuRoutes}
-      menuItemRender={(item, dom) => (
-        <a onClick={() => item.path && navigate(item.path)}>
-          {item.path === '/gates' && pendingGateCount > 0 ? (
-            <Badge count={pendingGateCount} size="small" offset={[8, 0]}>{dom}</Badge>
-          ) : (
-            dom
-          )}
-        </a>
-      )}
+      menuItemRender={(item, dom) => {
+        if (item.path === '/api-docs') {
+          return (
+            <a href="/docs" target="_blank" rel="noopener noreferrer">
+              {dom}
+            </a>
+          );
+        }
+        return (
+          <a onClick={() => item.path && navigate(item.path)}>
+            {item.path === '/gates' && pendingGateCount > 0 ? (
+              <Badge count={pendingGateCount} size="small" offset={[8, 0]}>{dom}</Badge>
+            ) : (
+              dom
+            )}
+          </a>
+        );
+      }}
+      actionsRender={() => [
+        <Space key="ws-status" size={4}>
+          <Tooltip title={wsRetryCount > 0 ? `重试次数: ${wsRetryCount}` : '实时连接'}>
+            <Tag
+              icon={<ApiOutlined />}
+              color={statusCfg.color}
+              style={{ marginInlineEnd: 0 }}
+            >
+              {statusCfg.label}
+            </Tag>
+          </Tooltip>
+        </Space>,
+      ]}
       contentStyle={{ padding: 24 }}
     >
       <Outlet />
