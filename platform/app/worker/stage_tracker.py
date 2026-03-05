@@ -40,6 +40,9 @@ def summarize_tool_command(tool_name: str, args: dict[str, Any]) -> str:
     if tool_name == "write":
         path = str(args.get("path") or "").strip()
         return f"write {path}".strip()
+    if tool_name == "edit":
+        path = str(args.get("path") or "").strip()
+        return f"edit {path}".strip()
     if tool_name == "skill":
         skill_name = str(args.get("name") or "").strip()
         return f"skill:{skill_name}" if skill_name else "skill"

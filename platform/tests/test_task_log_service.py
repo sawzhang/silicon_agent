@@ -136,6 +136,12 @@ class TestDeriveCommandFromArgs:
         )
         assert result == "write /tmp/out.py"
 
+    def test_edit_with_path(self):
+        result = TaskLogService._derive_command_from_args(
+            {"tool_name": "edit", "path": "/tmp/out.py"}
+        )
+        assert result == "edit /tmp/out.py"
+
     def test_skill_with_name(self):
         result = TaskLogService._derive_command_from_args(
             {"tool_name": "skill", "name": "my_skill"}

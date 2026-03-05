@@ -61,12 +61,12 @@ The system processes tasks through a multi-stage pipeline driven by a background
 | Role | Tools | Purpose |
 |------|-------|---------|
 | orchestrator | read, execute, skill | Task parsing & decomposition |
-| spec | read, write, skill | Technical spec writing |
-| coding | read, write, execute, execute_script, skill | Code implementation |
-| test | read, write, execute, execute_script, skill | Test writing & execution |
+| spec | read, write, edit, skill | Technical spec writing |
+| coding | read, write, edit, execute, execute_script, skill | Code implementation |
+| test | read, write, edit, execute, execute_script, skill | Test writing & execution |
 | review | read, execute, skill | Code review |
 | smoke | read, execute, skill | E2E smoke testing |
-| doc | read, write, skill | Documentation |
+| doc | read, write, edit, skill | Documentation |
 
 ### WebSocket Event Flow
 
