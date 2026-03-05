@@ -147,3 +147,65 @@ def test_create_runner_applies_temperature_and_max_tokens_overrides(monkeypatch,
     assert "max_tokens" not in kwargs
     assert runner.config.temperature == 0.3
     assert runner.config.max_tokens == 8192
+
+
+def test_sanitize_reasoning_kwargs_for_gemini_model():
+    kwargs = {"extra_body": {"reasoning_split": True, "foo": "bar"}, "x": 1}
+    sanitized = agents_mod._sanitize_reasoning_kwargs_for_model("gemini-2.5-pro", kwargs)
+    assert "extra_body" in sanitized
+    assert "reasoning_split" not in sanitized["extra_body"]
+    assert sanitized["extra_body"]["foo"] == "bar"
+    assert sanitized["x"] == 1
+
+
+def test_sanitize_reasoning_kwargs_keeps_non_gemini_payload():
+    kwargs = {"extra_body": {"reasoning_split": True}, "x": 1}
+    sanitized = agents_mod._sanitize_reasoning_kwargs_for_model("gpt-4o", kwargs)
+    assert sanitized == kwargs
+
+
+def test_extract_gemini_thought_signatures_from_response():
+    class _Resp:
+        def model_dump(self, mode=None):
+            return {
+                "choices": [
+                    {
+                        "message": {
+                            "tool_calls": [
+                                {
+                                    "id": "call-1",
+                                    "extra_content": {
+                                        "google": {"thought_signature": "sig-1"}
+                                    },
+                                }
+                            ]
+                        }
+                    }
+                ]
+            }
+
+    signatures = agents_mod._extract_gemini_thought_signatures_from_response(_Resp())
+    assert signatures == {"call-1": "sig-1"}
+
+
+def test_inject_gemini_thought_signatures_into_messages():
+    kwargs = {
+        "messages": [
+            {
+                "role": "assistant",
+                "tool_calls": [
+                    {
+                        "id": "call-1",
+                        "type": "function",
+                        "function": {"name": "execute", "arguments": "{}"},
+                    }
+                ],
+            }
+        ]
+    }
+    injected = agents_mod._inject_gemini_thought_signatures_into_messages(
+        kwargs,
+        {"call-1": "sig-1"},
+    )
+    tc = injected["messages"][0]["tool_calls"][0]
+    assert tc["extra_content"]["google"]["thought_signature"] == "sig-1"

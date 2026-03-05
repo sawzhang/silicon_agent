@@ -57,15 +57,13 @@ const TaskList: React.FC = () => {
 
   // Single mode state
   const [singleForm, setSingleForm] = useState({
-    title: '', description: '', template_id: '', project_id: '', target_branch: '', yunxiao_task_id: 'silicon_agent',
+    title: '', description: '', template_id: '', project_id: '',
   });
 
   // PRD mode state
   const [prdText, setPrdText] = useState('');
   const [prdProjectId, setPrdProjectId] = useState<string>('');
   const [prdTemplateId, setPrdTemplateId] = useState<string>('');
-  const [prdTargetBranch, setPrdTargetBranch] = useState<string>('');
-  const [prdYunxiaoTaskId, setPrdYunxiaoTaskId] = useState<string>('silicon_agent');
   const [decomposedTasks, setDecomposedTasks] = useState<EditableTask[]>([]);
   const [decomposeSummary, setDecomposeSummary] = useState('');
   const [analyzing, setAnalyzing] = useState(false);
@@ -74,12 +72,10 @@ const TaskList: React.FC = () => {
   const resetWizard = () => {
     setStep(0);
     setCreateMode('single');
-    setSingleForm({ title: '', description: '', template_id: '', project_id: '', target_branch: '', yunxiao_task_id: 'silicon_agent' });
+    setSingleForm({ title: '', description: '', template_id: '', project_id: '' });
     setPrdText('');
     setPrdProjectId('');
     setPrdTemplateId('');
-    setPrdTargetBranch('');
-    setPrdYunxiaoTaskId('silicon_agent');
     setDecomposedTasks([]);
     setDecomposeSummary('');
     setAnalyzing(false);
@@ -124,10 +120,6 @@ const TaskList: React.FC = () => {
 
   // Handle single task create
   const handleCreateSingle = async () => {
-    if (!singleForm.target_branch.trim()) {
-      message.warning('Target Git Branch is required');
-      return;
-    }
     setCreating(true);
     try {
       await createTask({
@@ -135,8 +127,7 @@ const TaskList: React.FC = () => {
         description: singleForm.description,
         template_id: singleForm.template_id || undefined,
         project_id: singleForm.project_id || undefined,
-        target_branch: singleForm.target_branch,
-        yunxiao_task_id: 'silicon_agent',
+        yunxiao_task_id: '云效任务',
       });
       message.success('Task created');
       actionRef.current?.reload();
@@ -154,10 +145,6 @@ const TaskList: React.FC = () => {
       message.warning('No tasks to create');
       return;
     }
-    if (!prdTargetBranch.trim()) {
-      message.warning('Target Git Branch is required');
-      return;
-    }
     setCreating(true);
     try {
       const result = await batchCreateTasks({
@@ -166,8 +153,7 @@ const TaskList: React.FC = () => {
           description: t.description,
           template_id: prdTemplateId || undefined,
           project_id: prdProjectId || undefined,
-          target_branch: prdTargetBranch,
-          yunxiao_task_id: 'silicon_agent',
+          yunxiao_task_id: '云效任务',
         })),
       });
       message.success(`${result.created} tasks created`);
@@ -256,12 +242,6 @@ const TaskList: React.FC = () => {
       search: false,
     },
     { title: '标题', dataIndex: 'title', ellipsis: true },
-    {
-      title: '云效 ID',
-      dataIndex: 'yunxiao_task_id',
-      width: 120,
-      render: (_, record) => record.yunxiao_task_id ? <Tag color="blue">{record.yunxiao_task_id}</Tag> : '-',
-    },
     {
       title: '模板',
       dataIndex: 'template_name',
@@ -432,23 +412,10 @@ const TaskList: React.FC = () => {
               </select>
             </div>
             <div style={{ marginBottom: 16 }}>
-              <label style={{ display: 'block', fontWeight: 500, marginBottom: 4 }}>云效 / 分支 *</label>
-              <Input.Group compact style={{ display: 'flex' }}>
-                <Input
-                  style={{ width: '40%', backgroundColor: '#f5f5f5' }}
-                  value="silicon_agent"
-                  readOnly
-                  disabled
-                />
-                <Input
-                  style={{ width: '60%' }}
-                  value={singleForm.target_branch}
-                  onChange={(e) => setSingleForm((p) => ({ ...p, target_branch: e.target.value }))}
-                  placeholder="目标 Git 分支（必填）"
-                />
-              </Input.Group>
+              <label style={{ display: 'block', fontWeight: 500, marginBottom: 4 }}>关联云效</label>
+              <Input value="云效任务" readOnly disabled />
               <div style={{ marginTop: 4, fontSize: 12, color: '#888' }}>
-                代码将在评审通过后推送到该分支。
+                目标分支将按规则自动生成（silicon_agent/&lt;taskId后缀&gt;）。
               </div>
             </div>
           </div>
@@ -495,21 +462,8 @@ const TaskList: React.FC = () => {
               </select>
             </div>
             <div>
-              <label style={{ display: 'block', fontWeight: 500, marginBottom: 4 }}>云效 / 分支 *</label>
-              <Input.Group compact style={{ display: 'flex' }}>
-                <Input
-                  style={{ width: '40%', backgroundColor: '#f5f5f5' }}
-                  value="silicon_agent"
-                  readOnly
-                  disabled
-                />
-                <Input
-                  style={{ width: '60%' }}
-                  value={prdTargetBranch}
-                  onChange={(e) => setPrdTargetBranch(e.target.value)}
-                  placeholder="目标 Git 分支（必填）"
-                />
-              </Input.Group>
+              <label style={{ display: 'block', fontWeight: 500, marginBottom: 4 }}>关联云效</label>
+              <Input value="云效任务" readOnly disabled />
             </div>
           </Space>
         </div>

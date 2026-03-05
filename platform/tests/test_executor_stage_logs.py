@@ -195,6 +195,86 @@ class _FakeStreamingSandboxManager:
         return self._result
 
 
+def test_is_tool_call_error_matches_gemini_thought_signature_error():
+    err = RuntimeError(
+        "Error code: 400 - [{'error': {'code': 400, 'message': "
+        "'Function call is missing a thought_signature in functionCall parts.'}}]"
+    )
+    assert executor._is_tool_call_error(err) is True
+
+
+@pytest.mark.asyncio
+async def test_execute_stage_falls_back_to_text_only_on_thought_signature_error(monkeypatch):
+    session = SimpleNamespace(commit=AsyncMock())
+    task = SimpleNamespace(
+        id='task-thought-signature-fallback',
+        title='task title',
+        description='task description',
+        total_tokens=0,
+        total_cost_rmb=0.0,
+    )
+    stage = SimpleNamespace(
+        id='stage-thought-signature-fallback',
+        stage_name='parse',
+        agent_role='orchestrator',
+        status='pending',
+        started_at=None,
+        completed_at=None,
+        duration_seconds=None,
+        tokens_used=0,
+        output_summary=None,
+    )
+
+    class _ThoughtSignatureErrorRunner(_FakeRunner):
+        async def chat(self, _prompt: str, reset: bool = True, **_: object):
+            raise RuntimeError(
+                "Error code: 400 - [{'error': {'code': 400, 'message': "
+                "'Function call is missing a thought_signature in functionCall parts.'}}]"
+            )
+
+    fake_pipeline = _FakePipeline()
+    fallback_called: dict[str, bool] = {'value': False}
+
+    monkeypatch.setattr(executor, 'get_task_log_pipeline', lambda: fake_pipeline)
+    monkeypatch.setattr(executor, '_get_agent', AsyncMock(return_value=None))
+    monkeypatch.setattr(executor, '_safe_broadcast', AsyncMock())
+    monkeypatch.setattr(executor, 'build_user_prompt', lambda _ctx: 'prompt')
+    monkeypatch.setattr(
+        executor,
+        'get_agent',
+        lambda _role, _task_id, model=None, temperature=None, max_tokens=None, max_turns=None, extra_skill_dirs=None, system_prompt_append=None: _ThoughtSignatureErrorRunner(),
+    )
+
+    def _fallback_runner(
+        _role,
+        _task_id,
+        model=None,
+        temperature=None,
+        max_tokens=None,
+        max_turns=None,
+        extra_skill_dirs=None,
+        system_prompt_append=None,
+    ):
+        fallback_called['value'] = True
+        return _FakeRunner()
+
+    monkeypatch.setattr(executor, 'get_agent_text_only', _fallback_runner)
+
+    result = await executor.execute_stage(
+        session=session,
+        task=task,
+        stage=stage,
+        prior_outputs=[],
+    )
+
+    assert result == 'stage output'
+    assert fallback_called['value'] is True
+    fallback_events = [
+        item for item in fake_pipeline.created if item['event_type'] == 'llm_fallback_text_only'
+    ]
+    assert len(fallback_events) == 1
+
+
 def test_apply_runner_workspace_override_replaces_prompt_and_cwd():
     runner = SimpleNamespace(
         default_cwd='/tmp/old-workspace',

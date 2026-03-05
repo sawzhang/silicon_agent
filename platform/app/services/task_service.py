@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import uuid
 from datetime import datetime, timezone
 from typing import List, Optional
 
@@ -31,6 +32,11 @@ logger = logging.getLogger(__name__)
 class TaskService:
     def __init__(self, session: AsyncSession):
         self.session = session
+
+    @staticmethod
+    def _build_auto_target_branch(task_id: str) -> str:
+        suffix = (task_id or "").rsplit("-", 1)[-1].strip() or task_id
+        return f"silicon_agent/{suffix}"
 
     async def list_tasks(
         self,
@@ -80,18 +86,20 @@ class TaskService:
 
     async def create_task(self, request: TaskCreateRequest) -> TaskDetailResponse:
         task = TaskModel(
+            id=str(uuid.uuid4()),
             title=request.title,
             description=request.description,
             jira_id=request.jira_id,
             status="pending",
             template_id=request.template_id,
             project_id=request.project_id,
-            target_branch=request.target_branch,
+            target_branch=None,
             yunxiao_task_id=request.yunxiao_task_id,
             github_issue_number=request.github_issue_number,
         )
         self.session.add(task)
         await self.session.flush()
+        task.target_branch = self._build_auto_target_branch(task.id)
 
         if request.template_id:
             template = await self.session.get(TaskTemplateModel, request.template_id)

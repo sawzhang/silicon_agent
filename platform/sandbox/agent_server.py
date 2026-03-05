@@ -13,6 +13,7 @@ import contextlib
 import json
 import logging
 import os
+import re
 import sys
 import time
 from datetime import datetime, timezone
@@ -57,6 +58,24 @@ except ImportError:
 # ---------------------------------------------------------------------------
 _ALL_TOOLS: set[str] = set()
 _TOOL_ARGUMENT_HINTS: dict[str, str] = {}
+_JAVA_DETECT_FILES = (
+    "pom.xml",
+    "build.gradle",
+    "build.gradle.kts",
+    "gradle.properties",
+)
+_JAVA8_PATTERNS = (
+    r"<java\.version>\s*(?:1\.8|8)\s*</java\.version>",
+    r"<maven\.compiler\.(?:source|target|release)>\s*(?:1\.8|8)\s*</maven\.compiler\.(?:source|target|release)>",
+    r"sourceCompatibility\s*=\s*(?:['\"]?1\.8['\"]?|JavaVersion\.VERSION_1_8)",
+    r"targetCompatibility\s*=\s*(?:['\"]?1\.8['\"]?|JavaVersion\.VERSION_1_8)",
+)
+_JAVA17_PATTERNS = (
+    r"<java\.version>\s*17\s*</java\.version>",
+    r"<maven\.compiler\.(?:source|target|release)>\s*17\s*</maven\.compiler\.(?:source|target|release)>",
+    r"sourceCompatibility\s*=\s*(?:['\"]?17['\"]?|JavaVersion\.VERSION_17)",
+    r"targetCompatibility\s*=\s*(?:['\"]?17['\"]?|JavaVersion\.VERSION_17)",
+)
 
 
 def _normalize_openai_base_url(base_url: str | None) -> str:
@@ -67,6 +86,199 @@ def _normalize_openai_base_url(base_url: str | None) -> str:
     if value.endswith("/v1"):
         return value
     return f"{value}/v1"
+
+
+def _detect_java_major_version(workdir: str) -> int | None:
+    workspace = Path(workdir)
+    if not workspace.exists():
+        return None
+
+    scanned: list[str] = []
+    for rel in _JAVA_DETECT_FILES:
+        file_path = workspace / rel
+        if not file_path.is_file():
+            continue
+        with contextlib.suppress(Exception):
+            text = file_path.read_text(encoding="utf-8", errors="ignore")
+            scanned.append(text[:200_000])
+
+    if not scanned:
+        return None
+
+    combined = "\n".join(scanned)
+    if any(re.search(pattern, combined, re.IGNORECASE) for pattern in _JAVA8_PATTERNS):
+        return 8
+    if any(re.search(pattern, combined, re.IGNORECASE) for pattern in _JAVA17_PATTERNS):
+        return 17
+    return None
+
+
+def _configure_java_runtime_for_workspace(workdir: str) -> int | None:
+    major = _detect_java_major_version(workdir)
+    if major is None:
+        return None
+
+    java_home_key = "JAVA8_HOME" if major == 8 else "JAVA17_HOME"
+    target_java_home = (os.environ.get(java_home_key) or "").strip()
+    if not target_java_home:
+        logger.warning("Java %s requested but %s is not configured", major, java_home_key)
+        return major
+
+    current_path = os.environ.get("PATH", "")
+    path_parts = [p for p in current_path.split(":") if p]
+    path_parts = [
+        p for p in path_parts
+        if not p.startswith("/opt/jdk8/bin")
+        and not p.startswith("/opt/jdk17/bin")
+    ]
+    os.environ["JAVA_HOME"] = target_java_home
+    os.environ["PATH"] = ":".join([f"{target_java_home}/bin", *path_parts])
+    logger.info(
+        "Configured Java runtime for workspace %s: java=%s JAVA_HOME=%s",
+        workdir,
+        major,
+        target_java_home,
+    )
+    return major
+
+
+def _is_gemini_model(model: str | None) -> bool:
+    return "gemini" in ((model or "").lower())
+
+
+def _sanitize_reasoning_kwargs_for_model(
+    model: str | None,
+    kwargs: dict[str, Any],
+) -> dict[str, Any]:
+    """Gemini compatibility: remove unsupported reasoning_split field."""
+    if not _is_gemini_model(model):
+        return kwargs
+
+    extra_body = kwargs.get("extra_body")
+    if not isinstance(extra_body, dict) or "reasoning_split" not in extra_body:
+        return kwargs
+
+    sanitized_kwargs = dict(kwargs)
+    sanitized_extra = dict(extra_body)
+    sanitized_extra.pop("reasoning_split", None)
+    if sanitized_extra:
+        sanitized_kwargs["extra_body"] = sanitized_extra
+    else:
+        sanitized_kwargs.pop("extra_body", None)
+    return sanitized_kwargs
+
+
+def _extract_gemini_thought_signatures_from_response(response_obj: Any) -> dict[str, str]:
+    """Extract OpenAI-compat thought signatures keyed by tool_call id."""
+    if hasattr(response_obj, "model_dump"):
+        try:
+            data = response_obj.model_dump(mode="json")
+        except Exception:
+            data = response_obj.model_dump()
+    elif hasattr(response_obj, "to_dict"):
+        data = response_obj.to_dict()
+    else:
+        data = response_obj
+
+    if not isinstance(data, dict):
+        return {}
+
+    signatures: dict[str, str] = {}
+    choices = data.get("choices")
+    if not isinstance(choices, list):
+        return signatures
+
+    for choice in choices:
+        if not isinstance(choice, dict):
+            continue
+        message = choice.get("message")
+        if not isinstance(message, dict):
+            continue
+        tool_calls = message.get("tool_calls")
+        if not isinstance(tool_calls, list):
+            continue
+        for tool_call in tool_calls:
+            if not isinstance(tool_call, dict):
+                continue
+            tool_call_id = str(tool_call.get("id") or "").strip()
+            if not tool_call_id:
+                continue
+            extra = tool_call.get("extra_content")
+            if not isinstance(extra, dict):
+                continue
+            google = extra.get("google")
+            if not isinstance(google, dict):
+                continue
+            thought_signature = google.get("thought_signature")
+            if isinstance(thought_signature, str) and thought_signature:
+                signatures[tool_call_id] = thought_signature
+    return signatures
+
+
+def _inject_gemini_thought_signatures_into_messages(
+    kwargs: dict[str, Any],
+    signatures: dict[str, str],
+) -> dict[str, Any]:
+    """Inject required thought signatures back into assistant/tool_call history."""
+    messages = kwargs.get("messages")
+    if not isinstance(messages, list) or not signatures:
+        return kwargs
+
+    changed = False
+    updated_messages: list[Any] = []
+    for message in messages:
+        if not isinstance(message, dict):
+            updated_messages.append(message)
+            continue
+
+        role = str(message.get("role") or "")
+        tool_calls = message.get("tool_calls")
+        if role not in ("assistant", "model") or not isinstance(tool_calls, list):
+            updated_messages.append(message)
+            continue
+
+        updated_tool_calls: list[Any] = []
+        message_changed = False
+        for tool_call in tool_calls:
+            if not isinstance(tool_call, dict):
+                updated_tool_calls.append(tool_call)
+                continue
+            tool_call_id = str(tool_call.get("id") or "").strip()
+            expected_signature = signatures.get(tool_call_id)
+            if not expected_signature:
+                updated_tool_calls.append(tool_call)
+                continue
+
+            extra = tool_call.get("extra_content")
+            if isinstance(extra, dict) and isinstance(extra.get("google"), dict):
+                existing_signature = extra["google"].get("thought_signature")
+                if isinstance(existing_signature, str) and existing_signature:
+                    updated_tool_calls.append(tool_call)
+                    continue
+
+            updated_tool_call = dict(tool_call)
+            updated_extra = dict(updated_tool_call.get("extra_content") or {})
+            updated_google = dict(updated_extra.get("google") or {})
+            updated_google["thought_signature"] = expected_signature
+            updated_extra["google"] = updated_google
+            updated_tool_call["extra_content"] = updated_extra
+            updated_tool_calls.append(updated_tool_call)
+            message_changed = True
+            changed = True
+
+        if message_changed:
+            updated_message = dict(message)
+            updated_message["tool_calls"] = updated_tool_calls
+            updated_messages.append(updated_message)
+        else:
+            updated_messages.append(message)
+
+    if not changed:
+        return kwargs
+
+    updated_kwargs = dict(kwargs)
+    updated_kwargs["messages"] = updated_messages
+    return updated_kwargs
 
 
 def _hydrate_skillkit_env_from_llm_env() -> list[str]:
@@ -139,6 +351,7 @@ class ContainerAgentRunner(ToolExecutionPolicyMixin, AgentRunner):
             "SANDBOX_MODEL_API_RAW_LOG_PATH",
             "/workspace/.agent_logs/model_api_raw_responses.jsonl",
         )
+        self._gemini_tool_call_signatures: dict[str, str] = {}
 
     def get_tools(self):
         tools = super().get_tools()
@@ -214,10 +427,25 @@ class ContainerAgentRunner(ToolExecutionPolicyMixin, AgentRunner):
         if completions is None:
             return await super()._call_llm(messages)
 
+        effective_model = getattr(self.config, "model", None)
+
         async def _wrapped_create(*args, **kwargs):
-            raw_response = await original_create(*args, **kwargs)
+            safe_kwargs = _sanitize_reasoning_kwargs_for_model(
+                effective_model,
+                dict(kwargs),
+            )
+            if _is_gemini_model(effective_model):
+                safe_kwargs = _inject_gemini_thought_signatures_into_messages(
+                    safe_kwargs,
+                    self._gemini_tool_call_signatures,
+                )
+            raw_response = await original_create(*args, **safe_kwargs)
+            if _is_gemini_model(effective_model):
+                self._gemini_tool_call_signatures.update(
+                    _extract_gemini_thought_signatures_from_response(raw_response)
+                )
             self._append_model_api_raw_log(
-                request_kwargs=dict(kwargs),
+                request_kwargs=safe_kwargs,
                 response_obj=raw_response,
             )
             return raw_response
@@ -519,6 +747,7 @@ async def handle_execute(request: web.Request) -> web.Response:
         parsed["workdir"],
         parsed["timeout"],
     )
+    _configure_java_runtime_for_workspace(parsed["workdir"])
 
     try:
         runner = _create_runner(parsed)
@@ -589,6 +818,7 @@ async def handle_execute_stream(request: web.Request) -> web.StreamResponse:
         parsed["workdir"],
         parsed["timeout"],
     )
+    _configure_java_runtime_for_workspace(parsed["workdir"])
 
     try:
         runner = _create_runner(parsed)

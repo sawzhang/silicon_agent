@@ -139,6 +139,147 @@ _refresh_tool_catalog()
 validate_role_tools_or_raise(fail_on_unknown=True)
 
 
+def _is_gemini_model(model: str | None) -> bool:
+    return "gemini" in ((model or "").lower())
+
+
+def _sanitize_reasoning_kwargs_for_model(
+    model: str | None,
+    kwargs: dict[str, Any],
+) -> dict[str, Any]:
+    """Gemini compatibility: remove unsupported reasoning_split field."""
+    if not _is_gemini_model(model):
+        return kwargs
+
+    extra_body = kwargs.get("extra_body")
+    if not isinstance(extra_body, dict) or "reasoning_split" not in extra_body:
+        return kwargs
+
+    sanitized_kwargs = dict(kwargs)
+    sanitized_extra = dict(extra_body)
+    sanitized_extra.pop("reasoning_split", None)
+    if sanitized_extra:
+        sanitized_kwargs["extra_body"] = sanitized_extra
+    else:
+        sanitized_kwargs.pop("extra_body", None)
+    return sanitized_kwargs
+
+
+def _to_jsonable(value: Any) -> Any:
+    if hasattr(value, "model_dump"):
+        try:
+            return value.model_dump(mode="json")
+        except Exception:
+            return value.model_dump()
+    if hasattr(value, "to_dict"):
+        return value.to_dict()
+    return value
+
+
+def _extract_gemini_thought_signatures_from_response(response_obj: Any) -> dict[str, str]:
+    """Extract OpenAI-compat thought signatures keyed by tool_call id."""
+    data = _to_jsonable(response_obj)
+    if not isinstance(data, dict):
+        return {}
+
+    signatures: dict[str, str] = {}
+    choices = data.get("choices")
+    if not isinstance(choices, list):
+        return signatures
+
+    for choice in choices:
+        if not isinstance(choice, dict):
+            continue
+        message = choice.get("message")
+        if not isinstance(message, dict):
+            continue
+        tool_calls = message.get("tool_calls")
+        if not isinstance(tool_calls, list):
+            continue
+        for tool_call in tool_calls:
+            if not isinstance(tool_call, dict):
+                continue
+            tool_call_id = str(tool_call.get("id") or "").strip()
+            if not tool_call_id:
+                continue
+            extra = tool_call.get("extra_content")
+            if not isinstance(extra, dict):
+                continue
+            google = extra.get("google")
+            if not isinstance(google, dict):
+                continue
+            thought_signature = google.get("thought_signature")
+            if isinstance(thought_signature, str) and thought_signature:
+                signatures[tool_call_id] = thought_signature
+    return signatures
+
+
+def _inject_gemini_thought_signatures_into_messages(
+    kwargs: dict[str, Any],
+    signatures: dict[str, str],
+) -> dict[str, Any]:
+    """Inject required thought signatures back into assistant/tool_call history."""
+    messages = kwargs.get("messages")
+    if not isinstance(messages, list) or not signatures:
+        return kwargs
+
+    changed = False
+    updated_messages: list[Any] = []
+    for message in messages:
+        if not isinstance(message, dict):
+            updated_messages.append(message)
+            continue
+
+        role = str(message.get("role") or "")
+        tool_calls = message.get("tool_calls")
+        if role not in ("assistant", "model") or not isinstance(tool_calls, list):
+            updated_messages.append(message)
+            continue
+
+        updated_tool_calls: list[Any] = []
+        message_changed = False
+        for tool_call in tool_calls:
+            if not isinstance(tool_call, dict):
+                updated_tool_calls.append(tool_call)
+                continue
+            tool_call_id = str(tool_call.get("id") or "").strip()
+            expected_signature = signatures.get(tool_call_id)
+            if not expected_signature:
+                updated_tool_calls.append(tool_call)
+                continue
+
+            extra = tool_call.get("extra_content")
+            if isinstance(extra, dict) and isinstance(extra.get("google"), dict):
+                existing_signature = extra["google"].get("thought_signature")
+                if isinstance(existing_signature, str) and existing_signature:
+                    updated_tool_calls.append(tool_call)
+                    continue
+
+            updated_tool_call = dict(tool_call)
+            updated_extra = dict(updated_tool_call.get("extra_content") or {})
+            updated_google = dict(updated_extra.get("google") or {})
+            updated_google["thought_signature"] = expected_signature
+            updated_extra["google"] = updated_google
+            updated_tool_call["extra_content"] = updated_extra
+            updated_tool_calls.append(updated_tool_call)
+            message_changed = True
+            changed = True
+
+        if message_changed:
+            updated_message = dict(message)
+            updated_message["tool_calls"] = updated_tool_calls
+            updated_messages.append(updated_message)
+        else:
+            updated_messages.append(message)
+
+    if not changed:
+        return kwargs
+
+    updated_kwargs = dict(kwargs)
+    updated_kwargs["messages"] = updated_messages
+    return updated_kwargs
+
+
 def _build_runtime_signature(
     *,
     model: str | None,
@@ -244,6 +385,7 @@ class SandboxedAgentRunner(ToolExecutionPolicyMixin, _BaseRunner):  # type: igno
         self.default_cwd = default_cwd
         self.allowed_tools = allowed_tools or _ALL_TOOLS
         self._tool_argument_hints = _TOOL_ARGUMENT_HINTS
+        self._gemini_tool_call_signatures: dict[str, str] = {}
 
     def _resolve_workspace_path(self, path: str) -> tuple[str, str | None]:
         """Resolve a possibly-relative path into task workspace safely."""
@@ -279,6 +421,43 @@ class SandboxedAgentRunner(ToolExecutionPolicyMixin, _BaseRunner):  # type: igno
         tools = [t for t in tools
                  if t["function"]["name"] in self.allowed_tools]
         return tools
+
+    async def _call_llm(self, messages):
+        """Keep reasoning enabled while stripping provider-incompatible payload fields."""
+        client = getattr(self, "client", None)
+        completions = (
+            getattr(getattr(getattr(client, "chat", None), "completions", None), "create", None)
+            if client is not None
+            else None
+        )
+        if completions is None:
+            return await super()._call_llm(messages)
+
+        effective_model = getattr(self.config, "model", None)
+        original_create = completions
+
+        async def _wrapped_create(*args, **kwargs):
+            safe_kwargs = _sanitize_reasoning_kwargs_for_model(
+                effective_model,
+                dict(kwargs),
+            )
+            if _is_gemini_model(effective_model):
+                safe_kwargs = _inject_gemini_thought_signatures_into_messages(
+                    safe_kwargs,
+                    self._gemini_tool_call_signatures,
+                )
+            response = await original_create(*args, **safe_kwargs)
+            if _is_gemini_model(effective_model):
+                self._gemini_tool_call_signatures.update(
+                    _extract_gemini_thought_signatures_from_response(response)
+                )
+            return response
+
+        self.client.chat.completions.create = _wrapped_create
+        try:
+            return await super()._call_llm(messages)
+        finally:
+            self.client.chat.completions.create = original_create
 
     async def _execute_tool_base(self, tool_call, on_output=None) -> str:
         return await super()._execute_tool(tool_call, on_output)
@@ -381,12 +560,6 @@ def _create_runner(
         # Keep runtime override handling consistent with model override.
         base.config.max_tokens = max_tokens
 
-    # Disable MiniMax-specific reasoning_split for non-MiniMax models (e.g. Gemini).
-    # SkillKit defaults enable_reasoning=True which injects extra_body={"reasoning_split": True}
-    # into every API call — Gemini returns HTTP 400 for this unrecognized field.
-    effective_model = (model or getattr(base.config, "model", "") or "").lower()
-    if "minimax" not in effective_model:
-        base.config.enable_reasoning = False
     runner = SandboxedAgentRunner(
         engine=base.engine,
         config=base.config,

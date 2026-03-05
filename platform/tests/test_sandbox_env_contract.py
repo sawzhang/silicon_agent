@@ -1,4 +1,5 @@
 from app.worker.sandbox import DockerSandboxBackend
+from pathlib import Path
 
 
 def _extract_env_vars_from_docker_cmd(tokens: list[str]) -> dict[str, str]:
@@ -87,3 +88,14 @@ def test_build_docker_run_cmd_disables_raw_model_dump_when_config_off(monkeypatc
     assert env["SANDBOX_DUMP_MODEL_API_RESPONSE"] == "false"
     assert "SANDBOX_MODEL_API_RAW_LOG_PATH" not in env
     assert not any(mount.endswith("dst=/model_api_logs") for mount in mounts)
+
+
+def test_coding_sandbox_image_provides_java_toolchain():
+    dockerfile_path = Path(__file__).resolve().parents[1] / "sandbox" / "Dockerfile.coding"
+    content = dockerfile_path.read_text(encoding="utf-8")
+
+    assert "FROM eclipse-temurin:8-jdk AS jdk8" in content
+    assert "FROM eclipse-temurin:17-jdk AS jdk17" in content
+    assert "JAVA8_HOME" in content
+    assert "JAVA17_HOME" in content
+    assert "ENV JAVA_HOME=/opt/jdk17" in content
