@@ -12,7 +12,7 @@ from app.worker.executor import infer_tool_status
 def _make_runner(workspace: Path) -> SandboxedAgentRunner:
     runner = object.__new__(SandboxedAgentRunner)
     runner.default_cwd = str(workspace)
-    runner.allowed_tools = {"read", "write", "execute", "execute_script", "skill"}
+    runner.allowed_tools = {"read", "write", "edit", "execute", "execute_script", "skill"}
     return runner
 
 
@@ -27,6 +27,31 @@ def test_resolve_workspace_path_for_relative_read_write(tmp_path: Path):
     resolved_abs, error_abs = runner._resolve_workspace_path(abs_path)
     assert error_abs is None
     assert resolved_abs == abs_path
+
+
+@pytest.mark.asyncio
+async def test_edit_relative_path_resolves_in_workspace(tmp_path: Path):
+    runner = _make_runner(tmp_path)
+
+    captured: dict[str, object] = {}
+
+    async def _fake_execute_tool_base(tool_call, on_output=None):
+        captured["tool_call"] = tool_call
+        return "ok"
+
+    runner._execute_tool_base = _fake_execute_tool_base  # type: ignore[method-assign]
+    result = await runner._execute_tool(
+        {
+            "name": "edit",
+            "arguments": json.dumps({"path": "src/a.py", "old_str": "a", "new_str": "b"}),
+        }
+    )
+
+    assert result == "ok"
+    tool_call = captured["tool_call"]
+    assert isinstance(tool_call, dict)
+    args = json.loads(str(tool_call["arguments"]))
+    assert args["path"] == str((tmp_path / "src" / "a.py").resolve())
 
 
 def test_resolve_workspace_path_blocks_escape(tmp_path: Path):
@@ -51,6 +76,21 @@ async def test_read_directory_returns_listing(tmp_path: Path):
     assert "Directory listing for docs:" in result
     assert "- api.md" in result
     assert "- usage.md" in result
+
+
+@pytest.mark.asyncio
+async def test_edit_blocks_workspace_escape(tmp_path: Path):
+    runner = _make_runner(tmp_path)
+    result = await runner._execute_tool(
+        {
+            "name": "edit",
+            "arguments": json.dumps(
+                {"path": "../outside.txt", "old_str": "a", "new_str": "b"}
+            ),
+        }
+    )
+
+    assert "escapes workspace" in result
 
 
 @pytest.mark.asyncio

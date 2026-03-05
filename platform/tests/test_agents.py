@@ -14,11 +14,11 @@ def test_role_tools_all_valid():
 
 
 def test_coding_has_core_tools():
-    assert {"read", "write", "execute", "execute_script", "skill"}.issubset(ROLE_TOOLS["coding"])
+    assert {"read", "write", "edit", "execute", "execute_script", "skill"}.issubset(ROLE_TOOLS["coding"])
 
 
 def test_test_has_core_tools():
-    assert {"read", "write", "execute", "execute_script", "skill"}.issubset(ROLE_TOOLS["test"])
+    assert {"read", "write", "edit", "execute", "execute_script", "skill"}.issubset(ROLE_TOOLS["test"])
 
 
 def test_spec_no_execute():
@@ -27,6 +27,7 @@ def test_spec_no_execute():
     assert "execute_script" not in tools
     assert "read" in tools
     assert "write" in tools
+    assert "edit" in tools
 
 
 def test_review_readonly():
@@ -42,6 +43,7 @@ def test_doc_no_execute():
     assert "execute" not in tools
     assert "execute_script" not in tools
     assert "write" in tools
+    assert "edit" in tools
 
 
 def test_orchestrator_no_write():

@@ -16,6 +16,7 @@ from typing import Any
 DEFAULT_FALLBACK_CORE_TOOLS: set[str] = {
     "read",
     "write",
+    "edit",
     "execute",
     "execute_script",
     "skill",
@@ -26,6 +27,7 @@ DEFAULT_FALLBACK_TOOL_ARGUMENT_HINTS: dict[str, str] = {
     "execute_script": '{"script":"<shell script>","cwd":"<optional path>"}',
     "read": '{"path":"<file path>"}',
     "write": '{"path":"<file path>","content":"<file content>"}',
+    "edit": '{"path":"<file path>","old_str":"<exact text>","new_str":"<replacement text>"}',
     "skill": '{"name":"<skill name>","arguments":"<optional string>"}',
 }
 

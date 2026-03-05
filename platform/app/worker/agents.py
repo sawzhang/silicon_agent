@@ -36,15 +36,15 @@ _MAX_TURNS: dict[str, int] = {
 }
 _DEFAULT_MAX_TURNS = 5
 
-# Per-role tool whitelist (SkillKit built-in: read, write, execute, execute_script, skill)
+# Per-role tool whitelist (SkillKit built-in: read, write, edit, execute, execute_script, skill)
 ROLE_TOOLS: dict[str, set[str]] = {
     "orchestrator": {"read", "execute", "skill"},
-    "spec":         {"read", "write", "skill"},
-    "coding":       {"read", "write", "execute", "execute_script", "skill"},
-    "test":         {"read", "write", "execute", "execute_script", "skill"},
+    "spec":         {"read", "write", "edit", "skill"},
+    "coding":       {"read", "write", "edit", "execute", "execute_script", "skill"},
+    "test":         {"read", "write", "edit", "execute", "execute_script", "skill"},
     "review":       {"read", "execute", "skill"},
     "smoke":        {"read", "execute", "skill"},
-    "doc":          {"read", "write", "skill"},
+    "doc":          {"read", "write", "edit", "skill"},
 }
 _ALL_TOOLS: set[str] = set()
 _TOOL_ARGUMENT_HINTS: dict[str, str] = {}
@@ -472,7 +472,7 @@ class SandboxedAgentRunner(ToolExecutionPolicyMixin, _BaseRunner):  # type: igno
         args: dict[str, Any],
         tool_call: dict[str, Any],
     ) -> tuple[dict[str, Any], dict[str, Any], str | None, str | None]:
-        if not self.default_cwd or tool_name not in ("read", "write"):
+        if not self.default_cwd or tool_name not in ("read", "write", "edit"):
             return tool_call, args, None, None
 
         path = str(args.get("path") or "")

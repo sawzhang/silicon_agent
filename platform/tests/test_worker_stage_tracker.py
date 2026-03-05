@@ -54,6 +54,7 @@ class _PipelineStub:
         ("execute_script", {}, "execute_script"),
         ("read", {"path": "README.md"}, "read README.md"),
         ("write", {"path": "a.txt"}, "write a.txt"),
+        ("edit", {"path": "a.txt"}, "edit a.txt"),
         ("skill", {"name": "lint"}, "skill:lint"),
         ("skill", {}, "skill"),
         ("unknown", {}, "unknown"),

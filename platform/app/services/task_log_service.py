@@ -44,6 +44,9 @@ class TaskLogService:
         if tool_name == "write":
             path = str(command_args.get("path") or "").strip()
             return f"write {path}".strip()
+        if tool_name == "edit":
+            path = str(command_args.get("path") or "").strip()
+            return f"edit {path}".strip()
         if tool_name == "skill":
             name = str(command_args.get("name") or "").strip()
             return f"skill:{name}" if name else "skill"
