@@ -20,6 +20,7 @@ def _make_stage(**kw) -> SimpleNamespace:
         agent_role="coding",
         error_message=None,
         output_summary=None,
+        output_structured=None,
     )
     defaults.update(kw)
     return SimpleNamespace(**defaults)
@@ -801,6 +802,225 @@ async def test_finalize_task_resources_worktree_commit_and_pr(monkeypatch):
     )
     assert result is True
     assert task.pr_url == "https://github.com/org/repo/pull/1"
+
+
+@pytest.mark.asyncio
+async def test_finalize_task_resources_pr_body_includes_signoff_structured_summary(monkeypatch):
+    """PR body should fall back to structured summary when raw signoff body is missing."""
+    monkeypatch.setattr(engine.settings, "MEMORY_ENABLED", False)
+    monkeypatch.setattr(engine.settings, "SKILL_FEEDBACK_ENABLED", False)
+    monkeypatch.setattr(engine, "_emit_system_log", AsyncMock(return_value="log-id"))
+    monkeypatch.setattr(engine, "_close_started_system_log", AsyncMock())
+    monkeypatch.setattr(engine, "_cleanup_runtime_resources", AsyncMock())
+
+    captured: dict[str, str] = {}
+
+    class FakeWorktreeMgr:
+        async def commit_and_push(self, **kw):
+            return "feat/my-branch"
+
+        async def create_pr(self, **kw):
+            captured.update(kw)
+            return "https://github.com/org/repo/pull/1"
+
+    task = _make_task(
+        project=SimpleNamespace(repo_url="https://github.com/org/repo.git", branch="main"),
+        project_id="proj-1",
+        branch_name=None,
+        pr_url=None,
+        target_branch=None,
+        stages=[
+            _make_stage(
+                stage_name="signoff",
+                output_structured={"summary": "签收通过，建议创建 PR"},
+            )
+        ],
+    )
+    session = SimpleNamespace(commit=AsyncMock())
+    result = await engine._finalize_task_resources(
+        session, task, [], None,
+        FakeWorktreeMgr(), "/wt/path", "/wt/path", "worktree", "feat/main",
+        None, None,
+    )
+
+    assert result is True
+    assert captured["body"] == (
+        "Automated PR for task: Test Task\n\n"
+        "Task ID: task-1\n\n"
+        "## Signoff\n"
+        "签收通过，建议创建 PR"
+    )
+
+
+@pytest.mark.asyncio
+async def test_finalize_task_resources_pr_body_falls_back_to_signoff_output_summary(monkeypatch):
+    """PR body should include the full raw signoff body when available."""
+    monkeypatch.setattr(engine.settings, "MEMORY_ENABLED", False)
+    monkeypatch.setattr(engine.settings, "SKILL_FEEDBACK_ENABLED", False)
+    monkeypatch.setattr(engine, "_emit_system_log", AsyncMock(return_value="log-id"))
+    monkeypatch.setattr(engine, "_close_started_system_log", AsyncMock())
+    monkeypatch.setattr(engine, "_cleanup_runtime_resources", AsyncMock())
+    monkeypatch.setattr(engine, "commit_and_push_workspace", AsyncMock(return_value="feat/branch"))
+
+    captured: dict[str, str] = {}
+
+    async def _fake_create_pr_for_workspace(**kw):
+        captured.update(kw)
+        return "https://pr/123"
+
+    monkeypatch.setattr(engine, "create_pr_for_workspace", _fake_create_pr_for_workspace)
+
+    task = _make_task(
+        project=SimpleNamespace(repo_url="https://github.com/org/repo.git", branch="main"),
+        project_id="proj-1",
+        branch_name=None,
+        pr_url=None,
+        target_branch=None,
+        stages=[_make_stage(stage_name="signoff", output_summary="签收结论：可以合并")],
+    )
+    session = SimpleNamespace(commit=AsyncMock())
+    result = await engine._finalize_task_resources(
+        session, task, [], None,
+        None, None, "/tmp/workspace", "tmp_cloned", "feat/branch",
+        None, None,
+    )
+
+    assert result is True
+    assert captured["body"] == (
+        "Automated PR for task: Test Task\n\n"
+        "Task ID: task-1\n\n"
+        "## Signoff\n"
+        "签收结论：可以合并"
+    )
+
+
+@pytest.mark.asyncio
+async def test_finalize_task_resources_pr_body_prefers_signoff_conclusion_over_generic_summary(
+    monkeypatch,
+):
+    """PR body should keep the signoff report while dropping the fixed Signoff Summary tail."""
+    monkeypatch.setattr(engine.settings, "MEMORY_ENABLED", False)
+    monkeypatch.setattr(engine.settings, "SKILL_FEEDBACK_ENABLED", False)
+    monkeypatch.setattr(engine, "_emit_system_log", AsyncMock(return_value="log-id"))
+    monkeypatch.setattr(engine, "_close_started_system_log", AsyncMock())
+    monkeypatch.setattr(engine, "_cleanup_runtime_resources", AsyncMock())
+
+    captured: dict[str, str] = {}
+
+    class FakeWorktreeMgr:
+        async def commit_and_push(self, **kw):
+            return "feat/my-branch"
+
+        async def create_pr(self, **kw):
+            captured.update(kw)
+            return "https://github.com/org/repo/pull/1"
+
+    task = _make_task(
+        project=SimpleNamespace(repo_url="https://github.com/org/repo.git", branch="main"),
+        project_id="proj-1",
+        branch_name=None,
+        pr_url=None,
+        target_branch=None,
+        stages=[
+            _make_stage(
+                stage_name="signoff",
+                output_structured={"summary": "基于对所有产出物的详细检查，我现在生成最终签收报告："},
+                output_summary=(
+                    "基于对所有产出物的详细检查，我现在生成最终签收报告：\n\n"
+                    "---\n\n"
+                    "## 质量签收报告\n\n"
+                    "### 阶段：signoff (最终签收)\n"
+                    "### 评分：10/10\n"
+                    "### 决策：✅ **通过 (PASS)**\n\n"
+                    "---\n\n"
+                    "### 1. 各阶段产出物完整性检查\n\n"
+                    "| 文件 | 状态 | 说明 |\n"
+                    "|------|------|------|\n"
+                    "| `src/utils/toKebabCase.js` | ✅ 存在 | 核心工具函数实现 |\n\n"
+                    "---\n\n"
+                    "### 2. 需求满足度评估\n\n"
+                    "| 需求项 | 状态 | 验证结果 |\n"
+                    "|--------|------|----------|\n"
+                    "| 新增 toKebabCase.js | ✅ | 文件存在，导出规范 |\n\n"
+                    "---\n\n"
+                    "### 3. 质量指标总结\n\n"
+                    "| 指标 | 标准 | 实际 | 状态 |\n"
+                    "|------|------|------|------|\n"
+                    "| 测试覆盖率 | ≥80% | **100%** | ✅ |\n"
+                    "| 测试通过率 | 100% | 89/89 | ✅ |\n\n"
+                    "---\n\n"
+                    "### 4. 遗留问题清单\n\n"
+                    "| 问题 | 严重程度 | 说明 |\n"
+                    "|------|----------|------|\n"
+                    "| npm test 无法执行 | **无阻塞** | 环境权限问题，非代码问题。 |\n\n"
+                    "---\n\n"
+                    "### 5. 最终签收结论\n\n"
+                    "**✅ 所有验收标准均已达成，任务通过签收！**\n\n"
+                    "#### 优秀表现：\n"
+                    "1. **测试覆盖全面**：覆盖核心功能和边界条件\n\n"
+                    "#### 签收意见：\n"
+                    "建议合并。\n\n"
+                    "---\n\n"
+                    "**签收人**: Project Orchestrator Agent  \n"
+                    "**签收时间**: 2026年3月6日\n\n"
+                    "## Signoff Summary\n"
+                    "- [SUCCESS] skill:quality-signoff\n"
+                    "  结果: # 质量签收评估"
+                ),
+            )
+        ],
+    )
+    session = SimpleNamespace(commit=AsyncMock())
+    result = await engine._finalize_task_resources(
+        session, task, [], None,
+        FakeWorktreeMgr(), "/wt/path", "/wt/path", "worktree", "feat/main",
+        None, None,
+    )
+
+    assert result is True
+    assert captured["body"] == (
+        "Automated PR for task: Test Task\n\n"
+        "Task ID: task-1\n\n"
+        "## Signoff\n"
+        "基于对所有产出物的详细检查，我现在生成最终签收报告：\n\n"
+        "---\n\n"
+        "## 质量签收报告\n\n"
+        "### 阶段：signoff (最终签收)\n"
+        "### 评分：10/10\n"
+        "### 决策：✅ **通过 (PASS)**\n\n"
+        "---\n\n"
+        "### 1. 各阶段产出物完整性检查\n\n"
+        "| 文件 | 状态 | 说明 |\n"
+        "|------|------|------|\n"
+        "| `src/utils/toKebabCase.js` | ✅ 存在 | 核心工具函数实现 |\n\n"
+        "---\n\n"
+        "### 2. 需求满足度评估\n\n"
+        "| 需求项 | 状态 | 验证结果 |\n"
+        "|--------|------|----------|\n"
+        "| 新增 toKebabCase.js | ✅ | 文件存在，导出规范 |\n\n"
+        "---\n\n"
+        "### 3. 质量指标总结\n\n"
+        "| 指标 | 标准 | 实际 | 状态 |\n"
+        "|------|------|------|------|\n"
+        "| 测试覆盖率 | ≥80% | **100%** | ✅ |\n"
+        "| 测试通过率 | 100% | 89/89 | ✅ |\n\n"
+        "---\n\n"
+        "### 4. 遗留问题清单\n\n"
+        "| 问题 | 严重程度 | 说明 |\n"
+        "|------|----------|------|\n"
+        "| npm test 无法执行 | **无阻塞** | 环境权限问题，非代码问题。 |\n\n"
+        "---\n\n"
+        "### 5. 最终签收结论\n\n"
+        "**✅ 所有验收标准均已达成，任务通过签收！**\n\n"
+        "#### 优秀表现：\n"
+        "1. **测试覆盖全面**：覆盖核心功能和边界条件\n\n"
+        "#### 签收意见：\n"
+        "建议合并。\n\n"
+        "---\n\n"
+        "**签收人**: Project Orchestrator Agent  \n"
+        "**签收时间**: 2026年3月6日"
+    )
+    assert "## Signoff Summary" not in captured["body"]
 
 
 @pytest.mark.asyncio

@@ -122,6 +122,72 @@ def _resolve_sandbox_workspace(
     return str(Path(settings.SANDBOX_WORKSPACE_BASE_DIR) / task_id), "fallback"
 
 
+def _is_signoff_stage_name(stage_name: str) -> bool:
+    lowered = (stage_name or "").lower()
+    return lowered == "signoff" or "signoff" in lowered or "签收" in (stage_name or "")
+
+
+def _strip_signoff_summary_tail(text: str) -> str:
+    value = (text or "").strip()
+    if not value:
+        return ""
+    for marker in (
+        "\n\n## Signoff Summary\n",
+        "\n## Signoff Summary\n",
+        "## Signoff Summary\n",
+    ):
+        head, sep, _tail = value.partition(marker)
+        if sep:
+            return head.rstrip()
+    return value
+
+
+def _extract_signoff_summary(
+    task: TaskModel,
+    prior_outputs: List[Dict[str, str]],
+) -> str:
+    """Extract the signoff body for downstream PR creation."""
+    stages = getattr(task, "stages", None) or []
+    for stage in reversed(stages):
+        if not _is_signoff_stage_name(getattr(stage, "stage_name", "")):
+            continue
+        structured = getattr(stage, "output_structured", None)
+        raw_summary = str(getattr(stage, "output_summary", "") or "").strip()
+        if raw_summary:
+            return _strip_signoff_summary_tail(raw_summary)
+        if isinstance(structured, dict):
+            summary = str(structured.get("summary") or "").strip()
+            if summary:
+                return summary
+
+    for item in reversed(prior_outputs):
+        if not _is_signoff_stage_name(str(item.get("stage") or "")):
+            continue
+        summary = str(item.get("output") or "").strip()
+        if summary:
+            return _strip_signoff_summary_tail(summary)
+    return ""
+
+
+def _build_pr_body(task: TaskModel, prior_outputs: List[Dict[str, str]]) -> str:
+    """Build the PR body from task metadata and signoff conclusion."""
+    parts = [
+        f"Automated PR for task: {task.title}",
+        "",
+        f"Task ID: {task.id}",
+    ]
+
+    issue_num = getattr(task, "github_issue_number", None)
+    if issue_num:
+        parts.extend(["", f"Fixes #{issue_num}"])
+
+    signoff_summary = _extract_signoff_summary(task, prior_outputs)
+    if signoff_summary:
+        parts.extend(["", "## Signoff", signoff_summary])
+
+    return "\n".join(parts)
+
+
 async def start_worker() -> None:
     """Start the background worker polling loop."""
     global _running, _task
@@ -880,10 +946,7 @@ async def _finalize_task_resources(
                     correlation_id=pr_corr,
                     response_body={"branch": branch},
                 )
-                pr_body = f"Automated PR for task: {task.title}\n\nTask ID: {task.id}"
-                issue_num = getattr(task, "github_issue_number", None)
-                if issue_num:
-                    pr_body += f"\n\nFixes #{issue_num}"
+                pr_body = _build_pr_body(task, prior_outputs)
                 if worktree_mgr and worktree_path:
                     pr_url = await worktree_mgr.create_pr(
                         task_id=str(task.id),
