@@ -8,6 +8,7 @@ from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+import pytest_asyncio
 
 # ---------------------------------------------------------------------------
 # Mock boxlite SDK AND skillkit.runtime.boxlite so they can be imported
@@ -45,6 +46,16 @@ if "skillkit.sandbox.runner" not in sys.modules:
 from app.worker.sandbox_boxlite import BoxLiteSandboxBackend, _register_event_bridge  # noqa: E402
 
 
+@pytest_asyncio.fixture
+async def backend() -> BoxLiteSandboxBackend:
+    """Create a backend instance and always destroy any mocked runtimes after the test."""
+    instance = BoxLiteSandboxBackend()
+    try:
+        yield instance
+    finally:
+        await instance.destroy_all()
+
+
 # ---------------------------------------------------------------------------
 # Create
 # ---------------------------------------------------------------------------
@@ -52,8 +63,7 @@ from app.worker.sandbox_boxlite import BoxLiteSandboxBackend, _register_event_br
 
 class TestBoxLiteBackendCreate:
     @pytest.mark.asyncio
-    async def test_workspace_not_found(self) -> None:
-        backend = BoxLiteSandboxBackend()
+    async def test_workspace_not_found(self, backend: BoxLiteSandboxBackend) -> None:
         result = await backend.create(
             "task-1",
             workspace="/nonexistent/path",
@@ -62,9 +72,8 @@ class TestBoxLiteBackendCreate:
         assert result.info is None
 
     @pytest.mark.asyncio
-    async def test_successful_create(self, tmp_path: Path) -> None:
+    async def test_successful_create(self, tmp_path: Path, backend: BoxLiteSandboxBackend) -> None:
         workspace = str(tmp_path)
-        backend = BoxLiteSandboxBackend()
 
         mock_runtime = AsyncMock()
         mock_runtime.start = AsyncMock()
@@ -85,9 +94,12 @@ class TestBoxLiteBackendCreate:
         mock_runtime.start.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_unhealthy_box_cleaned_up(self, tmp_path: Path) -> None:
+    async def test_unhealthy_box_cleaned_up(
+        self,
+        tmp_path: Path,
+        backend: BoxLiteSandboxBackend,
+    ) -> None:
         workspace = str(tmp_path)
-        backend = BoxLiteSandboxBackend()
 
         mock_runtime = AsyncMock()
         mock_runtime.start = AsyncMock()
@@ -104,9 +116,12 @@ class TestBoxLiteBackendCreate:
         mock_runtime.destroy.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_start_failure_returns_error(self, tmp_path: Path) -> None:
+    async def test_start_failure_returns_error(
+        self,
+        tmp_path: Path,
+        backend: BoxLiteSandboxBackend,
+    ) -> None:
         workspace = str(tmp_path)
-        backend = BoxLiteSandboxBackend()
 
         mock_runtime = AsyncMock()
         mock_runtime.start = AsyncMock(side_effect=RuntimeError("VM failed to start"))
@@ -130,9 +145,12 @@ class TestBoxLiteBackendCreateWithRole:
     """Tests for create() with role, cpus, memory_mib, mount_mode parameters."""
 
     @pytest.mark.asyncio
-    async def test_create_with_role_uses_composite_key(self, tmp_path: Path) -> None:
+    async def test_create_with_role_uses_composite_key(
+        self,
+        tmp_path: Path,
+        backend: BoxLiteSandboxBackend,
+    ) -> None:
         workspace = str(tmp_path)
-        backend = BoxLiteSandboxBackend()
 
         mock_runtime = AsyncMock()
         mock_runtime.start = AsyncMock()
@@ -154,9 +172,12 @@ class TestBoxLiteBackendCreateWithRole:
         assert "coding:task-1" in backend._boxes
 
     @pytest.mark.asyncio
-    async def test_create_with_custom_resources(self, tmp_path: Path) -> None:
+    async def test_create_with_custom_resources(
+        self,
+        tmp_path: Path,
+        backend: BoxLiteSandboxBackend,
+    ) -> None:
         workspace = str(tmp_path)
-        backend = BoxLiteSandboxBackend()
 
         mock_runtime = AsyncMock()
         mock_runtime.start = AsyncMock()
@@ -187,9 +208,12 @@ class TestBoxLiteBackendCreateWithRole:
         assert captured_args["volumes"] == [(workspace, "/workspace", "ro")]
 
     @pytest.mark.asyncio
-    async def test_create_without_role_uses_default_key(self, tmp_path: Path) -> None:
+    async def test_create_without_role_uses_default_key(
+        self,
+        tmp_path: Path,
+        backend: BoxLiteSandboxBackend,
+    ) -> None:
         workspace = str(tmp_path)
-        backend = BoxLiteSandboxBackend()
 
         mock_runtime = AsyncMock()
         mock_runtime.start = AsyncMock()
@@ -206,9 +230,12 @@ class TestBoxLiteBackendCreateWithRole:
         assert "default:task-3" in backend._boxes
 
     @pytest.mark.asyncio
-    async def test_different_roles_same_task_separate_vms(self, tmp_path: Path) -> None:
+    async def test_different_roles_same_task_separate_vms(
+        self,
+        tmp_path: Path,
+        backend: BoxLiteSandboxBackend,
+    ) -> None:
         workspace = str(tmp_path)
-        backend = BoxLiteSandboxBackend()
 
         mock_runtime_1 = AsyncMock()
         mock_runtime_1.start = AsyncMock()
@@ -236,8 +263,10 @@ class TestBoxLiteBackendCreateWithRole:
 
 class TestBoxLiteBackendDestroy:
     @pytest.mark.asyncio
-    async def test_destroy_removes_all_role_runtimes_for_task(self) -> None:
-        backend = BoxLiteSandboxBackend()
+    async def test_destroy_removes_all_role_runtimes_for_task(
+        self,
+        backend: BoxLiteSandboxBackend,
+    ) -> None:
         rt_coding = AsyncMock()
         rt_coding.destroy = AsyncMock()
         rt_test = AsyncMock()
@@ -257,13 +286,11 @@ class TestBoxLiteBackendDestroy:
         assert "coding:task-2" in backend._boxes
 
     @pytest.mark.asyncio
-    async def test_destroy_nonexistent_task_is_noop(self) -> None:
-        backend = BoxLiteSandboxBackend()
+    async def test_destroy_nonexistent_task_is_noop(self, backend: BoxLiteSandboxBackend) -> None:
         await backend.destroy("nonexistent")  # Should not raise
 
     @pytest.mark.asyncio
-    async def test_destroy_all(self) -> None:
-        backend = BoxLiteSandboxBackend()
+    async def test_destroy_all(self, backend: BoxLiteSandboxBackend) -> None:
         rt1 = AsyncMock()
         rt1.destroy = AsyncMock()
         rt2 = AsyncMock()

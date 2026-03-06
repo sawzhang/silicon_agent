@@ -94,3 +94,25 @@ async def client() -> AsyncGenerator[AsyncClient, None]:
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as ac:
         yield ac
+
+
+@pytest_asyncio.fixture(autouse=True)
+async def reset_sandbox_runtime_state() -> AsyncGenerator[None, None]:
+    """Keep sandbox-related module state isolated between tests.
+
+    BoxLite and Docker backends both use module-level semaphores, and the
+    sandbox manager itself is a module-level singleton. Resetting them here
+    prevents one test's mocked runtime lifecycle from leaking into another.
+    """
+    import app.worker.sandbox as sandbox_mod  # noqa: PLC0415
+    import app.worker.sandbox_boxlite as sandbox_boxlite_mod  # noqa: PLC0415
+
+    await sandbox_mod.close_sandbox_manager()
+    sandbox_mod._docker_concurrency_sem = None
+    sandbox_boxlite_mod._concurrency_sem = None
+
+    yield
+
+    await sandbox_mod.close_sandbox_manager()
+    sandbox_mod._docker_concurrency_sem = None
+    sandbox_boxlite_mod._concurrency_sem = None
