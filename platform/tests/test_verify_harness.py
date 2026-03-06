@@ -67,6 +67,17 @@ def test_print_contracts_target_returns_prompt_template_contract_commands() -> N
     assert "test_template_contracts.py" in payload["commands"][0]["cmd"]
 
 
+def test_print_worker_target_includes_boxlite_and_workflow_regressions() -> None:
+    result = _run_script("--target", "worker", "--format", "json")
+
+    assert result.returncode == 0
+    payload = json.loads(result.stdout)
+    assert payload["target"] == "worker"
+    worker_tests_cmd = payload["commands"][1]["cmd"]
+    assert "tests/test_sandbox_boxlite.py" in worker_tests_cmd
+    assert "tests/test_e2e_workflow.py" in worker_tests_cmd
+
+
 def test_unknown_target_returns_non_zero_exit_code() -> None:
     result = _run_script("--target", "unknown")
 

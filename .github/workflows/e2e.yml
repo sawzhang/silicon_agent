@@ -47,7 +47,9 @@ jobs:
           exit 1
 
       - name: Run deterministic control-plane regression
+        shell: bash
         run: |
+          set -o pipefail
           echo "## E2E Smoke Test Results" >> $GITHUB_STEP_SUMMARY
           python3 scripts/e2e_control_plane.py --base-url http://localhost:8000 --format json | tee -a $GITHUB_STEP_SUMMARY
 

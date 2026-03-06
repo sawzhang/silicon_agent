@@ -14,11 +14,11 @@ except ModuleNotFoundError:  # pragma: no cover - CLI entrypoint path
 
 ROOT = Path(__file__).resolve().parents[2]
 TARGET_PRIORITY = ["contracts", "worker", "api-core", "frontend-logs", "frontend", "core"]
-IGNORED_PREFIXES = (
-    "platform/.venv/",
-    "web/coverage/",
-    "web/dist/",
-    "web/node_modules/",
+IGNORED_PATHS = (
+    "platform/.venv",
+    "web/coverage",
+    "web/dist",
+    "web/node_modules",
 )
 CORE_FILES = {
     "Makefile",
@@ -76,6 +76,10 @@ def _matches(path: str, exact: set[str], prefixes: tuple[str, ...]) -> bool:
     return path in exact or any(path.startswith(prefix) for prefix in prefixes)
 
 
+def _is_ignored(path: str) -> bool:
+    return any(path == ignored or path.startswith(f"{ignored}/") for ignored in IGNORED_PATHS)
+
+
 def _target_for_path(path: str) -> str | None:
     if _matches(path, CORE_FILES, ()):
         return "core"
@@ -100,7 +104,7 @@ def select_targets(paths: list[str]) -> list[str]:
     selected = {
         target
         for path in normalized
-        if not any(path.startswith(prefix) for prefix in IGNORED_PREFIXES)
+        if not _is_ignored(path)
         for target in [_target_for_path(path)]
         if target is not None
     }

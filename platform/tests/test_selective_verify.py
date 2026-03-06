@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from scripts.selective_verify import select_targets
+from scripts.selective_verify import _is_ignored, select_targets
 
 
 def test_select_targets_defaults_to_core_when_no_files() -> None:
@@ -44,3 +44,8 @@ def test_select_targets_elevates_harness_changes_to_core() -> None:
     targets = select_targets(["Makefile"])
 
     assert targets == ["core"]
+
+
+def test_is_ignored_matches_top_level_env_dirs_without_trailing_slash() -> None:
+    assert _is_ignored("platform/.venv")
+    assert _is_ignored("web/node_modules")
