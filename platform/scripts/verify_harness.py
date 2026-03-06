@@ -38,6 +38,20 @@ TARGETS: dict[str, list[dict[str, str]]] = {
             ),
         },
     ],
+    "contracts": [
+        {
+            "name": "prompt-template-contract-tests",
+            "cmd": _backend_cmd(
+                PYTHON,
+                "-m",
+                "pytest",
+                "tests/test_prompts.py",
+                "tests/test_template_contracts.py",
+                "-v",
+                "--tb=short",
+            ),
+        },
+    ],
     "frontend": [
         {
             "name": "frontend-unit",
@@ -77,7 +91,6 @@ TARGETS: dict[str, list[dict[str, str]]] = {
                 "-m",
                 "pytest",
                 "tests/test_verify_harness.py",
-                "tests/test_prompts.py",
                 "tests/test_executor_stage_logs.py",
                 "tests/test_engine_stage_execution.py",
                 "tests/test_worker_graph.py",
@@ -90,6 +103,7 @@ TARGETS: dict[str, list[dict[str, str]]] = {
 
 TARGETS["core"] = [
     *TARGETS["worker"],
+    *TARGETS["contracts"],
     *TARGETS["api-core"],
     *TARGETS["frontend"],
 ]

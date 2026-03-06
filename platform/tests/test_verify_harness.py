@@ -27,6 +27,7 @@ def test_list_targets_returns_known_targets() -> None:
     payload = json.loads(result.stdout)
     assert payload["targets"] == [
         "api-core",
+        "contracts",
         "core",
         "frontend",
         "frontend-logs",
@@ -44,11 +45,24 @@ def test_print_core_target_returns_named_commands() -> None:
     assert command_names == [
         "backend-lint",
         "worker-tests",
+        "prompt-template-contract-tests",
         "api-core-tests",
         "frontend-unit",
         "frontend-build",
     ]
     assert "test_verify_harness.py" in payload["commands"][1]["cmd"]
+
+
+def test_print_contracts_target_returns_prompt_template_contract_commands() -> None:
+    result = _run_script("--target", "contracts", "--format", "json")
+
+    assert result.returncode == 0
+    payload = json.loads(result.stdout)
+    assert payload["target"] == "contracts"
+    command_names = [item["name"] for item in payload["commands"]]
+    assert command_names == ["prompt-template-contract-tests"]
+    assert "test_prompts.py" in payload["commands"][0]["cmd"]
+    assert "test_template_contracts.py" in payload["commands"][0]["cmd"]
 
 
 def test_unknown_target_returns_non_zero_exit_code() -> None:
