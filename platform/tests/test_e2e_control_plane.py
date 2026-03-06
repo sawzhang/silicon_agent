@@ -19,7 +19,7 @@ def _load_module():
     return module
 
 
-def test_run_control_plane_flow_calls_expected_endpoints() -> None:
+def test_run_control_plane_flow_uses_gate_capable_template_and_scoped_gate_query() -> None:
     module = _load_module()
     calls: list[tuple[str, str, dict | None]] = []
 
@@ -30,22 +30,46 @@ def test_run_control_plane_flow_calls_expected_endpoints() -> None:
         if path == "/api/v1/templates":
             return {
                 "items": [
-                    {"id": "tpl-full", "name": "full_pipeline"},
-                    {"id": "tpl-quick", "name": "quick_fix"},
+                    {
+                        "id": "tpl-quick",
+                        "name": "quick_fix",
+                        "stages": [
+                            {"name": "parse"},
+                            {"name": "code"},
+                            {"name": "test"},
+                            {"name": "signoff"},
+                        ],
+                        "gates": [],
+                    },
+                    {
+                        "id": "tpl-full",
+                        "name": "full_pipeline",
+                        "stages": [
+                            {"name": "parse"},
+                            {"name": "spec"},
+                            {"name": "code"},
+                            {"name": "test"},
+                            {"name": "signoff"},
+                        ],
+                        "gates": [{"after_stage": "spec", "type": "human_approve"}],
+                    },
                 ]
             }
         if path == "/api/v1/tasks":
+            assert payload is not None
+            assert payload["template_id"] == "tpl-full"
             return {"id": "task-1"}
         if path == "/api/v1/tasks/task-1/stages":
             return [
                 {"stage_name": "parse"},
+                {"stage_name": "spec"},
                 {"stage_name": "code"},
                 {"stage_name": "test"},
                 {"stage_name": "signoff"},
             ]
         if path == "/api/v1/task-logs?task=task-1":
             return {"items": [], "total": 0}
-        if path == "/api/v1/gates?status=pending":
+        if path == "/api/v1/gates?status=pending&task_id=task-1":
             return {"items": [{"id": "gate-1", "status": "pending"}]}
         if path == "/api/v1/gates/gate-1/approve":
             return {"id": "gate-1", "status": "approved"}
@@ -61,22 +85,36 @@ def test_run_control_plane_flow_calls_expected_endpoints() -> None:
         "/api/v1/tasks",
         "/api/v1/tasks/task-1/stages",
         "/api/v1/task-logs?task=task-1",
-        "/api/v1/gates?status=pending",
+        "/api/v1/gates?status=pending&task_id=task-1",
         "/api/v1/gates/gate-1/approve",
     ]
 
 
-def test_run_control_plane_flow_requires_quick_fix_template() -> None:
+def test_run_control_plane_flow_requires_gate_capable_template() -> None:
     module = _load_module()
 
     def fake_request(method: str, path: str, payload: dict | None = None):
         if path == "/health":
             return {"status": "ok"}
         if path == "/api/v1/templates":
-            return {"items": [{"id": "tpl-full", "name": "full_pipeline"}]}
+            return {
+                "items": [
+                    {
+                        "id": "tpl-quick",
+                        "name": "quick_fix",
+                        "stages": [
+                            {"name": "parse"},
+                            {"name": "code"},
+                            {"name": "test"},
+                            {"name": "signoff"},
+                        ],
+                        "gates": [],
+                    }
+                ]
+            }
         raise AssertionError(f"Unexpected request: {method} {path}")
 
-    with pytest.raises(module.ControlPlaneCheckError, match="quick_fix"):
+    with pytest.raises(module.ControlPlaneCheckError, match="gate-capable"):
         module.run_control_plane_flow(fake_request)
 
 
@@ -87,7 +125,22 @@ def test_run_control_plane_flow_requires_expected_stage_shape() -> None:
         if path == "/health":
             return {"status": "ok"}
         if path == "/api/v1/templates":
-            return {"items": [{"id": "tpl-quick", "name": "quick_fix"}]}
+            return {
+                "items": [
+                    {
+                        "id": "tpl-full",
+                        "name": "full_pipeline",
+                        "stages": [
+                            {"name": "parse"},
+                            {"name": "spec"},
+                            {"name": "code"},
+                            {"name": "test"},
+                            {"name": "signoff"},
+                        ],
+                        "gates": [{"after_stage": "spec", "type": "human_approve"}],
+                    }
+                ]
+            }
         if path == "/api/v1/tasks":
             return {"id": "task-1"}
         if path == "/api/v1/tasks/task-1/stages":

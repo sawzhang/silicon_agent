@@ -92,6 +92,7 @@ TARGETS: dict[str, list[dict[str, str]]] = {
                 "pytest",
                 "tests/test_verify_harness.py",
                 "tests/test_selective_verify.py",
+                "tests/test_e2e_control_plane.py",
                 "tests/test_executor_stage_logs.py",
                 "tests/test_engine_stage_execution.py",
                 "tests/test_worker_graph.py",

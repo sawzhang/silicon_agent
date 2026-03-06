@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+import time
 from typing import Any, Callable
 from urllib import error, parse, request
 
@@ -16,12 +17,25 @@ def _require(condition: bool, message: str) -> None:
         raise ControlPlaneCheckError(message)
 
 
-def _find_quick_fix_template(payload: dict[str, Any]) -> dict[str, Any] | None:
+def _find_gate_capable_template(payload: dict[str, Any]) -> dict[str, Any] | None:
     items = payload.get("items")
     if not isinstance(items, list):
         return None
     for item in items:
-        if isinstance(item, dict) and item.get("name") == "quick_fix":
+        if not isinstance(item, dict):
+            continue
+        gates = item.get("gates")
+        if not isinstance(gates, list) or not gates:
+            continue
+        stages = item.get("stages")
+        if not isinstance(stages, list):
+            continue
+        stage_names = {
+            str(stage.get("name") or stage.get("stage_name") or "").strip()
+            for stage in stages
+            if isinstance(stage, dict)
+        }
+        if {"parse", "code", "test", "signoff"}.issubset(stage_names):
             return item
     return None
 
@@ -36,6 +50,30 @@ def _stage_names(payload: list[dict[str, Any]]) -> set[str]:
     return names
 
 
+def _pending_gate_path(task_id: str) -> str:
+    return f"/api/v1/gates?{parse.urlencode({'status': 'pending', 'task_id': task_id})}"
+
+
+def _wait_for_pending_gate(
+    request_json: Callable[[str, str, dict[str, Any] | None], Any],
+    task_id: str,
+    attempts: int = 10,
+    delay_seconds: float = 1.0,
+) -> dict[str, Any]:
+    gate_path = _pending_gate_path(task_id)
+    for attempt in range(attempts):
+        gates = request_json("GET", gate_path, None)
+        _require(isinstance(gates, dict), "gates response must be an object")
+        gate_items = gates.get("items")
+        if isinstance(gate_items, list) and gate_items:
+            first_gate = gate_items[0]
+            _require(isinstance(first_gate, dict), "pending gate item must be an object")
+            return first_gate
+        if attempt < attempts - 1:
+            time.sleep(delay_seconds)
+    raise ControlPlaneCheckError(f"no pending gate available for task {task_id}")
+
+
 def run_control_plane_flow(
     request_json: Callable[[str, str, dict[str, Any] | None], Any]
 ) -> dict[str, Any]:
@@ -44,8 +82,8 @@ def run_control_plane_flow(
 
     templates = request_json("GET", "/api/v1/templates", None)
     _require(isinstance(templates, dict), "templates response must be an object")
-    quick_fix = _find_quick_fix_template(templates)
-    _require(quick_fix is not None, "quick_fix template is missing")
+    template = _find_gate_capable_template(templates)
+    _require(template is not None, "gate-capable template is missing")
 
     created_task = request_json(
         "POST",
@@ -53,7 +91,7 @@ def run_control_plane_flow(
         {
             "title": "E2E control-plane regression",
             "description": "Deterministic regression task for control-plane validation.",
-            "template_id": quick_fix["id"],
+            "template_id": template["id"],
         },
     )
     _require(isinstance(created_task, dict), "task create response must be an object")
@@ -70,11 +108,8 @@ def run_control_plane_flow(
     _require(isinstance(task_logs, dict), "task logs response must be an object")
     _require("items" in task_logs and "total" in task_logs, "task logs response is malformed")
 
-    gates = request_json("GET", "/api/v1/gates?status=pending", None)
-    _require(isinstance(gates, dict), "gates response must be an object")
-    gate_items = gates.get("items")
-    _require(isinstance(gate_items, list) and gate_items, "no pending gate available")
-    gate_id = str(gate_items[0].get("id") or "").strip()
+    gate = _wait_for_pending_gate(request_json, task_id)
+    gate_id = str(gate.get("id") or "").strip()
     _require(gate_id, "pending gate is missing id")
 
     approved_gate = request_json(
