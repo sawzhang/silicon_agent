@@ -1,0 +1,78 @@
+{
+  "task": {
+    "id": "tt-log-replay-task",
+    "title": "Task Log Replay Fixture",
+    "status": "running"
+  },
+  "stages": [
+    {
+      "id": "tt-log-replay-stage-parse",
+      "stage_name": "parse",
+      "agent_role": "orchestrator",
+      "status": "completed"
+    },
+    {
+      "id": "tt-log-replay-stage-code",
+      "stage_name": "coding",
+      "agent_role": "coding",
+      "status": "running"
+    }
+  ],
+  "logs": [
+    {
+      "id": "tt-log-replay-2",
+      "stage_id": "tt-log-replay-stage-code",
+      "stage_name": "coding",
+      "agent_role": "coding",
+      "event_seq": 2,
+      "event_type": "agent_runner_chat_sent",
+      "event_source": "llm",
+      "status": "running",
+      "request_body": {
+        "prompt": "write code"
+      },
+      "created_at": "2026-03-06T10:00:00+00:00"
+    },
+    {
+      "id": "tt-log-replay-1",
+      "stage_id": "tt-log-replay-stage-code",
+      "stage_name": "coding",
+      "agent_role": "coding",
+      "event_seq": 1,
+      "event_type": "tool_call_executed",
+      "event_source": "tool",
+      "status": "success",
+      "command": "npm test",
+      "result": "ok",
+      "created_at": "2026-03-06T10:00:00+00:00"
+    },
+    {
+      "id": "tt-log-replay-3",
+      "stage_id": "tt-log-replay-stage-code",
+      "stage_name": "coding",
+      "agent_role": "coding",
+      "event_seq": 3,
+      "event_type": "agent_runner_chat_received",
+      "event_source": "llm",
+      "status": "success",
+      "response_body": {
+        "content": "done"
+      },
+      "created_at": "2026-03-06T10:00:00+00:00"
+    },
+    {
+      "id": "tt-log-replay-4",
+      "stage_id": "tt-log-replay-stage-parse",
+      "stage_name": "parse",
+      "agent_role": "orchestrator",
+      "event_seq": 1,
+      "event_type": "agent_runner_chat_sent",
+      "event_source": "llm",
+      "status": "running",
+      "request_body": {
+        "prompt": "parse this"
+      },
+      "created_at": "2026-03-06T09:59:59+00:00"
+    }
+  ]
+}

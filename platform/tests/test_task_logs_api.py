@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import json
 from datetime import datetime
+from pathlib import Path
 from sqlalchemy import select
 
 import pytest
@@ -9,6 +11,12 @@ import pytest_asyncio
 from app.db.session import async_session_factory
 from app.models.task import TaskModel, TaskStageModel
 from app.models.task_log import TaskStageLogModel
+
+FIXTURES_DIR = Path(__file__).with_name('fixtures')
+
+
+def _load_task_log_replay_case() -> dict:
+    return json.loads((FIXTURES_DIR / 'task_log_stream_case.json').read_text())
 
 
 @pytest_asyncio.fixture
@@ -309,6 +317,62 @@ async def test_list_task_logs_orders_by_event_seq_for_same_timestamp(client):
 async def test_list_task_logs_supports_legacy_task_id_param(client, seed_task_stage_logs):
     resp = await client.get('/api/v1/task-logs', params={'task_id': 'tt-log-task', 'stage': 'coding'})
     assert resp.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_list_task_logs_replay_fixture_preserves_stage_filter_and_order(client):
+    case = _load_task_log_replay_case()
+    task = case['task']
+    logs = case['logs']
+    stage_rows = case['stages']
+
+    async with async_session_factory() as session:
+        session.add(TaskModel(**task))
+        for stage in stage_rows:
+            session.add(TaskStageModel(task_id=task['id'], **stage))
+        for log in logs:
+            created_at = datetime.fromisoformat(log['created_at'])
+            payload = {k: v for k, v in log.items() if k != 'created_at'}
+            session.add(TaskStageLogModel(task_id=task['id'], created_at=created_at, **payload))
+        await session.commit()
+
+    try:
+        resp = await client.get(
+            '/api/v1/task-logs',
+            params={'task': task['id'], 'stage': 'coding'},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+
+        assert [item['id'] for item in data['items']] == [
+            'tt-log-replay-1',
+            'tt-log-replay-2',
+            'tt-log-replay-3',
+        ]
+        assert {item['stage_name'] for item in data['items']} == {'coding'}
+        assert data['items'][0]['event_type'] == 'tool_call_executed'
+        assert data['items'][1]['event_type'] == 'agent_runner_chat_sent'
+        assert data['items'][2]['event_type'] == 'agent_runner_chat_received'
+    finally:
+        async with async_session_factory() as session:
+            result = await session.execute(
+                select(TaskStageLogModel).where(TaskStageLogModel.task_id == task['id'])
+            )
+            for item in result.scalars().all():
+                await session.delete(item)
+
+            stage_result = await session.execute(
+                select(TaskStageModel).where(TaskStageModel.task_id == task['id'])
+            )
+            for stage in stage_result.scalars().all():
+                await session.delete(stage)
+
+            task_result = await session.execute(select(TaskModel).where(TaskModel.id == task['id']))
+            task_row = task_result.scalar_one_or_none()
+            if task_row:
+                await session.delete(task_row)
+
+            await session.commit()
 
 
 @pytest.mark.asyncio

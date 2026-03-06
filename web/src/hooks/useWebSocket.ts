@@ -18,6 +18,7 @@ export function useWebSocket() {
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout>>();
   const heartbeatTimerRef = useRef<ReturnType<typeof setInterval>>();
+  const shouldReconnectRef = useRef(true);
   const queryClient = useQueryClient();
 
   const updateAgent = useAgentStore((s) => s.updateAgent);
@@ -26,6 +27,8 @@ export function useWebSocket() {
   const appendStream = useTaskLogStreamStore((s) => s.append);
 
   useEffect(() => {
+    shouldReconnectRef.current = true;
+
     function connect() {
       const wsUrl = import.meta.env.VITE_WS_URL || `ws://${window.location.host}/ws`;
       const ws = new WebSocket(wsUrl);
@@ -52,6 +55,7 @@ export function useWebSocket() {
       ws.onclose = () => {
         console.log('[WS] Disconnected, reconnecting in 3s...');
         cleanup();
+        if (!shouldReconnectRef.current) return;
         reconnectTimerRef.current = setTimeout(connect, 3_000);
       };
 
@@ -138,6 +142,7 @@ export function useWebSocket() {
     connect();
 
     return () => {
+      shouldReconnectRef.current = false;
       if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current);
       if (heartbeatTimerRef.current) clearInterval(heartbeatTimerRef.current);
       wsRef.current?.close();
