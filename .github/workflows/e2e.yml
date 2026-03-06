@@ -46,38 +46,10 @@ jobs:
           docker compose logs app
           exit 1
 
-      - name: Run smoke tests
+      - name: Run deterministic control-plane regression
         run: |
-          PASS=0
-          FAIL=0
-
-          check() {
-            local method=$1 url=$2 expect=$3 label=$4
-            status=$(curl -sf -o /dev/null -w "%{http_code}" -X "$method" "$url" 2>/dev/null || echo "000")
-            if [ "$status" = "$expect" ]; then
-              echo "✅ $label — $status"
-              PASS=$((PASS + 1))
-            else
-              echo "❌ $label — expected $expect, got $status"
-              FAIL=$((FAIL + 1))
-            fi
-          }
-
           echo "## E2E Smoke Test Results" >> $GITHUB_STEP_SUMMARY
-
-          check GET  http://localhost:8000/health              200 "Health check"
-          check GET  http://localhost:8000/api/v1/agents       200 "List agents"
-          check GET  http://localhost:8000/api/v1/templates    200 "List templates"
-          check GET  http://localhost:8000/api/v1/tasks        200 "List tasks"
-          check GET  http://localhost:8000/api/v1/projects     200 "List projects"
-
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "Passed: $PASS / $((PASS + FAIL))" | tee -a $GITHUB_STEP_SUMMARY
-
-          if [ "$FAIL" -gt 0 ]; then
-            echo "::error::$FAIL smoke test(s) failed"
-            exit 1
-          fi
+          python3 scripts/e2e_control_plane.py --base-url http://localhost:8000 --format json | tee -a $GITHUB_STEP_SUMMARY
 
       - name: Dump logs on failure
         if: failure()
