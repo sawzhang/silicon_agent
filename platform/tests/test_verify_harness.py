@@ -51,6 +51,7 @@ def test_print_core_target_returns_named_commands() -> None:
         "frontend-build",
     ]
     assert "test_verify_harness.py" in payload["commands"][1]["cmd"]
+    assert "test_selective_verify.py" in payload["commands"][1]["cmd"]
 
 
 def test_print_contracts_target_returns_prompt_template_contract_commands() -> None:

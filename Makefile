@@ -1,6 +1,6 @@
 PYTHON ?= python3
 
-.PHONY: verify-list verify-core verify-worker verify-contracts verify-api-core verify-frontend verify-frontend-logs
+.PHONY: verify-list verify-core verify-worker verify-contracts verify-api-core verify-frontend verify-frontend-logs verify-changed
 
 verify-list:
 	$(PYTHON) platform/scripts/verify_harness.py --list-targets
@@ -22,3 +22,6 @@ verify-frontend:
 
 verify-frontend-logs:
 	$(PYTHON) platform/scripts/verify_harness.py --target frontend-logs --run
+
+verify-changed:
+	$(PYTHON) platform/scripts/selective_verify.py --run $(FILES)
