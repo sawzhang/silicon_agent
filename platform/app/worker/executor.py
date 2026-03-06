@@ -881,8 +881,10 @@ async def execute_stage(
     used_text_only_fallback = False
     response: Any | None = None
 
+    max_retries = settings.WORKER_STAGE_MAX_RETRIES
+    attempt = 0
     try:
-        for attempt in range(settings.WORKER_STAGE_MAX_RETRIES + 1):
+        while attempt <= max_retries:
             llm_started = time.monotonic()
             chat_correlation = await tracker.emit_chat_sent(
                 request_body={
@@ -944,6 +946,7 @@ async def execute_stage(
                     },
                 )
                 await asyncio.sleep(delay)
+                attempt += 1
             except Exception as e:
                 last_error = e
                 await tracker.emit_chat_received(
@@ -975,7 +978,7 @@ async def execute_stage(
                     used_text_only_fallback = True
                     continue
 
-                if attempt < settings.WORKER_STAGE_MAX_RETRIES:
+                if attempt < max_retries:
                     delay = settings.WORKER_STAGE_RETRY_DELAY * (2 ** attempt)
                     await tracker.emit_system_event(
                         "llm_retry_scheduled",
@@ -988,6 +991,7 @@ async def execute_stage(
                         },
                     )
                     await asyncio.sleep(delay)
+                    attempt += 1
                 else:
                     raise last_error
     finally:

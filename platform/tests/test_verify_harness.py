@@ -1,0 +1,58 @@
+from __future__ import annotations
+
+import json
+import subprocess
+import sys
+from pathlib import Path
+
+
+ROOT = Path(__file__).resolve().parents[2]
+SCRIPT = ROOT / "platform" / "scripts" / "verify_harness.py"
+
+
+def _run_script(*args: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        [sys.executable, str(SCRIPT), *args],
+        cwd=ROOT,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+
+def test_list_targets_returns_known_targets() -> None:
+    result = _run_script("--list-targets")
+
+    assert result.returncode == 0
+    payload = json.loads(result.stdout)
+    assert payload["targets"] == [
+        "api-core",
+        "core",
+        "frontend",
+        "frontend-logs",
+        "worker",
+    ]
+
+
+def test_print_core_target_returns_named_commands() -> None:
+    result = _run_script("--target", "core", "--format", "json")
+
+    assert result.returncode == 0
+    payload = json.loads(result.stdout)
+    assert payload["target"] == "core"
+    command_names = [item["name"] for item in payload["commands"]]
+    assert command_names == [
+        "backend-lint",
+        "worker-tests",
+        "api-core-tests",
+        "frontend-unit",
+        "frontend-build",
+    ]
+    assert "test_verify_harness.py" in payload["commands"][1]["cmd"]
+
+
+def test_unknown_target_returns_non_zero_exit_code() -> None:
+    result = _run_script("--target", "unknown")
+
+    assert result.returncode == 2
+    assert "Unknown target" in result.stderr
