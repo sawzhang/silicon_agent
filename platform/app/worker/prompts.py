@@ -127,6 +127,31 @@ STAGE_INSTRUCTIONS: Dict[str, str] = {
 }
 
 
+STAGE_GUARDRAILS: Dict[str, str] = {
+    "code": (
+        "只完成当前阶段，不要提前执行后续阶段任务。\n"
+        "你可以为了验证实现而运行必要命令，但不要提前生成最终签收/验收报告，"
+        "也不要调用 signoff、review、smoke、e2e-test 等后续阶段能力。\n"
+        "完成实现并简要总结本阶段改动后结束。"
+    ),
+    "test": (
+        "只完成当前阶段，不要提前执行后续阶段任务。\n"
+        "请聚焦当前任务直接相关的自动化测试与验证；如果相关测试已经通过，且已覆盖验收标准，请立即停止。\n"
+        "不要继续扩展额外类型的测试，例如 E2E、冒烟、性能或签收报告，除非任务明确要求。"
+    ),
+    "signoff": (
+        "此阶段负责输出最终签收结果。\n"
+        "请基于已有阶段产出进行总结和结论，不要再回头扩展实现或测试范围。\n"
+        "前序阶段产出里可能包含中间态、自修复前描述或已过时结论；如果它们与当前阶段直接读取到的文件内容、"
+        "命令结果或已完成阶段的最终产出冲突，请以当前阶段直接核验到的最新事实为准。\n"
+        "只有在 signoff 阶段再次核验后仍然成立的问题，才可以写入遗留问题或影响最终结论；"
+        "已经被后续修改修复的问题，应标记为已解决，不要继续当作遗留问题。\n"
+        "优先复用 test 阶段已经完成的最终验证结果；除非存在明确缺口，不要重复安装依赖、重跑整套测试，"
+        "也不要让宿主环境差异覆盖已在正确环境中验证通过的结论。"
+    ),
+}
+
+
 @dataclass
 class StageContext:
     """Context for building LLM messages for a stage execution."""
@@ -208,6 +233,10 @@ def build_user_prompt(ctx: StageContext) -> str:
         parts.append("请仔细阅读审批反馈，针对性地修改产出，避免重复同样的问题。")
 
     parts.append(f"\n## 当前阶段: {ctx.stage_name}\n{stage_instruction}")
+
+    guardrail = STAGE_GUARDRAILS.get(ctx.stage_name)
+    if guardrail:
+        parts.append(f"\n## 阶段边界\n{guardrail}")
 
     # Append custom instruction from template stage definition (Phase 1.4)
     if ctx.custom_instruction:
