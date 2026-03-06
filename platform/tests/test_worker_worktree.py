@@ -330,6 +330,12 @@ async def test_create_pr_for_workspace_variants(tmp_path: Path, monkeypatch: pyt
         captured.append(cmd)
         return 0, "https://scm.example.com/org/repo/pull/2", ""
 
+    async def _fake_run(cmd: str, cwd=None):
+        if cmd == "git remote get-url origin":
+            return 0, "https://scm.example.com/org/repo.git", ""
+        return 0, "", ""
+
+    monkeypatch.setattr(worktree, "_run", _fake_run)
     monkeypatch.setattr(worktree, "_run_with_retry", _retry_success)
 
     pr_url = await worktree.create_pr_for_workspace(
@@ -595,6 +601,12 @@ async def test_create_pr_and_manager_cache(tmp_path: Path, monkeypatch: pytest.M
         captured_cmd.append(cmd)
         return 0, "https://scm.example.com/org/repo/pull/1", ""
 
+    async def _fake_run(cmd: str, cwd=None):
+        if cmd == "git remote get-url origin":
+            return 0, "https://scm.example.com/org/repo.git", ""
+        return 0, "", ""
+
+    monkeypatch.setattr(worktree, "_run", _fake_run)
     monkeypatch.setattr(worktree, "_run_with_retry", _fake_retry)
 
     pr_url = await manager.create_pr(
@@ -609,6 +621,52 @@ async def test_create_pr_and_manager_cache(tmp_path: Path, monkeypatch: pytest.M
     assert captured_cmd
     assert "GH_HOST=scm.example.com" in captured_cmd[0]
     assert "--head silicon_agent/task-7" in captured_cmd[0]
+
+
+@pytest.mark.asyncio
+async def test_create_pr_skips_ghe_host_for_github_remote(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    wt_base = tmp_path / "wt"
+
+    monkeypatch.setattr(worktree.settings, "WORKTREE_BASE_DIR", str(wt_base))
+    monkeypatch.setattr(worktree.settings, "GHE_BASE_URL", "https://scm.example.com")
+    monkeypatch.setattr(worktree.settings, "GHE_TOKEN", "secret")
+
+    manager = worktree.WorktreeManager(str(repo))
+    task_dir = wt_base / "task-8"
+    task_dir.mkdir(parents=True)
+
+    captured_cmd: list[str] = []
+
+    async def _fake_run(cmd: str, cwd=None):
+        if cmd == "git remote get-url origin":
+            return 0, "https://github.com/org/repo.git", ""
+        return 0, "", ""
+
+    async def _fake_retry(cmd: str, cwd=None, **kwargs):
+        captured_cmd.append(cmd)
+        return 0, "https://github.com/org/repo/pull/8", ""
+
+    monkeypatch.setattr(worktree, "_run", _fake_run)
+    monkeypatch.setattr(worktree, "_run_with_retry", _fake_retry)
+
+    pr_url = await manager.create_pr(
+        "task-8",
+        "title",
+        "body",
+        base_branch="master",
+        head_branch="silicon_agent/task-8",
+    )
+
+    assert pr_url.url == "https://github.com/org/repo/pull/8"
+    assert pr_url.error is None
+    assert captured_cmd
+    assert "GH_HOST=scm.example.com" not in captured_cmd[0]
+    assert "--head silicon_agent/task-8" in captured_cmd[0]
 
     worktree._managers.clear()
     m1 = worktree.get_worktree_manager(str(repo))

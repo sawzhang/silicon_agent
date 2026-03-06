@@ -125,6 +125,26 @@ def _inject_git_auth(cmd: str, repo_url: str) -> str:
     return f"git -c http.extraheader={shlex.quote(header)} {cmd[4:]}"
 
 
+def _build_gh_cli_prefix(repo_url: str) -> str:
+    repo_url = (repo_url or "").strip()
+    if not repo_url or not settings.GHE_BASE_URL:
+        return ""
+
+    ghe_host = urlparse(settings.GHE_BASE_URL).hostname or ""
+    repo_host = urlparse(repo_url).hostname or ""
+    if not ghe_host or not repo_host or repo_host != ghe_host:
+        return ""
+
+    token = (settings.GHE_TOKEN or "").strip()
+    if not token:
+        return ""
+
+    return (
+        f'GH_HOST={ghe_host} '
+        f'GH_ENTERPRISE_TOKEN={token} '
+    )
+
+
 async def ensure_repo_local_mirror(
     project_id: str,
     repo_url: str,
@@ -330,6 +350,8 @@ async def create_pr_for_workspace(
         return PRCreationResult(url=None, error="workspace does not exist")
 
     cwd = str(workspace_path)
+    origin_rc, origin_url, _ = await _run("git remote get-url origin", cwd=cwd)
+    normalized_origin = origin_url.strip() if origin_rc == 0 else ""
     resolved_head_branch = (head_branch or "").strip()
     if not resolved_head_branch:
         rc, branch, err = await _run("git branch --show-current", cwd=cwd)
@@ -345,14 +367,9 @@ async def create_pr_for_workspace(
         f"--head {shlex.quote(resolved_head_branch)}"
     )
 
-    if settings.GHE_BASE_URL:
-        ghe_host = urlparse(settings.GHE_BASE_URL).hostname or ""
-        if ghe_host:
-            cmd = (
-                f'GH_HOST={ghe_host} '
-                f'GH_ENTERPRISE_TOKEN={settings.GHE_TOKEN} '
-                f'{cmd}'
-            )
+    gh_prefix = _build_gh_cli_prefix(normalized_origin)
+    if gh_prefix:
+        cmd = f"{gh_prefix}{cmd}"
 
     rc, out, err = await _run_with_retry(cmd, cwd=cwd)
     if rc != 0:
@@ -582,6 +599,8 @@ class WorktreeManager:
             return PRCreationResult(url=None, error="worktree does not exist")
 
         cwd = str(worktree_path)
+        origin_rc, origin_url, _ = await _run("git remote get-url origin", cwd=cwd)
+        normalized_origin = origin_url.strip() if origin_rc == 0 else ""
         resolved_head_branch = (head_branch or "").strip()
         if not resolved_head_branch:
             rc, branch, err = await _run("git branch --show-current", cwd=cwd)
@@ -598,15 +617,9 @@ class WorktreeManager:
         )
 
         # For GitHub Enterprise, set GH_HOST so `gh` CLI targets the right server
-        if settings.GHE_BASE_URL:
-            from urllib.parse import urlparse
-            ghe_host = urlparse(settings.GHE_BASE_URL).hostname or ""
-            if ghe_host:
-                cmd = (
-                    f'GH_HOST={ghe_host} '
-                    f'GH_ENTERPRISE_TOKEN={settings.GHE_TOKEN} '
-                    f'{cmd}'
-                )
+        gh_prefix = _build_gh_cli_prefix(normalized_origin)
+        if gh_prefix:
+            cmd = f"{gh_prefix}{cmd}"
 
         rc, out, err = await _run_with_retry(cmd, cwd=cwd)
         if rc != 0:
