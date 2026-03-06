@@ -258,6 +258,34 @@ def test_without_custom_instruction():
     assert "## 附加指令" not in result
 
 
+def test_code_stage_includes_boundary_against_signoff():
+    ctx = _minimal_ctx(stage_name="code", agent_role="coding")
+    result = build_user_prompt(ctx)
+    assert "只完成当前阶段" in result
+    assert "不要提前生成最终签收" in result
+    assert "不要调用 signoff" in result
+
+
+def test_test_stage_includes_stop_condition_after_relevant_tests_pass():
+    ctx = _minimal_ctx(stage_name="test", agent_role="test")
+    result = build_user_prompt(ctx)
+    assert "相关测试已经通过" in result
+    assert "立即停止" in result
+    assert "不要继续扩展额外类型的测试" in result
+    assert "E2E" in result
+
+
+def test_signoff_stage_prefers_latest_verified_state_over_stale_prior_output():
+    ctx = _minimal_ctx(stage_name="signoff", agent_role="orchestrator")
+    result = build_user_prompt(ctx)
+    assert "中间态、自修复前描述或已过时结论" in result
+    assert "最新事实为准" in result
+    assert "已解决" in result
+    assert "不要继续当作遗留问题" in result
+    assert "优先复用 test 阶段已经完成的最终验证结果" in result
+    assert "不要重复安装依赖" in result
+
+
 # ---------------------------------------------------------------------------
 # Stage name → STAGE_INSTRUCTIONS lookup
 # ---------------------------------------------------------------------------
