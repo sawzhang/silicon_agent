@@ -188,6 +188,19 @@ def _build_pr_body(task: TaskModel, prior_outputs: List[Dict[str, str]]) -> str:
     return "\n".join(parts)
 
 
+def _parse_pr_creation_result(result: object) -> tuple[str | None, str | None, str | None]:
+    if result is None:
+        return None, None, None
+    if isinstance(result, str):
+        value = result.strip()
+        return value or None, None, None
+
+    url = str(getattr(result, "url", "") or "").strip() or None
+    error = str(getattr(result, "error", "") or "").strip() or None
+    head_branch = str(getattr(result, "head_branch", "") or "").strip() or None
+    return url, error, head_branch
+
+
 async def start_worker() -> None:
     """Start the background worker polling loop."""
     global _running, _task
@@ -948,36 +961,46 @@ async def _finalize_task_resources(
                 )
                 pr_body = _build_pr_body(task, prior_outputs)
                 if worktree_mgr and worktree_path:
-                    pr_url = await worktree_mgr.create_pr(
+                    pr_result = await worktree_mgr.create_pr(
                         task_id=str(task.id),
                         title=task.title,
                         body=pr_body,
                         base_branch=task.project.branch or "main",
+                        head_branch=branch,
                     )
                 else:
-                    pr_url = await create_pr_for_workspace(
+                    pr_result = await create_pr_for_workspace(
                         workspace=workspace_path,
                         title=task.title,
                         body=pr_body,
                         base_branch=task.project.branch or "main",
+                        head_branch=branch,
                     )
+                pr_url, pr_error, pr_head_branch = _parse_pr_creation_result(pr_result)
                 if pr_url:
                     task.pr_url = pr_url
                     await session.commit()
                     logger.info("PR created for task %s: %s", task.id, pr_url)
+                elif pr_error:
+                    logger.warning("PR creation failed for task %s: %s", task.id, pr_error)
                 pr_duration_ms = round((time.monotonic() - pr_started_at) * 1000, 2)
+                pr_status = "success" if pr_url else "failed"
                 await _emit_system_log(
                     task,
                     event_type="worktree_pr_finished",
-                    status="success",
+                    status=pr_status,
                     correlation_id=pr_corr,
-                    response_body={"pr_url": pr_url},
+                    response_body={
+                        "pr_url": pr_url,
+                        "error": pr_error,
+                        "head_branch": pr_head_branch or branch,
+                    },
                     duration_ms=pr_duration_ms,
                 )
                 await _close_started_system_log(
                     started_log_id=pr_started_log_id,
                     started_at_monotonic=pr_started_at,
-                    status="success",
+                    status=pr_status,
                 )
         except Exception as exc:
             logger.warning("Worktree commit/push failed for task %s", task.id, exc_info=True)

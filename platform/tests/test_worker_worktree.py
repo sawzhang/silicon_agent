@@ -337,18 +337,23 @@ async def test_create_pr_for_workspace_variants(tmp_path: Path, monkeypatch: pyt
         title="task title",
         body="task body",
         base_branch="main",
+        head_branch="silicon_agent/task-2",
     )
-    assert pr_url == "https://scm.example.com/org/repo/pull/2"
+    assert pr_url.url == "https://scm.example.com/org/repo/pull/2"
+    assert pr_url.error is None
     assert captured
     assert "GH_HOST=scm.example.com" in captured[0]
+    assert "--head silicon_agent/task-2" in captured[0]
 
     monkeypatch.setattr(worktree, "_run_with_retry", AsyncMock(return_value=(1, "", "failed")))
     failed_url = await worktree.create_pr_for_workspace(
         workspace=str(workspace),
         title="task title",
         body="task body",
+        head_branch="silicon_agent/task-2",
     )
-    assert failed_url is None
+    assert failed_url.url is None
+    assert failed_url.error == "failed"
 
 
 @pytest.mark.asyncio
@@ -592,10 +597,18 @@ async def test_create_pr_and_manager_cache(tmp_path: Path, monkeypatch: pytest.M
 
     monkeypatch.setattr(worktree, "_run_with_retry", _fake_retry)
 
-    pr_url = await manager.create_pr("task-7", "title", "body", base_branch="master")
-    assert pr_url == "https://scm.example.com/org/repo/pull/1"
+    pr_url = await manager.create_pr(
+        "task-7",
+        "title",
+        "body",
+        base_branch="master",
+        head_branch="silicon_agent/task-7",
+    )
+    assert pr_url.url == "https://scm.example.com/org/repo/pull/1"
+    assert pr_url.error is None
     assert captured_cmd
     assert "GH_HOST=scm.example.com" in captured_cmd[0]
+    assert "--head silicon_agent/task-7" in captured_cmd[0]
 
     worktree._managers.clear()
     m1 = worktree.get_worktree_manager(str(repo))

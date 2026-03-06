@@ -15,6 +15,7 @@ import logging
 import re
 import shlex
 import shutil
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 from urllib.parse import urlparse
@@ -22,6 +23,13 @@ from urllib.parse import urlparse
 from app.config import settings
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(slots=True)
+class PRCreationResult:
+    url: Optional[str]
+    error: Optional[str] = None
+    head_branch: Optional[str] = None
 
 
 async def _run(cmd: str, cwd: Optional[str] = None) -> tuple[int, str, str]:
@@ -314,17 +322,27 @@ async def create_pr_for_workspace(
     title: str,
     body: str,
     base_branch: str = "main",
-) -> Optional[str]:
+    head_branch: Optional[str] = None,
+) -> PRCreationResult:
     """Create PR from an arbitrary workspace git checkout via gh CLI."""
     workspace_path = Path(workspace)
     if not workspace_path.exists():
-        return None
+        return PRCreationResult(url=None, error="workspace does not exist")
 
     cwd = str(workspace_path)
+    resolved_head_branch = (head_branch or "").strip()
+    if not resolved_head_branch:
+        rc, branch, err = await _run("git branch --show-current", cwd=cwd)
+        if rc != 0 or not branch.strip():
+            message = err or "failed to resolve PR head branch"
+            logger.error("Unable to resolve PR head branch in workspace %s: %s", workspace_path, message)
+            return PRCreationResult(url=None, error=message)
+        resolved_head_branch = branch.strip()
     cmd = (
         f"gh pr create --title {shlex.quote(title)} "
         f"--body {shlex.quote(body)} "
-        f"--base {shlex.quote(base_branch)}"
+        f"--base {shlex.quote(base_branch)} "
+        f"--head {shlex.quote(resolved_head_branch)}"
     )
 
     if settings.GHE_BASE_URL:
@@ -338,9 +356,18 @@ async def create_pr_for_workspace(
 
     rc, out, err = await _run_with_retry(cmd, cwd=cwd)
     if rc != 0:
-        logger.error("gh pr create failed in workspace %s: %s", workspace_path, err)
-        return None
-    return out.strip() or None
+        error = err or out or "gh pr create failed"
+        logger.error("gh pr create failed in workspace %s: %s", workspace_path, error)
+        return PRCreationResult(url=None, error=error, head_branch=resolved_head_branch)
+
+    pr_url = out.strip() or None
+    if not pr_url:
+        return PRCreationResult(
+            url=None,
+            error="gh pr create returned empty output",
+            head_branch=resolved_head_branch,
+        )
+    return PRCreationResult(url=pr_url, error=None, head_branch=resolved_head_branch)
 
 
 class WorktreeManager:
@@ -547,17 +574,27 @@ class WorktreeManager:
         title: str,
         body: str,
         base_branch: str = "main",
-    ) -> Optional[str]:
+        head_branch: Optional[str] = None,
+    ) -> PRCreationResult:
         """Create a PR via gh CLI. Supports both github.com and GitHub Enterprise."""
         worktree_path = self.base_dir / task_id
         if not worktree_path.exists():
-            return None
+            return PRCreationResult(url=None, error="worktree does not exist")
 
         cwd = str(worktree_path)
+        resolved_head_branch = (head_branch or "").strip()
+        if not resolved_head_branch:
+            rc, branch, err = await _run("git branch --show-current", cwd=cwd)
+            if rc != 0 or not branch.strip():
+                message = err or "failed to resolve PR head branch"
+                logger.error("Unable to resolve PR head branch for task %s: %s", task_id, message)
+                return PRCreationResult(url=None, error=message)
+            resolved_head_branch = branch.strip()
         cmd = (
             f"gh pr create --title {shlex.quote(title)} "
             f"--body {shlex.quote(body)} "
-            f"--base {shlex.quote(base_branch)}"
+            f"--base {shlex.quote(base_branch)} "
+            f"--head {shlex.quote(resolved_head_branch)}"
         )
 
         # For GitHub Enterprise, set GH_HOST so `gh` CLI targets the right server
@@ -573,12 +610,19 @@ class WorktreeManager:
 
         rc, out, err = await _run_with_retry(cmd, cwd=cwd)
         if rc != 0:
-            logger.error("gh pr create failed for task %s after retries: %s", task_id, err)
-            return None
+            error = err or out or "gh pr create failed"
+            logger.error("gh pr create failed for task %s after retries: %s", task_id, error)
+            return PRCreationResult(url=None, error=error, head_branch=resolved_head_branch)
 
         pr_url = out.strip()
+        if not pr_url:
+            return PRCreationResult(
+                url=None,
+                error="gh pr create returned empty output",
+                head_branch=resolved_head_branch,
+            )
         logger.info("Created PR for task %s: %s", task_id, pr_url)
-        return pr_url
+        return PRCreationResult(url=pr_url, error=None, head_branch=resolved_head_branch)
 
 
 # Module-level cache of WorktreeManager instances per repo path

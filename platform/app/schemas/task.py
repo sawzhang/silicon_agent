@@ -6,6 +6,13 @@ from typing import List, Optional
 from pydantic import BaseModel, field_validator
 
 
+def _validate_auto_target_branch(value: Optional[str]) -> Optional[str]:
+    normalized = (value or "").strip()
+    if normalized:
+        raise ValueError("target_branch 由系统自动创建，请不要填写。")
+    return None
+
+
 class TaskCreateRequest(BaseModel):
     jira_id: Optional[str] = None
     title: str
@@ -15,6 +22,10 @@ class TaskCreateRequest(BaseModel):
     target_branch: Optional[str] = None
     yunxiao_task_id: Optional[str] = None
     github_issue_number: Optional[int] = None
+
+    _target_branch_auto = field_validator("target_branch", mode="before")(
+        _validate_auto_target_branch
+    )
 
 
 class TaskStageResponse(BaseModel):
@@ -118,6 +129,10 @@ class BatchTaskItem(BaseModel):
     project_id: Optional[str] = None
     target_branch: Optional[str] = None
     yunxiao_task_id: Optional[str] = None
+
+    _target_branch_auto = field_validator("target_branch", mode="before")(
+        _validate_auto_target_branch
+    )
 
 
 class TaskBatchCreateRequest(BaseModel):

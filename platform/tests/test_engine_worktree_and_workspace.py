@@ -784,11 +784,19 @@ async def test_finalize_task_resources_worktree_commit_and_pr(monkeypatch):
     monkeypatch.setattr(engine, "_close_started_system_log", AsyncMock())
     monkeypatch.setattr(engine, "_cleanup_runtime_resources", AsyncMock())
 
+    captured: dict[str, str] = {}
+
     class FakeWorktreeMgr:
         async def commit_and_push(self, **kw):
             return "feat/my-branch"
+
         async def create_pr(self, **kw):
-            return "https://github.com/org/repo/pull/1"
+            captured.update(kw)
+            return SimpleNamespace(
+                url="https://github.com/org/repo/pull/1",
+                error=None,
+                head_branch=kw["head_branch"],
+            )
 
     task = _make_task(
         project=SimpleNamespace(repo_url="https://github.com/org/repo.git", branch="main"),
@@ -802,6 +810,58 @@ async def test_finalize_task_resources_worktree_commit_and_pr(monkeypatch):
     )
     assert result is True
     assert task.pr_url == "https://github.com/org/repo/pull/1"
+    assert captured["head_branch"] == "feat/my-branch"
+
+
+@pytest.mark.asyncio
+async def test_finalize_task_resources_records_pr_creation_failure_details(monkeypatch):
+    """PR creation failures should be logged with failed status and explicit error details."""
+    monkeypatch.setattr(engine.settings, "MEMORY_ENABLED", False)
+    monkeypatch.setattr(engine.settings, "SKILL_FEEDBACK_ENABLED", False)
+    emit_calls: list[dict] = []
+
+    async def _fake_emit_system_log(_task, **kw):
+        emit_calls.append(kw)
+        return "log-id"
+
+    monkeypatch.setattr(engine, "_emit_system_log", _fake_emit_system_log)
+    monkeypatch.setattr(engine, "_close_started_system_log", AsyncMock())
+    monkeypatch.setattr(engine, "_cleanup_runtime_resources", AsyncMock())
+
+    class FakeWorktreeMgr:
+        async def commit_and_push(self, **kw):
+            return "feat/my-branch"
+
+        async def create_pr(self, **kw):
+            return SimpleNamespace(
+                url=None,
+                error="gh pr create failed: head branch not found",
+                head_branch=kw["head_branch"],
+            )
+
+    task = _make_task(
+        project=SimpleNamespace(repo_url="https://github.com/org/repo.git", branch="main"),
+        project_id="proj-1",
+        branch_name=None,
+        pr_url=None,
+        target_branch=None,
+    )
+    session = SimpleNamespace(commit=AsyncMock())
+    result = await engine._finalize_task_resources(
+        session, task, [], None,
+        FakeWorktreeMgr(), "/wt/path", "/wt/path", "worktree", "feat/main",
+        None, None,
+    )
+
+    assert result is True
+    assert task.pr_url is None
+    pr_finished = next(call for call in emit_calls if call["event_type"] == "worktree_pr_finished")
+    assert pr_finished["status"] == "failed"
+    assert pr_finished["response_body"] == {
+        "pr_url": None,
+        "error": "gh pr create failed: head branch not found",
+        "head_branch": "feat/my-branch",
+    }
 
 
 @pytest.mark.asyncio
@@ -821,7 +881,11 @@ async def test_finalize_task_resources_pr_body_includes_signoff_structured_summa
 
         async def create_pr(self, **kw):
             captured.update(kw)
-            return "https://github.com/org/repo/pull/1"
+            return SimpleNamespace(
+                url="https://github.com/org/repo/pull/1",
+                error=None,
+                head_branch=kw["head_branch"],
+            )
 
     task = _make_task(
         project=SimpleNamespace(repo_url="https://github.com/org/repo.git", branch="main"),
@@ -866,7 +930,7 @@ async def test_finalize_task_resources_pr_body_falls_back_to_signoff_output_summ
 
     async def _fake_create_pr_for_workspace(**kw):
         captured.update(kw)
-        return "https://pr/123"
+        return SimpleNamespace(url="https://pr/123", error=None, head_branch=kw["head_branch"])
 
     monkeypatch.setattr(engine, "create_pr_for_workspace", _fake_create_pr_for_workspace)
 
@@ -913,7 +977,11 @@ async def test_finalize_task_resources_pr_body_prefers_signoff_conclusion_over_g
 
         async def create_pr(self, **kw):
             captured.update(kw)
-            return "https://github.com/org/repo/pull/1"
+            return SimpleNamespace(
+                url="https://github.com/org/repo/pull/1",
+                error=None,
+                head_branch=kw["head_branch"],
+            )
 
     task = _make_task(
         project=SimpleNamespace(repo_url="https://github.com/org/repo.git", branch="main"),
@@ -1061,7 +1129,13 @@ async def test_finalize_task_resources_workspace_commit_and_pr(monkeypatch):
     monkeypatch.setattr(engine, "_close_started_system_log", AsyncMock())
     monkeypatch.setattr(engine, "_cleanup_runtime_resources", AsyncMock())
     monkeypatch.setattr(engine, "commit_and_push_workspace", AsyncMock(return_value="feat/branch"))
-    monkeypatch.setattr(engine, "create_pr_for_workspace", AsyncMock(return_value="https://pr/123"))
+    captured: dict[str, str] = {}
+
+    async def _fake_create_pr_for_workspace(**kw):
+        captured.update(kw)
+        return SimpleNamespace(url="https://pr/123", error=None, head_branch=kw["head_branch"])
+
+    monkeypatch.setattr(engine, "create_pr_for_workspace", _fake_create_pr_for_workspace)
 
     task = _make_task(
         project=SimpleNamespace(repo_url="https://github.com/org/repo.git", branch="main"),
@@ -1075,6 +1149,7 @@ async def test_finalize_task_resources_workspace_commit_and_pr(monkeypatch):
     )
     assert result is True
     assert task.pr_url == "https://pr/123"
+    assert captured["head_branch"] == "feat/branch"
 
 
 # ═══════════════════════════════════════════════════════════════════════

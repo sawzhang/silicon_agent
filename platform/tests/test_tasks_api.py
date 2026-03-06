@@ -173,6 +173,19 @@ async def test_create_task(client):
 
 
 @pytest.mark.asyncio
+async def test_create_task_rejects_manual_target_branch(client):
+    """POST /api/v1/tasks rejects manually supplied target_branch values."""
+    resp = await client.post("/api/v1/tasks", json={
+        "title": "TT Create Invalid Branch",
+        "target_branch": "task/manual-branch",
+    })
+    assert resp.status_code == 422
+    data = resp.json()
+    assert "target_branch" in json.dumps(data, ensure_ascii=False)
+    assert "自动创建" in json.dumps(data, ensure_ascii=False)
+
+
+@pytest.mark.asyncio
 async def test_create_task_with_template(client, seed_template_with_stages):
     """POST /api/v1/tasks with template_id auto-generates stages from template."""
     template_id = seed_template_with_stages
@@ -190,6 +203,23 @@ async def test_create_task_with_template(client, seed_template_with_stages):
     assert "test" in stage_names
     for stage in data["stages"]:
         assert stage["status"] == "pending"
+
+
+@pytest.mark.asyncio
+async def test_batch_create_task_rejects_manual_target_branch(client):
+    """POST /api/v1/tasks/batch rejects manually supplied target_branch values."""
+    resp = await client.post("/api/v1/tasks/batch", json={
+        "tasks": [
+            {
+                "title": "TT Batch Invalid Branch",
+                "target_branch": "task/manual-branch",
+            }
+        ]
+    })
+    assert resp.status_code == 422
+    data = resp.json()
+    assert "target_branch" in json.dumps(data, ensure_ascii=False)
+    assert "自动创建" in json.dumps(data, ensure_ascii=False)
 
 
 # ── Get Task Tests ────────────────────────────────────────
