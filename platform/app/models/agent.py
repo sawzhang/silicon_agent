@@ -22,11 +22,11 @@ class AgentModel(Base):
     model_name: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
     config: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
     current_task_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
-    started_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
-    last_active_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    started_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_active_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
-        DateTime, nullable=False, server_default=func.now()
+        DateTime(timezone=True), nullable=False, server_default=func.now()
     )
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime, nullable=False, server_default=func.now(), onupdate=func.now()
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
     )

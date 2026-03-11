@@ -21,6 +21,6 @@ class KPIMetricModel(Base):
     value: Mapped[float] = mapped_column(Float, nullable=False)
     unit: Mapped[str] = mapped_column(String(50), nullable=False, default="count")
     recorded_at: Mapped[datetime] = mapped_column(
-        DateTime, nullable=False, server_default=func.now()
+        DateTime(timezone=True), nullable=False, server_default=func.now()
     )
     extra_data: Mapped[Optional[dict]] = mapped_column("metadata", JSON, nullable=True)

@@ -1,6 +1,6 @@
 import logging
 
-from sqlalchemy import inspect, text
+from sqlalchemy import DateTime, inspect, text
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from app.db.base import Base
@@ -20,6 +20,60 @@ import app.models.trigger  # noqa: F401
 import app.models.integration  # noqa: F401
 
 logger = logging.getLogger(__name__)
+
+
+def _upgrade_postgres_datetime_columns(connection) -> None:
+    """Upgrade Postgres timestamp columns to TIMESTAMPTZ for timezone-aware models.
+
+    Older deployments may already have tables with ``timestamp without time zone``.
+    When app code writes aware UTC datetimes, asyncpg raises DataError. This startup
+    migration aligns DB column types with SQLAlchemy ``DateTime(timezone=True)``.
+    """
+    if connection.dialect.name != "postgresql":
+        return
+
+    for table_name, table in Base.metadata.tables.items():
+        if "." in table_name:
+            schema_name, rel_name = table_name.split(".", 1)
+        else:
+            schema_name, rel_name = "public", table_name
+
+        for col in table.columns:
+            if not isinstance(col.type, DateTime) or not bool(col.type.timezone):
+                continue
+
+            column_type = connection.execute(
+                text(
+                    """
+                    SELECT data_type
+                    FROM information_schema.columns
+                    WHERE table_schema = :schema_name
+                      AND table_name = :table_name
+                      AND column_name = :column_name
+                    """
+                ),
+                {
+                    "schema_name": schema_name,
+                    "table_name": rel_name,
+                    "column_name": col.name,
+                },
+            ).scalar_one_or_none()
+
+            if column_type != "timestamp without time zone":
+                continue
+
+            stmt = (
+                f'ALTER TABLE "{schema_name}"."{rel_name}" '
+                f'ALTER COLUMN "{col.name}" TYPE TIMESTAMP WITH TIME ZONE '
+                f'USING "{col.name}" AT TIME ZONE \'UTC\''
+            )
+            connection.execute(text(stmt))
+            logger.info(
+                "Upgraded column to TIMESTAMPTZ: %s.%s.%s",
+                schema_name,
+                rel_name,
+                col.name,
+            )
 
 
 def _add_missing_columns(connection) -> None:
@@ -77,3 +131,4 @@ async def init_db(engine: AsyncEngine) -> None:
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
         await conn.run_sync(_add_missing_columns)
+        await conn.run_sync(_upgrade_postgres_datetime_columns)

@@ -44,5 +44,5 @@ class TaskStageLogModel(Base):
     missing_fields: Mapped[Optional[list]] = mapped_column(JSON, nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(
-        DateTime, nullable=False, server_default=func.now(), index=True
+        DateTime(timezone=True), nullable=False, server_default=func.now(), index=True
     )

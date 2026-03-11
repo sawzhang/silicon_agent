@@ -27,5 +27,5 @@ class SkillFeedbackModel(Base):
     tokens_used: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     duration_ms: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
     created_at: Mapped[datetime] = mapped_column(
-        DateTime, nullable=False, server_default=func.now()
+        DateTime(timezone=True), nullable=False, server_default=func.now()
     )

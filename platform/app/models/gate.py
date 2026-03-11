@@ -28,9 +28,9 @@ class HumanGateModel(Base):
     reviewer: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
     review_comment: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
-        DateTime, nullable=False, server_default=func.now()
+        DateTime(timezone=True), nullable=False, server_default=func.now()
     )
-    reviewed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    reviewed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     # Phase 1.3: Gate rejection feedback loop
     retry_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     # Phase 2.3: Dynamic confidence-based gate insertion

@@ -23,7 +23,7 @@ class AuditLogModel(Base):
         String(20), nullable=False, default="low", index=True
     )
     created_at: Mapped[datetime] = mapped_column(
-        DateTime, nullable=False, server_default=func.now()
+        DateTime(timezone=True), nullable=False, server_default=func.now()
     )
 
 
@@ -39,6 +39,6 @@ class CircuitBreakerModel(Base):
     )
     triggered_by: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
     trigger_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    triggered_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
-    resolved_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    triggered_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    resolved_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     resolved_by: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)

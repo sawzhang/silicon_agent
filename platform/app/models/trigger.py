@@ -48,10 +48,10 @@ class TriggerRuleModel(Base):
     # Cron 表达式（仅 source="cron" 时使用），标准 5 段格式，如 "0 9 * * 1-5"
     cron_expr: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
     # 上次触发时间（Cron 调度器用于判断是否到期）
-    last_triggered_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    last_triggered_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     created_at: Mapped[datetime] = mapped_column(
-        DateTime, nullable=False, server_default=func.now()
+        DateTime(timezone=True), nullable=False, server_default=func.now()
     )
 
 
@@ -78,5 +78,5 @@ class TriggerEventModel(Base):
     # 处理结果: "triggered" | "skipped_no_rule" | "skipped_filter" | "skipped_dedup"
     result: Mapped[str] = mapped_column(String(30), nullable=False)
     created_at: Mapped[datetime] = mapped_column(
-        DateTime, nullable=False, server_default=func.now()
+        DateTime(timezone=True), nullable=False, server_default=func.now()
     )

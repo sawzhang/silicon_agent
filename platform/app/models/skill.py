@@ -27,10 +27,10 @@ class SkillModel(Base):
     content: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     git_path: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
-        DateTime, nullable=False, server_default=func.now()
+        DateTime(timezone=True), nullable=False, server_default=func.now()
     )
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime, nullable=False, server_default=func.now(), onupdate=func.now()
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
     )
 
     versions: Mapped[list["SkillVersionModel"]] = relationship(
@@ -51,7 +51,7 @@ class SkillVersionModel(Base):
     content: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     change_summary: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
-        DateTime, nullable=False, server_default=func.now()
+        DateTime(timezone=True), nullable=False, server_default=func.now()
     )
 
     skill: Mapped["SkillModel"] = relationship(back_populates="versions")

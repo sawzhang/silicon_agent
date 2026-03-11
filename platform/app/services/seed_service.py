@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 import logging
 import uuid
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -45,8 +45,7 @@ async def seed_demo_data(session: AsyncSession) -> None:
         return
 
     # --- Seed sample tasks with stages ---
-    # Use naive UTC datetime for PostgreSQL compatibility (DateTime columns lack timezone=True)
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
 
     # Get full_pipeline template
     tpl_result = await session.execute(
