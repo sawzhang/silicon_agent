@@ -72,6 +72,14 @@ async def created_project():
     await _cleanup_project(proj_id)
 
 
+def test_project_model_timestamps_are_timezone_aware():
+    """Project timestamp columns should be timezone-aware for Postgres compatibility."""
+    columns = ProjectModel.__table__.c
+    assert columns.last_synced_at.type.timezone is True
+    assert columns.created_at.type.timezone is True
+    assert columns.updated_at.type.timezone is True
+
+
 # ── list_projects ─────────────────────────────────────────────────────────────
 
 
