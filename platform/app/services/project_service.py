@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Optional
 
 from sqlalchemy import func, or_, select
@@ -129,7 +129,7 @@ class ProjectService:
         except RepoNotFoundError as e:
             raise ValueError(str(e))
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now()
         project.tech_stack = ctx.tech_stack
         project.repo_tree = ctx.tree
         project.last_synced_at = now

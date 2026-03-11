@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import List, Optional
 
 from sqlalchemy import func, select
@@ -178,7 +178,7 @@ class TaskService:
         if task.status in ("completed", "failed", "cancelled"):
             return self._task_to_response(task)
         task.status = "cancelled"
-        task.completed_at = datetime.now(timezone.utc)
+        task.completed_at = datetime.now()
         await self.session.commit()
         await self.session.refresh(task)
         return self._task_to_response(task)

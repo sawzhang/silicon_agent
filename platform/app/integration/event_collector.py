@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Optional
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -47,7 +47,7 @@ class EventCollector:
             agent_role=agent_role,
             value=value,
             unit=unit,
-            recorded_at=datetime.now(timezone.utc),
+            recorded_at=datetime.now(),
             extra_data=metadata,
         )
         session.add(metric)

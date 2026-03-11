@@ -1,7 +1,7 @@
 """Simple JWT token issuing endpoint for development/internal use."""
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 
 import jwt
 from fastapi import APIRouter, HTTPException
@@ -35,12 +35,12 @@ async def issue_token(request: TokenRequest):
         raise HTTPException(status_code=401, detail="Password required when JWT is enabled")
 
     expires_delta = timedelta(hours=24)
-    expire = datetime.now(timezone.utc) + expires_delta
+    expire = datetime.now() + expires_delta
 
     payload = {
         "sub": request.username,
         "exp": expire,
-        "iat": datetime.now(timezone.utc),
+        "iat": datetime.now(),
     }
     token = jwt.encode(payload, settings.JWT_SECRET, algorithm="HS256")
 

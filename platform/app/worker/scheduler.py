@@ -51,7 +51,7 @@ async def _cron_loop() -> None:
 
 
 async def _fire_due_rules() -> None:
-    now = datetime.now(timezone.utc)
+    now = datetime.now()
 
     async with async_session_factory() as session:
         result = await session.execute(

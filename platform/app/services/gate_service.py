@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Optional
 
 from sqlalchemy import func, select
@@ -71,7 +71,7 @@ class GateService:
         gate.status = "approved"
         gate.reviewer = request.reviewer
         gate.review_comment = request.comment
-        gate.reviewed_at = datetime.now(timezone.utc)
+        gate.reviewed_at = datetime.now()
         await self.session.commit()
         await self.session.refresh(gate)
         return GateDetailResponse.model_validate(gate)
@@ -86,7 +86,7 @@ class GateService:
         gate.status = "rejected"
         gate.reviewer = request.reviewer
         gate.review_comment = request.comment
-        gate.reviewed_at = datetime.now(timezone.utc)
+        gate.reviewed_at = datetime.now()
         await self.session.commit()
         await self.session.refresh(gate)
 
@@ -113,7 +113,7 @@ class GateService:
         gate.reviewer = request.reviewer
         gate.review_comment = request.comment
         gate.revised_content = request.revised_content
-        gate.reviewed_at = datetime.now(timezone.utc)
+        gate.reviewed_at = datetime.now()
         await self.session.commit()
         await self.session.refresh(gate)
         return GateDetailResponse.model_validate(gate)

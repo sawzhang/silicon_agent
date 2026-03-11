@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Optional
 
 from sqlalchemy import select
@@ -33,7 +33,7 @@ class CircuitBreakerService:
             status="triggered",
             triggered_by=triggered_by,
             trigger_reason=reason,
-            triggered_at=datetime.now(timezone.utc),
+            triggered_at=datetime.now(),
         )
         self.session.add(cb)
         await self.session.commit()
@@ -50,7 +50,7 @@ class CircuitBreakerService:
         if cb is None:
             return None
         cb.status = "resolved"
-        cb.resolved_at = datetime.now(timezone.utc)
+        cb.resolved_at = datetime.now()
         cb.resolved_by = resolved_by
         await self.session.commit()
         await self.session.refresh(cb)

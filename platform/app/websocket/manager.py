@@ -1,6 +1,6 @@
 import json
 import logging
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Any
 
 from fastapi import WebSocket
@@ -66,7 +66,7 @@ class ConnectionManager:
         message = json.dumps({
             "type": msg_type,
             "payload": data,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now().isoformat(),
         })
 
         if self._use_redis and self._redis:
@@ -93,7 +93,7 @@ class ConnectionManager:
         message = json.dumps({
             "type": msg_type,
             "payload": data,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now().isoformat(),
         })
         try:
             await websocket.send_text(message)

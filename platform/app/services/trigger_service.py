@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from typing import Optional
 
 from sqlalchemy import select
@@ -162,7 +162,7 @@ class TriggerService:
     async def _is_duplicate(self, rule: TriggerRuleModel, dedup_key: str) -> bool:
         """检查去重窗口内是否已有相同 dedup_key 的触发记录。"""
         window_hours = rule.dedup_window_hours or 24
-        cutoff = datetime.now(timezone.utc) - timedelta(hours=window_hours)
+        cutoff = datetime.now() - timedelta(hours=window_hours)
 
         result = await self.session.execute(
             select(TriggerEventModel).where(

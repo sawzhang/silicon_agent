@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from typing import Dict, List, Optional
 
 from sqlalchemy import func, select
@@ -160,7 +160,7 @@ class KPIService:
             )
 
         return KPIReportResponse(
-            generated_at=datetime.now(timezone.utc),
+            generated_at=datetime.now(),
             period=period,
             summary=summary,
             by_agent=by_agent,
@@ -200,7 +200,7 @@ class KPIService:
     # ── ROI Dashboard ──────────────────────────────────────
 
     async def get_roi_summary(self, days: int = 30) -> ROISummaryResponse:
-        cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+        cutoff = datetime.now() - timedelta(days=days)
         result = await self.session.execute(
             select(TaskModel)
             .options(selectinload(TaskModel.template))
@@ -309,7 +309,7 @@ class KPIService:
     # ── Developer Cockpit ──────────────────────────────────
 
     async def get_cockpit(self) -> CockpitResponse:
-        now = datetime.now(timezone.utc)
+        now = datetime.now()
         today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
 
         # Pending gates

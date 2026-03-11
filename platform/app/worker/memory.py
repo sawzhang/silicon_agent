@@ -10,7 +10,7 @@ import json
 import logging
 import uuid
 from dataclasses import asdict, dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional
 
@@ -61,7 +61,7 @@ class MemoryEntry:
             content=content,
             source_task_id=source_task_id,
             source_task_title=source_task_title,
-            created_at=datetime.now(timezone.utc).isoformat(),
+            created_at=datetime.now().isoformat(),
             confidence=confidence,
             tags=tags or [],
         )
@@ -141,7 +141,7 @@ class ProjectMemoryStore:
         if not idx.exists():
             idx.write_text(json.dumps({
                 "project_id": self.project_id,
-                "created_at": datetime.now(timezone.utc).isoformat(),
+                "created_at": datetime.now().isoformat(),
                 "categories": {},
             }, ensure_ascii=False, indent=2))
 
@@ -153,7 +153,7 @@ class ProjectMemoryStore:
             data = {"project_id": self.project_id, "categories": {}}
         data["categories"][category] = {
             "count": count,
-            "updated_at": datetime.now(timezone.utc).isoformat(),
+            "updated_at": datetime.now().isoformat(),
         }
         idx_path.write_text(json.dumps(data, ensure_ascii=False, indent=2))
 

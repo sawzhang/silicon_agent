@@ -9,7 +9,7 @@ import tempfile
 import time
 import uuid
 from collections import defaultdict
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -1933,7 +1933,7 @@ async def _check_circuit_breaker(
         status="triggered",
         triggered_by=stage.agent_role,
         trigger_reason=reason,
-        triggered_at=datetime.now(timezone.utc),
+        triggered_at=datetime.now(),
     )
     session.add(cb)
     await session.commit()
@@ -2106,10 +2106,10 @@ async def _check_interactive_planning(
     logger.info("Task %s paused for plan review (gate_id=%s)", task.id, gate.id)
 
     # Poll for plan approval
-    gate_start = datetime.now(timezone.utc)
+    gate_start = datetime.now()
     while _running:
         await asyncio.sleep(settings.WORKER_GATE_POLL_INTERVAL)
-        elapsed = (datetime.now(timezone.utc) - gate_start).total_seconds()
+        elapsed = (datetime.now() - gate_start).total_seconds()
         if elapsed > settings.WORKER_GATE_MAX_WAIT_SECONDS:
             await _fail_task(session, task, "Plan review timed out")
             return True
@@ -2223,10 +2223,10 @@ async def _maybe_insert_dynamic_gate(
     await notify_gate_created(gate.id, task.id, stage.stage_name, "confidence_review")
 
     # Poll until resolved (reuse existing gate polling logic)
-    gate_start = datetime.now(timezone.utc)
+    gate_start = datetime.now()
     while _running:
         await asyncio.sleep(settings.WORKER_GATE_POLL_INTERVAL)
-        elapsed = (datetime.now(timezone.utc) - gate_start).total_seconds()
+        elapsed = (datetime.now() - gate_start).total_seconds()
         if elapsed > settings.WORKER_GATE_MAX_WAIT_SECONDS:
             return False
         if await _is_cancelled(session, task.id):
@@ -2491,13 +2491,13 @@ async def _handle_gate(
         )
 
     # Poll for gate resolution with timeout
-    gate_start = datetime.now(timezone.utc)
+    gate_start = datetime.now()
 
     while _running:
         await asyncio.sleep(settings.WORKER_GATE_POLL_INTERVAL)
 
         # Check gate timeout
-        elapsed = (datetime.now(timezone.utc) - gate_start).total_seconds()
+        elapsed = (datetime.now() - gate_start).total_seconds()
         if elapsed > settings.WORKER_GATE_MAX_WAIT_SECONDS:
             logger.warning(
                 "Gate %s timed out after %ds (max=%ds)",
@@ -2760,7 +2760,7 @@ def _group_stages_by_order(
 async def _complete_task(session: AsyncSession, task: TaskModel) -> None:
     """Mark task as completed, broadcast, and send external notification."""
     task.status = "completed"
-    task.completed_at = datetime.now(timezone.utc)
+    task.completed_at = datetime.now()
     await session.commit()
 
     await _safe_broadcast(TASK_STATUS_CHANGED, {
@@ -2804,7 +2804,7 @@ def _build_repo_context(project) -> str:
 
 async def _fail_task(session: AsyncSession, task: TaskModel, reason: str) -> None:
     """Mark task as failed, broadcast, and send external notification."""
-    failed_at = datetime.now(timezone.utc)
+    failed_at = datetime.now()
     update_result = await session.execute(
         update(TaskModel)
         .where(

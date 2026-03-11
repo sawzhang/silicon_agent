@@ -6,7 +6,7 @@ Compatible with Slack Incoming Webhooks, 飞书/钉钉 custom bots, and generic 
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Optional
 
 import httpx
@@ -49,7 +49,7 @@ async def notify(event_type: str, payload: dict) -> None:
 
     body = {
         "event": event_type,
-        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "timestamp": datetime.now().isoformat(),
         **payload,
     }
 

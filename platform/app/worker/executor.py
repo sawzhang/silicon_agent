@@ -7,7 +7,7 @@ import logging
 import re
 import time
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 from sqlalchemy import select
@@ -733,7 +733,7 @@ async def _finalize_stage_success(
 ) -> None:
     """Persist completed-stage state to DB and broadcast updates."""
     stage.status = "completed"
-    stage.completed_at = datetime.now(timezone.utc)
+    stage.completed_at = datetime.now()
     stage.duration_seconds = round(elapsed, 2)
     stage.tokens_used = total_tokens
     stage.output_summary = output
@@ -769,7 +769,7 @@ async def _finalize_stage_success(
     if agent:
         agent.status = "idle"
         agent.current_task_id = None
-        agent.last_active_at = datetime.now(timezone.utc)
+        agent.last_active_at = datetime.now()
         await session.commit()
         await _safe_broadcast(
             AGENT_STATUS_CHANGED,
@@ -805,7 +805,7 @@ async def execute_stage(
     evaluator_config: Optional[dict] = None,
 ) -> str:
     """Execute a single stage: call AgentRunner and update DB/broadcast."""
-    now = datetime.now(timezone.utc)
+    now = datetime.now()
     task_id = str(task.id)
     stage_id = str(stage.id)
 
@@ -1141,7 +1141,7 @@ async def mark_stage_failed(
 
     stage.status = "failed"
     stage.error_message = error_message
-    stage.completed_at = datetime.now(timezone.utc)
+    stage.completed_at = datetime.now()
     # Phase 1.2: Classify the failure for recovery routing
     category = classify_failure(
         error=error,
@@ -1209,7 +1209,7 @@ async def execute_stage_sandboxed(
     from app.worker.prompts import SYSTEM_PROMPTS, StageContext, build_user_prompt
     from app.worker.sandbox import get_sandbox_manager
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now()
 
     # 1. Mark stage as running
     stage.status = "running"
@@ -1628,7 +1628,7 @@ async def execute_stage_sandboxed(
 
     # 7. Update stage as completed
     stage.status = "completed"
-    stage.completed_at = datetime.now(timezone.utc)
+    stage.completed_at = datetime.now()
     stage.duration_seconds = round(elapsed, 2)
     stage.tokens_used = total_tokens
     stage.output_summary = _resolve_stage_output_summary(
@@ -1658,7 +1658,7 @@ async def execute_stage_sandboxed(
     if agent:
         agent.status = "idle"
         agent.current_task_id = None
-        agent.last_active_at = datetime.now(timezone.utc)
+        agent.last_active_at = datetime.now()
         await session.commit()
         await _safe_broadcast(AGENT_STATUS_CHANGED, {
             "role": agent.role,

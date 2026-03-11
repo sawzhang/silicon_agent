@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import time
-from datetime import datetime, timezone
+from datetime import datetime
 
 import httpx
 
@@ -26,7 +26,7 @@ class LLMProbeService:
         """Run a minimal chat-completions request and return normalized diagnostics."""
         requested_model = settings.LLM_MODEL
         started = time.perf_counter()
-        checked_at = datetime.now(timezone.utc)
+        checked_at = datetime.now()
         client = self._build_client(timeout_ms)
 
         try:

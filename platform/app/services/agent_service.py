@@ -263,8 +263,8 @@ class AgentService:
         if agent is None:
             return None
         agent.status = "running"
-        agent.started_at = datetime.now(timezone.utc)
-        agent.last_active_at = datetime.now(timezone.utc)
+        agent.started_at = datetime.now()
+        agent.last_active_at = datetime.now()
         await self.session.commit()
         await self.session.refresh(agent)
         return AgentStatusResponse.model_validate(agent)
@@ -292,7 +292,7 @@ class AgentService:
 
         uptime = None
         if agent.status == "running" and agent.started_at:
-            delta = datetime.now(timezone.utc) - agent.started_at.replace(
+            delta = datetime.now() - agent.started_at.replace(
                 tzinfo=timezone.utc
             )
             uptime = delta.total_seconds()

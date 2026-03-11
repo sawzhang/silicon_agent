@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime
 import re
 from typing import Any, Optional
 
@@ -112,7 +112,7 @@ class TaskLogService:
         )
 
         if item.get("created_at") is None:
-            item["created_at"] = datetime.now(timezone.utc).replace(tzinfo=None)
+            item["created_at"] = datetime.now()
 
         if item.get("event_seq") is None:
             item["event_seq"] = 0
