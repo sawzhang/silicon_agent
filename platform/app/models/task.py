@@ -49,7 +49,10 @@ class TaskModel(Base):
     )
 
     stages: Mapped[List["TaskStageModel"]] = relationship(
-        back_populates="task", cascade="all, delete-orphan"
+        back_populates="task",
+        cascade="all, delete-orphan",
+        # Keep DB query order deterministic; business order is still enforced in service layer.
+        order_by="TaskStageModel.id",
     )
     template = relationship("TaskTemplateModel", lazy="selectin")
     project = relationship("ProjectModel", lazy="selectin")

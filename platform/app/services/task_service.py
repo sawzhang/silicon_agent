@@ -464,6 +464,47 @@ class TaskService:
                 pass
         return int(stage_max_retries)
 
+    @staticmethod
+    def _build_stage_order_map(task: TaskModel) -> dict[str, int]:
+        """Build stage order map from template definitions."""
+        template = getattr(task, "template", None)
+        stage_defs_raw = getattr(template, "stages", None) if template else None
+        if not stage_defs_raw:
+            return {}
+        try:
+            stage_defs = json.loads(stage_defs_raw)
+        except (ValueError, json.JSONDecodeError, TypeError):
+            return {}
+        if not isinstance(stage_defs, list):
+            return {}
+
+        order_map: dict[str, int] = {}
+        for idx, stage_def in enumerate(stage_defs):
+            if not isinstance(stage_def, dict):
+                continue
+            stage_name = stage_def.get("name")
+            if not isinstance(stage_name, str) or not stage_name:
+                continue
+            order_raw = stage_def.get("order", idx)
+            try:
+                order_map[stage_name] = int(order_raw)
+            except (TypeError, ValueError):
+                order_map[stage_name] = idx
+        return order_map
+
+    @staticmethod
+    def _sorted_task_stages(task: TaskModel) -> list[TaskStageModel]:
+        """Return task stages in stable display order."""
+        order_map = TaskService._build_stage_order_map(task)
+        stages = list(task.stages or [])
+        return sorted(
+            stages,
+            key=lambda stage: (
+                order_map.get(stage.stage_name, 999),
+                getattr(stage, "id", "") or "",
+            ),
+        )
+
     def _select_retryable_failed_stage(
         self, task: TaskModel,
     ) -> tuple[Optional[TaskStageModel], Optional[str]]:
@@ -513,6 +554,7 @@ class TaskService:
 
     @staticmethod
     def _task_to_response(task: TaskModel) -> TaskDetailResponse:
+        sorted_stages = TaskService._sorted_task_stages(task)
         return TaskDetailResponse(
             id=task.id,
             jira_id=task.jira_id,
@@ -525,7 +567,7 @@ class TaskService:
             completed_at=task.completed_at,
             branch_name=task.branch_name,
             pr_url=task.pr_url,
-            stages=[TaskStageResponse.model_validate(s) for s in task.stages],
+            stages=[TaskStageResponse.model_validate(s) for s in sorted_stages],
             template_id=task.template_id,
             project_id=task.project_id,
             template_name=task.template.display_name if task.template else None,

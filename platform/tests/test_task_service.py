@@ -378,6 +378,72 @@ async def test_get_task_not_found():
     assert result is None
 
 
+@pytest.mark.asyncio
+async def test_get_task_sorts_stages_by_template_order():
+    """Task detail stages should follow template-defined order."""
+    session = _make_session()
+    template = _make_template(
+        id="tmpl-order",
+        stages_json=json.dumps(
+            [
+                {"name": "parse", "agent_role": "orchestrator", "order": 0},
+                {"name": "code", "agent_role": "coding", "order": 1},
+                {"name": "test", "agent_role": "test", "order": 2},
+                {"name": "signoff", "agent_role": "orchestrator", "order": 3},
+            ]
+        ),
+    )
+    task = _make_task(
+        id="task-order",
+        template=template,
+        stages=[
+            _make_stage(id="s-code", stage_name="code", agent_role="coding"),
+            _make_stage(id="s-signoff", stage_name="signoff", agent_role="orchestrator"),
+            _make_stage(id="s-parse", stage_name="parse", agent_role="orchestrator"),
+            _make_stage(id="s-test", stage_name="test", agent_role="test"),
+        ],
+    )
+    session.execute.return_value = _mock_result(scalar_one_or_none=task)
+    svc = TaskService(session)
+
+    result = await svc.get_task("task-order")
+
+    assert result is not None
+    assert [s.stage_name for s in result.stages] == ["parse", "code", "test", "signoff"]
+
+
+@pytest.mark.asyncio
+async def test_get_task_unknown_stages_are_sorted_last_and_stable():
+    """Unknown stage names should be placed after known stages with stable fallback order."""
+    session = _make_session()
+    template = _make_template(
+        id="tmpl-order",
+        stages_json=json.dumps(
+            [
+                {"name": "parse", "agent_role": "orchestrator", "order": 0},
+                {"name": "code", "agent_role": "coding", "order": 1},
+            ]
+        ),
+    )
+    task = _make_task(
+        id="task-order-unknown",
+        template=template,
+        stages=[
+            _make_stage(id="z-last", stage_name="custom_b", agent_role="coding"),
+            _make_stage(id="s-parse", stage_name="parse", agent_role="orchestrator"),
+            _make_stage(id="a-first", stage_name="custom_a", agent_role="coding"),
+        ],
+    )
+    session.execute.return_value = _mock_result(scalar_one_or_none=task)
+    svc = TaskService(session)
+
+    result = await svc.get_task("task-order-unknown")
+
+    assert result is not None
+    assert [s.stage_name for s in result.stages] == ["parse", "custom_a", "custom_b"]
+    assert [s.id for s in result.stages] == ["s-parse", "a-first", "z-last"]
+
+
 # ---------------------------------------------------------------------------
 # get_stages (lines 144-145)
 # ---------------------------------------------------------------------------
