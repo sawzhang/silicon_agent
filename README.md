@@ -61,7 +61,7 @@ silicon_agent/
 ```bash
 cd platform
 cp .env.example .env
-# 编辑 .env 配置 LLM_API_KEY 和 LLM_BASE_URL
+# 编辑 .env 配置 LLM_API_KEY、LLM_BASE_URL（如用 GHE，再配置 GHE_BASE_URL/GHE_USERNAME/GHE_TOKEN）
 
 python -m venv .venv
 source .venv/bin/activate

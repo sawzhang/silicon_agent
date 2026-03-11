@@ -68,10 +68,21 @@ def test_inject_git_auth_adds_basic_header_for_https(monkeypatch: pytest.MonkeyP
         "git fetch --prune origin",
         "https://scm.example.com/china/my/repo.git",
     )
-    assert cmd.startswith("git -c http.extraheader=")
+    assert cmd.startswith("GIT_TERMINAL_PROMPT=0 GCM_INTERACTIVE=Never git -c http.extraheader=")
     assert "fetch --prune origin" in cmd
     assert "Basic" in cmd
     assert "eC1hY2Nlc3MtdG9rZW46dG9rZW4tY2hpbmE=" in cmd
+
+
+def test_inject_git_auth_uses_configured_ghe_username(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr(worktree.settings, "GHE_BASE_URL", "https://scm.example.com/api/v3")
+    monkeypatch.setattr(worktree.settings, "GHE_USERNAME", "stb_admin")
+    monkeypatch.setattr(worktree.settings, "GHE_TOKEN", "token-china")
+    cmd = worktree._inject_git_auth(
+        "git fetch --prune origin",
+        "https://scm.example.com/china/my/repo.git",
+    )
+    assert "c3RiX2FkbWluOnRva2VuLWNoaW5h" in cmd  # base64("stb_admin:token-china")
 
 
 def test_inject_git_auth_skips_for_ssh(monkeypatch: pytest.MonkeyPatch):

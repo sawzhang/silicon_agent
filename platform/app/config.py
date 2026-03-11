@@ -59,6 +59,7 @@ class Settings(BaseSettings):
 
     # GitHub Enterprise integration (e.g. scm.starbucks.com)
     GHE_BASE_URL: str = ""       # e.g. "https://scm.starbucks.com/api/v3"
+    GHE_USERNAME: str = ""       # Git username for HTTPS auth (recommended for GHE git operations)
     GHE_TOKEN: str = ""          # Personal access token for the GHE instance
 
     # ROI benchmark: estimated manual effort per task

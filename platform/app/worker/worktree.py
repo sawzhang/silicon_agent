@@ -109,20 +109,40 @@ def _resolve_git_token_for_repo_url(repo_url: str) -> str:
     return ""
 
 
+def _resolve_git_username_for_repo_url(repo_url: str) -> str:
+    repo_url = (repo_url or "").strip()
+    if not repo_url:
+        return ""
+
+    if "github.com" in repo_url:
+        # GitHub PAT over HTTPS uses `x-access-token` as username.
+        return "x-access-token"
+
+    ghe_username = (settings.GHE_USERNAME or "").strip()
+    if ghe_username:
+        return ghe_username
+    # Backward-compatible fallback for deployments that only configured token.
+    return "x-access-token"
+
+
 def _inject_git_auth(cmd: str, repo_url: str) -> str:
     repo_url = (repo_url or "").strip()
     token = _resolve_git_token_for_repo_url(repo_url)
-    if not token:
+    username = _resolve_git_username_for_repo_url(repo_url)
+    if not token or not username:
         return cmd
     if not repo_url.startswith(("http://", "https://")):
         return cmd
     if not cmd.startswith("git "):
         return cmd
 
-    raw = f"x-access-token:{token}".encode("utf-8")
+    raw = f"{username}:{token}".encode("utf-8")
     auth_value = "Basic " + base64.b64encode(raw).decode("ascii")
     header = f"Authorization: {auth_value}"
-    return f"git -c http.extraheader={shlex.quote(header)} {cmd[4:]}"
+    return (
+        "GIT_TERMINAL_PROMPT=0 GCM_INTERACTIVE=Never "
+        f"git -c http.extraheader={shlex.quote(header)} {cmd[4:]}"
+    )
 
 
 def _build_gh_cli_prefix(repo_url: str) -> str:
