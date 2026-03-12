@@ -29,7 +29,7 @@ class LLMResponse:
 
 
 class LLMClient:
-    """Async client for OpenAI-compatible /v1/chat/completions endpoint."""
+    """Async client for OpenAI-compatible chat completions endpoint."""
 
     def __init__(
         self,
@@ -63,7 +63,7 @@ class LLMClient:
             "max_tokens": max_tokens,
         }
 
-        url = f"{self._base_url}/v1/chat/completions"
+        url = f"{self._base_url}/chat/completions"
         parsed = urlparse(url)
         logger.debug(
             "LLM request: model=%s messages=%d endpoint=%s://%s%s",
@@ -90,8 +90,8 @@ class LLMClient:
         )
 
     async def list_models(self) -> list[str]:
-        """Fetch model IDs from OpenAI-compatible /v1/models endpoint."""
-        url = f"{self._base_url}/v1/models"
+        """Fetch model IDs from OpenAI-compatible models endpoint."""
+        url = f"{self._base_url}/models"
         response = await self._client.get(url)
         response.raise_for_status()
         data = response.json()

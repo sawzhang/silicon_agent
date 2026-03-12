@@ -136,7 +136,7 @@ class AgentService:
                     return models
             except Exception as exc:
                 logger.warning(
-                    "Failed to load models from %s/v1/models: %s",
+                    "Failed to load models from %s/models: %s",
                     settings.LLM_BASE_URL.rstrip("/"),
                     exc,
                 )
