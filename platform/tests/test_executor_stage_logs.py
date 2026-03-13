@@ -203,6 +203,14 @@ def test_is_tool_call_error_matches_gemini_thought_signature_error():
     assert executor._is_tool_call_error(err) is True
 
 
+def test_is_tool_call_error_matches_auto_tool_choice_not_supported():
+    err = RuntimeError(
+        'Error code: 400 - {"object":"error","message":"\\"auto\\" tool choice requires '
+        '--enable-auto-tool-choice and --tool-call-parser to be set"}'
+    )
+    assert executor._is_tool_call_error(err) is True
+
+
 @pytest.mark.asyncio
 async def test_execute_stage_falls_back_to_text_only_on_thought_signature_error(monkeypatch):
     session = SimpleNamespace(commit=AsyncMock())

@@ -219,6 +219,9 @@ _TOOL_CALL_ERROR_PATTERNS = (
     "invalid_request_error",
     "tool_use_failed",
     "function_call",
+    '\\"auto\\" tool choice requires',
+    '"auto" tool choice requires',
+    "auto tool choice requires",
     "thought_signature",
     "function call is missing a thought_signature",
 )
