@@ -143,3 +143,19 @@ def test_coding_sandbox_image_provides_java_toolchain():
     assert "JAVA8_HOME" in content
     assert "JAVA17_HOME" in content
     assert "ENV JAVA_HOME=/opt/jdk17" in content
+
+
+def test_base_sandbox_image_makes_runtime_entrypoints_world_readable():
+    dockerfile_path = Path(__file__).resolve().parents[1] / "sandbox" / "Dockerfile.base"
+    content = dockerfile_path.read_text(encoding="utf-8")
+
+    assert "COPY --chown=agent:agent sandbox/agent_server.py /app/agent_server.py" in content
+    assert "COPY --chown=agent:agent sandbox/tool_policy.py /app/tool_policy.py" in content
+    assert "RUN chmod -R a+rX /app /skills" in content
+
+
+def test_base_sandbox_image_copies_skills_with_agent_ownership():
+    dockerfile_path = Path(__file__).resolve().parents[1] / "sandbox" / "Dockerfile.base"
+    content = dockerfile_path.read_text(encoding="utf-8")
+
+    assert "COPY --chown=agent:agent skills/ /skills/" in content
