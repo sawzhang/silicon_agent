@@ -24,6 +24,14 @@ def _extract_mounts_from_docker_cmd(tokens: list[str]) -> list[str]:
     return mounts
 
 
+def _extract_user_from_docker_cmd(tokens: list[str]) -> str | None:
+    for idx, token in enumerate(tokens):
+        if token != "--user" or idx + 1 >= len(tokens):
+            continue
+        return tokens[idx + 1]
+    return None
+
+
 def test_build_docker_run_cmd_includes_skillkit_compat_env(monkeypatch, tmp_path):
     from app.worker import sandbox as sandbox_mod
 
@@ -88,6 +96,42 @@ def test_build_docker_run_cmd_disables_raw_model_dump_when_config_off(monkeypatc
     assert env["SANDBOX_DUMP_MODEL_API_RESPONSE"] == "false"
     assert "SANDBOX_MODEL_API_RAW_LOG_PATH" not in env
     assert not any(mount.endswith("dst=/model_api_logs") for mount in mounts)
+
+
+def test_build_docker_run_cmd_uses_workspace_owner_by_default(monkeypatch):
+    from app.worker import sandbox as sandbox_mod
+
+    monkeypatch.setattr(sandbox_mod.settings, "SANDBOX_RUN_AS_WORKSPACE_OWNER", True, raising=False)
+
+    backend = DockerSandboxBackend()
+    cmd = backend._build_docker_run_cmd(
+        container_name="sbx-test",
+        image="sandbox-image:latest",
+        workspace="/tmp/workspace",
+        task_id="task-123",
+        workspace_uid=1234,
+        workspace_gid=2345,
+    )
+
+    assert _extract_user_from_docker_cmd(cmd) == "1234:2345"
+
+
+def test_build_docker_run_cmd_skips_workspace_owner_when_disabled(monkeypatch):
+    from app.worker import sandbox as sandbox_mod
+
+    monkeypatch.setattr(sandbox_mod.settings, "SANDBOX_RUN_AS_WORKSPACE_OWNER", False, raising=False)
+
+    backend = DockerSandboxBackend()
+    cmd = backend._build_docker_run_cmd(
+        container_name="sbx-test",
+        image="sandbox-image:latest",
+        workspace="/tmp/workspace",
+        task_id="task-123",
+        workspace_uid=1234,
+        workspace_gid=2345,
+    )
+
+    assert _extract_user_from_docker_cmd(cmd) is None
 
 
 def test_coding_sandbox_image_provides_java_toolchain():

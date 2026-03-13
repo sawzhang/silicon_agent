@@ -144,12 +144,23 @@ class DockerSandboxBackend:
                 error_code="workspace_not_found",
                 error_message=f"Sandbox workspace path does not exist or is not a directory: {workspace}",
             )
+        workspace_uid: int | None = None
+        workspace_gid: int | None = None
+        if settings.SANDBOX_RUN_AS_WORKSPACE_OWNER:
+            try:
+                stat_result = workspace_path.stat()
+                workspace_uid = stat_result.st_uid
+                workspace_gid = stat_result.st_gid
+            except OSError:
+                logger.warning("Failed to stat sandbox workspace owner for %s", workspace, exc_info=True)
 
         docker_cmd = self._build_docker_run_cmd(
             container_name=container_name,
             image=resolved_image,
             workspace=workspace,
             task_id=task_id,
+            workspace_uid=workspace_uid,
+            workspace_gid=workspace_gid,
         )
 
         logger.info("Creating sandbox container: %s (image=%s)", container_name, resolved_image)
@@ -324,10 +335,19 @@ class DockerSandboxBackend:
                     streamed=True,
                 )
         except httpx.HTTPStatusError as e:
+            # NOTE: do NOT read e.response.text here — on a streaming response
+            # the body has not been buffered and accessing .text raises
+            # ResponseNotRead, which would mask the original status code.
+            status_code = e.response.status_code
+            logger.error(
+                "Sandbox HTTP %d from %s (check container logs for root cause)",
+                status_code,
+                info.container_name,
+            )
             return SandboxResult(
                 error=(
-                    f"Sandbox HTTP {e.response.status_code} from "
-                    f"{info.container_name}: {e.response.text[:500]}"
+                    f"Sandbox HTTP {status_code} from {info.container_name} "
+                    f"(see container logs for details)"
                 ),
                 streamed=True,
             )
@@ -390,6 +410,8 @@ class DockerSandboxBackend:
         image: str,
         workspace: str,
         task_id: str,
+        workspace_uid: int | None = None,
+        workspace_gid: int | None = None,
     ) -> list[str]:
         """Build the docker run command with security constraints."""
         parts = [
@@ -412,6 +434,8 @@ class DockerSandboxBackend:
             "--mount",
             f"type=bind,src={workspace},dst=/workspace",
         ]
+        if settings.SANDBOX_RUN_AS_WORKSPACE_OWNER and workspace_uid is not None and workspace_gid is not None:
+            parts.extend(["--user", f"{workspace_uid}:{workspace_gid}"])
         capture_model_api_raw = bool(settings.SANDBOX_DUMP_MODEL_API_RESPONSE)
         container_raw_log_path: str | None = None
         if capture_model_api_raw:

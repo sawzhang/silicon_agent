@@ -83,6 +83,7 @@ class Settings(BaseSettings):
     SANDBOX_AGENT_PORT: int = 9090
     SANDBOX_READONLY_ROOT: bool = True
     SANDBOX_MAX_CONCURRENT: int = 16
+    SANDBOX_RUN_AS_WORKSPACE_OWNER: bool = True
     SANDBOX_WORKSPACE_BASE_DIR: str = "/tmp/silicon_agent/tasks"
     SANDBOX_FALLBACK_MODE: str = "graceful"
     SANDBOX_MEMORY_MIB: int = 4096  # BoxLite memory limit (MiB); Docker uses SANDBOX_MEMORY
