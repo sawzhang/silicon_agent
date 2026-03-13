@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 
 import pytest
 
+from app.config import settings
 from app.dependencies import get_llm_probe_service
 from app.main import app
 from app.schemas.llm_probe import LLMProbeResponse
@@ -76,3 +77,69 @@ async def test_llm_probe_api_failure_payload(client):
     data = resp.json()
     assert data["ok"] is False
     assert data["error_code"] == "UPSTREAM_TIMEOUT"
+
+
+@pytest.mark.asyncio
+async def test_get_llm_config(client, monkeypatch):
+    monkeypatch.setattr(settings, "LLM_API_KEY", "sk-abcd1234efgh5678")
+    monkeypatch.setattr(settings, "LLM_BASE_URL", "https://api.test.com/v1")
+    monkeypatch.setattr(settings, "LLM_MODEL", "gpt-4o")
+    monkeypatch.setattr(settings, "LLM_TIMEOUT", 30)
+    monkeypatch.setattr(settings, "LLM_ROLE_MODEL_MAP", '{"coding": "deepseek-coder"}')
+
+    resp = await client.get("/api/v1/llm/config")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["api_key_set"] is True
+    assert data["api_key_masked"] == "sk-a****5678"
+    assert data["base_url"] == "https://api.test.com/v1"
+    assert data["model"] == "gpt-4o"
+    assert data["role_model_map"] == {"coding": "deepseek-coder"}
+
+
+@pytest.mark.asyncio
+async def test_get_llm_config_empty_key(client, monkeypatch):
+    monkeypatch.setattr(settings, "LLM_API_KEY", "")
+    resp = await client.get("/api/v1/llm/config")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["api_key_set"] is False
+    assert data["api_key_masked"] == ""
+
+
+@pytest.mark.asyncio
+async def test_update_llm_config(client, monkeypatch):
+    monkeypatch.setattr(settings, "LLM_API_KEY", "old-key")
+    monkeypatch.setattr(settings, "LLM_BASE_URL", "https://old.com/v1")
+    monkeypatch.setattr(settings, "LLM_MODEL", "old-model")
+    monkeypatch.setattr(settings, "LLM_TIMEOUT", 10)
+    monkeypatch.setattr(settings, "LLM_ROLE_MODEL_MAP", "{}")
+
+    resp = await client.put(
+        "/api/v1/llm/config",
+        json={"base_url": "https://new.com/v1/", "model": "gpt-4o-mini"},
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["base_url"] == "https://new.com/v1"  # trailing slash stripped
+    assert data["model"] == "gpt-4o-mini"
+    # api_key unchanged
+    assert data["api_key_masked"] != ""
+
+
+@pytest.mark.asyncio
+async def test_update_llm_config_api_key(client, monkeypatch):
+    monkeypatch.setattr(settings, "LLM_API_KEY", "")
+    monkeypatch.setattr(settings, "LLM_BASE_URL", "https://x.com/v1")
+    monkeypatch.setattr(settings, "LLM_MODEL", "m")
+    monkeypatch.setattr(settings, "LLM_TIMEOUT", 10)
+    monkeypatch.setattr(settings, "LLM_ROLE_MODEL_MAP", "{}")
+
+    resp = await client.put(
+        "/api/v1/llm/config",
+        json={"api_key": "sk-new-key-value-1234"},
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["api_key_set"] is True
+    assert "new-" not in data["api_key_masked"]  # key is masked

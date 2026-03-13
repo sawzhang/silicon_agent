@@ -21,3 +21,23 @@ class LLMProbeResponse(BaseModel):
     error_code: Optional[str] = None
     error_message: Optional[str] = None
     checked_at: datetime
+
+
+class LLMConfigResponse(BaseModel):
+    """Current LLM connection configuration (API key masked)."""
+
+    api_key_set: bool
+    api_key_masked: str
+    base_url: str
+    model: str
+    timeout: float
+    role_model_map: dict[str, str]
+
+
+class LLMConfigUpdateRequest(BaseModel):
+    """Request to update LLM connection settings at runtime."""
+
+    api_key: Optional[str] = None
+    base_url: Optional[str] = None
+    model: Optional[str] = None
+    timeout: Optional[float] = None

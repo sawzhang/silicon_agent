@@ -79,6 +79,7 @@ class TaskDetailResponse(BaseModel):
     target_branch: Optional[str] = None
     yunxiao_task_id: Optional[str] = None
     github_issue_number: Optional[int] = None
+    error_reason: Optional[str] = None
 
     @field_validator("total_tokens", mode="before")
     @classmethod
