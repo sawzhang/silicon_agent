@@ -457,6 +457,24 @@ class DockerSandboxBackend:
                 )
                 capture_model_api_raw = False
 
+        gradle_cache_host_dir = Path(settings.SANDBOX_GRADLE_CACHE_HOST_DIR).expanduser()
+        gradle_cache_container_dir = str(settings.SANDBOX_GRADLE_USER_HOME).strip() or "/var/lib/silicon_agent/gradle-cache"
+        try:
+            gradle_cache_host_dir.mkdir(parents=True, exist_ok=True)
+            parts.extend(
+                [
+                    "--mount",
+                    f"type=bind,src={gradle_cache_host_dir},dst={gradle_cache_container_dir}",
+                ]
+            )
+        except Exception:
+            logger.warning(
+                "Failed to prepare gradle cache mount directory: %s",
+                gradle_cache_host_dir,
+                exc_info=True,
+            )
+            gradle_cache_container_dir = "/tmp/.gradle"
+
         if settings.SANDBOX_READONLY_ROOT:
             parts.append("--read-only")
             parts.extend(["--tmpfs", "/tmp:size=512m"])
@@ -479,7 +497,7 @@ class DockerSandboxBackend:
                 "-e",
                 f"SANDBOX_DUMP_MODEL_API_RESPONSE={'true' if capture_model_api_raw else 'false'}",
                 "-e",
-                f"GRADLE_USER_HOME={settings.SANDBOX_GRADLE_USER_HOME}",
+                f"GRADLE_USER_HOME={gradle_cache_container_dir}",
                 "-e",
                 f"SANDBOX_GRADLE_WRAPPER_PREWARM={'true' if settings.SANDBOX_GRADLE_WRAPPER_PREWARM else 'false'}",
                 "-e",
