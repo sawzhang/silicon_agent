@@ -77,10 +77,11 @@ _JAVA17_PATTERNS = (
     r"sourceCompatibility\s*=\s*(?:['\"]?17['\"]?|JavaVersion\.VERSION_17)",
     r"targetCompatibility\s*=\s*(?:['\"]?17['\"]?|JavaVersion\.VERSION_17)",
 )
-_GRADLE_WRAPPER_CMD_RE = re.compile(r"(?<![\w./-])(?:sh\s+)?(?:\./)?gradlew(?![\w.-])")
 _GRADLE_ANY_CMD_RE = re.compile(r"(?<![\w./-])(?:gradle|(?:sh\s+)?(?:\./)?gradlew)(?![\w.-])")
 _RUNTIME_PREFLIGHT_DONE = False
 _RUNTIME_PREFLIGHT_LOCK = asyncio.Lock()
+_WRAPPER_PREWARM_DONE = False
+_WRAPPER_PREWARM_LOCK = asyncio.Lock()
 
 
 def _normalize_openai_base_url(base_url: str | None) -> str:
@@ -191,30 +192,15 @@ def _env_int(name: str, default: int) -> int:
     return parsed if parsed > 0 else default
 
 
-def _rewrite_gradle_wrapper_command(command: str) -> tuple[str, bool]:
-    rewritten, count = _GRADLE_WRAPPER_CMD_RE.subn("gradle", command)
-    return rewritten, count > 0
-
-
-def _build_gradle_command(
-    *,
-    original_command: str,
-    rewritten_command: str,
-    timeout_seconds: int,
-    allow_wrapper_fallback: bool,
-) -> tuple[str, str]:
-    payload = rewritten_command
-    strategy = "system"
-    if allow_wrapper_fallback and rewritten_command != original_command:
-        strategy = "wrapper_fallback"
-        payload = (
-            f"{rewritten_command}; __sa_rc=$?; "
-            f"if [ $__sa_rc -eq 126 ] || [ $__sa_rc -eq 127 ]; then {original_command}; "
-            f"else exit $__sa_rc; fi"
-        )
-    if timeout_seconds > 0:
-        payload = f"timeout {timeout_seconds}s bash -lc {shlex.quote(payload)}"
-    return payload, strategy
+def _wrap_with_timeout(command: str, timeout_seconds: int) -> str:
+    if timeout_seconds <= 0:
+        return command
+    payload = (
+        "if command -v timeout >/dev/null 2>&1; "
+        f"then timeout {timeout_seconds}s bash -lc {shlex.quote(command)}; "
+        f"else bash -lc {shlex.quote(command)}; fi"
+    )
+    return payload
 
 
 async def _run_runtime_preflight_once() -> None:
@@ -253,6 +239,61 @@ async def _run_runtime_preflight_once() -> None:
             logger.info("sandbox_runtime_preflight java=unavailable")
 
         _RUNTIME_PREFLIGHT_DONE = True
+
+
+async def _run_gradle_wrapper_prewarm_once(workdir: str) -> None:
+    global _WRAPPER_PREWARM_DONE
+    if _WRAPPER_PREWARM_DONE:
+        return
+    if not _env_flag("SANDBOX_GRADLE_WRAPPER_PREWARM", True):
+        return
+
+    gradlew = Path(workdir) / "gradlew"
+    if not gradlew.is_file():
+        return
+
+    timeout_seconds = _env_int("SANDBOX_GRADLE_WRAPPER_PREWARM_TIMEOUT_SECONDS", 180)
+    cmd = _wrap_with_timeout(f"cd {shlex.quote(workdir)} && ./gradlew --version", timeout_seconds)
+
+    async with _WRAPPER_PREWARM_LOCK:
+        if _WRAPPER_PREWARM_DONE:
+            return
+
+        started = time.monotonic()
+        proc = await asyncio.create_subprocess_exec(
+            "sh", "-lc", cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.STDOUT,
+        )
+        try:
+            out, _ = await proc.communicate()
+            elapsed_ms = int((time.monotonic() - started) * 1000)
+            output = (out or b"").decode("utf-8", errors="ignore")
+            if proc.returncode == 0:
+                _WRAPPER_PREWARM_DONE = True
+                logger.info(
+                    "gradle_wrapper_prewarm status=success workdir=%s elapsed_ms=%d gradle_user_home=%s",
+                    workdir,
+                    elapsed_ms,
+                    os.environ.get("GRADLE_USER_HOME", ""),
+                )
+                return
+
+            logger.warning(
+                "gradle_wrapper_prewarm status=failed workdir=%s elapsed_ms=%d exit_code=%s output=%s",
+                workdir,
+                elapsed_ms,
+                proc.returncode,
+                output[-600:].replace("\n", " | "),
+            )
+        except Exception as exc:
+            elapsed_ms = int((time.monotonic() - started) * 1000)
+            logger.warning(
+                "gradle_wrapper_prewarm status=error workdir=%s elapsed_ms=%d error=%s",
+                workdir,
+                elapsed_ms,
+                exc,
+            )
 
 
 def _extract_gemini_thought_signatures_from_response(response_obj: Any) -> dict[str, str]:
@@ -572,32 +613,14 @@ class ContainerAgentRunner(ToolExecutionPolicyMixin, AgentRunner):
                 tool_call=tool_call,
             )
 
-        force_system_gradle = _env_flag("SANDBOX_FORCE_SYSTEM_GRADLE", True)
-        allow_wrapper_fallback = _env_flag("SANDBOX_ALLOW_WRAPPER_FALLBACK", True)
         timeout_seconds = _env_int("SANDBOX_GRADLE_CMD_TIMEOUT_SECONDS", 480)
         rewritten = command
-        rewritten_flag = False
-        strategy = "wrapper"
-        if force_system_gradle:
-            rewritten, rewritten_flag = _rewrite_gradle_wrapper_command(command)
-            if rewritten_flag:
-                rewritten, strategy = _build_gradle_command(
-                    original_command=command,
-                    rewritten_command=rewritten,
-                    timeout_seconds=timeout_seconds,
-                    allow_wrapper_fallback=allow_wrapper_fallback,
-                )
-            elif timeout_seconds > 0:
-                strategy = "system"
-                rewritten = f"timeout {timeout_seconds}s bash -lc {shlex.quote(rewritten)}"
-        elif timeout_seconds > 0:
-            rewritten = f"timeout {timeout_seconds}s bash -lc {shlex.quote(rewritten)}"
+        if timeout_seconds > 0:
+            rewritten = _wrap_with_timeout(rewritten, timeout_seconds)
 
         if rewritten != command:
             logger.info(
-                "gradle_command_rewrite strategy=%s rewritten=%s original_command=%s rewritten_command=%s",
-                strategy,
-                str(rewritten_flag).lower(),
+                "gradle_command_wrap strategy=wrapper rewritten=true original_command=%s rewritten_command=%s",
                 command,
                 rewritten,
             )
@@ -894,6 +917,7 @@ async def handle_execute(request: web.Request) -> web.Response:
     )
     await _run_runtime_preflight_once()
     _configure_java_runtime_for_workspace(parsed["workdir"])
+    await _run_gradle_wrapper_prewarm_once(parsed["workdir"])
 
     try:
         runner = _create_runner(parsed)
@@ -966,6 +990,7 @@ async def handle_execute_stream(request: web.Request) -> web.StreamResponse:
     )
     await _run_runtime_preflight_once()
     _configure_java_runtime_for_workspace(parsed["workdir"])
+    await _run_gradle_wrapper_prewarm_once(parsed["workdir"])
 
     try:
         runner = _create_runner(parsed)

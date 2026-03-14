@@ -46,9 +46,15 @@ def test_build_docker_run_cmd_includes_skillkit_compat_env(monkeypatch, tmp_path
         "SANDBOX_MODEL_API_RAW_LOG_HOST_DIR",
         str(raw_log_dir),
     )
-    monkeypatch.setattr(sandbox_mod.settings, "SANDBOX_FORCE_SYSTEM_GRADLE", True)
     monkeypatch.setattr(sandbox_mod.settings, "SANDBOX_GRADLE_CMD_TIMEOUT_SECONDS", 480)
-    monkeypatch.setattr(sandbox_mod.settings, "SANDBOX_ALLOW_WRAPPER_FALLBACK", True)
+    gradle_cache_dir = tmp_path / "gradle_cache"
+    monkeypatch.setattr(
+        sandbox_mod.settings,
+        "SANDBOX_GRADLE_USER_HOME_HOST_DIR",
+        str(gradle_cache_dir),
+    )
+    monkeypatch.setattr(sandbox_mod.settings, "SANDBOX_GRADLE_WRAPPER_PREWARM", True)
+    monkeypatch.setattr(sandbox_mod.settings, "SANDBOX_GRADLE_WRAPPER_PREWARM_TIMEOUT_SECONDS", 180)
 
     backend = DockerSandboxBackend()
     cmd = backend._build_docker_run_cmd(
@@ -69,10 +75,12 @@ def test_build_docker_run_cmd_includes_skillkit_compat_env(monkeypatch, tmp_path
     assert env["AGENT_PORT"] == "19090"
     assert env["SANDBOX_DUMP_MODEL_API_RESPONSE"] == "true"
     assert env["SANDBOX_MODEL_API_RAW_LOG_PATH"] == "/model_api_logs/task-123.jsonl"
-    assert env["SANDBOX_FORCE_SYSTEM_GRADLE"] == "true"
     assert env["SANDBOX_GRADLE_CMD_TIMEOUT_SECONDS"] == "480"
-    assert env["SANDBOX_ALLOW_WRAPPER_FALLBACK"] == "true"
+    assert env["GRADLE_USER_HOME"] == "/gradle-cache"
+    assert env["SANDBOX_GRADLE_WRAPPER_PREWARM"] == "true"
+    assert env["SANDBOX_GRADLE_WRAPPER_PREWARM_TIMEOUT_SECONDS"] == "180"
     assert f"type=bind,src={raw_log_dir},dst=/model_api_logs" in mounts
+    assert f"type=bind,src={gradle_cache_dir},dst=/gradle-cache" in mounts
 
 
 def test_build_docker_run_cmd_disables_raw_model_dump_when_config_off(monkeypatch, tmp_path):

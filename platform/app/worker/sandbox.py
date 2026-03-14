@@ -11,9 +11,11 @@ Supports two backends, selected via ``SANDBOX_BACKEND`` setting:
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import inspect
 import json
 import logging
+import os
 import time
 from pathlib import Path
 from typing import Any, Awaitable, Callable, Dict, Optional
@@ -457,6 +459,26 @@ class DockerSandboxBackend:
                 )
                 capture_model_api_raw = False
 
+        gradle_user_home_mount = "/gradle-cache"
+        gradle_user_home_host = Path(settings.SANDBOX_GRADLE_USER_HOME_HOST_DIR).expanduser()
+        try:
+            gradle_user_home_host.mkdir(parents=True, exist_ok=True)
+            with contextlib.suppress(OSError):
+                os.chmod(gradle_user_home_host, 0o777)
+            parts.extend(
+                [
+                    "--mount",
+                    f"type=bind,src={gradle_user_home_host},dst={gradle_user_home_mount}",
+                ]
+            )
+        except Exception:
+            logger.warning(
+                "Failed to prepare gradle cache mount directory: %s",
+                gradle_user_home_host,
+                exc_info=True,
+            )
+            gradle_user_home_mount = "/tmp/.gradle"
+
         if settings.SANDBOX_READONLY_ROOT:
             parts.append("--read-only")
             parts.extend(["--tmpfs", "/tmp:size=512m"])
@@ -478,6 +500,12 @@ class DockerSandboxBackend:
             [
                 "-e",
                 f"SANDBOX_DUMP_MODEL_API_RESPONSE={'true' if capture_model_api_raw else 'false'}",
+                "-e",
+                f"GRADLE_USER_HOME={gradle_user_home_mount}",
+                "-e",
+                f"SANDBOX_GRADLE_WRAPPER_PREWARM={'true' if settings.SANDBOX_GRADLE_WRAPPER_PREWARM else 'false'}",
+                "-e",
+                f"SANDBOX_GRADLE_WRAPPER_PREWARM_TIMEOUT_SECONDS={int(settings.SANDBOX_GRADLE_WRAPPER_PREWARM_TIMEOUT_SECONDS)}",
             ]
         )
         if capture_model_api_raw and container_raw_log_path:
@@ -485,11 +513,7 @@ class DockerSandboxBackend:
         parts.extend(
             [
                 "-e",
-                f"SANDBOX_FORCE_SYSTEM_GRADLE={'true' if settings.SANDBOX_FORCE_SYSTEM_GRADLE else 'false'}",
-                "-e",
                 f"SANDBOX_GRADLE_CMD_TIMEOUT_SECONDS={int(settings.SANDBOX_GRADLE_CMD_TIMEOUT_SECONDS)}",
-                "-e",
-                f"SANDBOX_ALLOW_WRAPPER_FALLBACK={'true' if settings.SANDBOX_ALLOW_WRAPPER_FALLBACK else 'false'}",
             ]
         )
 

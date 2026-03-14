@@ -177,25 +177,9 @@ def test_configure_java_runtime_sets_java_home_and_path(tmp_path, monkeypatch):
     assert os.environ["PATH"].split(":")[0] == "/opt/jdk8/bin"
 
 
-def test_rewrite_gradle_wrapper_command_simple():
+def test_container_runner_keeps_gradlew_and_wraps_timeout(monkeypatch):
     agent_server = _load_agent_server_with_fake_skillkit()
-    rewritten, changed = agent_server._rewrite_gradle_wrapper_command("./gradlew compileJava --no-daemon")
-    assert changed is True
-    assert rewritten == "gradle compileJava --no-daemon"
-
-
-def test_rewrite_gradle_wrapper_command_keeps_prefix_chain():
-    agent_server = _load_agent_server_with_fake_skillkit()
-    rewritten, changed = agent_server._rewrite_gradle_wrapper_command("cd /workspace && ./gradlew test")
-    assert changed is True
-    assert rewritten == "cd /workspace && gradle test"
-
-
-def test_container_runner_rewrites_gradlew_when_force_enabled(monkeypatch):
-    agent_server = _load_agent_server_with_fake_skillkit()
-    monkeypatch.setenv("SANDBOX_FORCE_SYSTEM_GRADLE", "true")
     monkeypatch.setenv("SANDBOX_GRADLE_CMD_TIMEOUT_SECONDS", "480")
-    monkeypatch.setenv("SANDBOX_ALLOW_WRAPPER_FALLBACK", "false")
     runner = agent_server._create_runner(
         {
             "skill_dirs": [],
@@ -209,57 +193,27 @@ def test_container_runner_rewrites_gradlew_when_force_enabled(monkeypatch):
             "allowed_tools": {"execute"},
         }
     )
-    tool_call = {"name": "execute", "arguments": '{"command":"cd /workspace && ./gradlew test"}'}
     normalized, args, err, result = runner._preprocess_validated_tool_call(
-        tool_name="execute",
-        args={"command": "cd /workspace && ./gradlew test"},
-        tool_call=tool_call,
-    )
-    assert err is None
-    assert result is None
-    assert args["command"].startswith("timeout 480s bash -lc ")
-    assert "gradle test" in args["command"]
-    assert "./gradlew test" not in args["command"]
-    assert normalized["arguments"]
-
-
-def test_container_runner_keeps_gradlew_when_force_disabled(monkeypatch):
-    agent_server = _load_agent_server_with_fake_skillkit()
-    monkeypatch.setenv("SANDBOX_FORCE_SYSTEM_GRADLE", "false")
-    monkeypatch.setenv("SANDBOX_GRADLE_CMD_TIMEOUT_SECONDS", "480")
-    monkeypatch.setenv("SANDBOX_ALLOW_WRAPPER_FALLBACK", "true")
-    runner = agent_server._create_runner(
-        {
-            "skill_dirs": [],
-            "system_prompt": "system",
-            "max_turns": 5,
-            "enable_tools": True,
-            "model": "gpt-4o",
-            "temperature": None,
-            "max_tokens": None,
-            "workdir": "/workspace",
-            "allowed_tools": {"execute"},
-        }
-    )
-    _, args, err, result = runner._preprocess_validated_tool_call(
         tool_name="execute",
         args={"command": "cd /workspace && ./gradlew test"},
         tool_call={"name": "execute", "arguments": '{"command":"cd /workspace && ./gradlew test"}'},
     )
     assert err is None
     assert result is None
-    assert args["command"].startswith("timeout 480s bash -lc ")
+    assert "timeout 480s bash -lc" in args["command"]
     assert "./gradlew test" in args["command"]
+    assert "gradle test" not in args["command"]
+    assert normalized["arguments"]
 
 
-def test_build_gradle_command_enables_wrapper_fallback():
+def test_run_gradle_wrapper_prewarm_once_marks_done(tmp_path, monkeypatch):
     agent_server = _load_agent_server_with_fake_skillkit()
-    cmd, strategy = agent_server._build_gradle_command(
-        original_command="cd /workspace && ./gradlew compileJava",
-        rewritten_command="cd /workspace && gradle compileJava",
-        timeout_seconds=480,
-        allow_wrapper_fallback=True,
-    )
-    assert strategy == "wrapper_fallback"
-    assert "if [ $__sa_rc -eq 126 ] || [ $__sa_rc -eq 127 ]" in cmd
-    assert "./gradlew compileJava" in cmd
+    gradlew = tmp_path / "gradlew"
+    gradlew.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    gradlew.chmod(0o755)
+    monkeypatch.setenv("SANDBOX_GRADLE_WRAPPER_PREWARM", "true")
+    monkeypatch.setenv("SANDBOX_GRADLE_WRAPPER_PREWARM_TIMEOUT_SECONDS", "30")
+    agent_server._WRAPPER_PREWARM_DONE = False
+    import asyncio
+    asyncio.run(agent_server._run_gradle_wrapper_prewarm_once(str(tmp_path)))
+    assert agent_server._WRAPPER_PREWARM_DONE is True
