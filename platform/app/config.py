@@ -41,6 +41,9 @@ class Settings(BaseSettings):
     CB_MAX_TOKENS_PER_TASK: int = 400000
     CB_MAX_COST_PER_TASK_RMB: float = 100.0
     CB_TOKEN_PRICE_PER_1K: float = 0.01
+    # Per-stage token budgets (JSON string). Empty means disabled.
+    # Example: {"parse": 60000, "code": 250000}
+    CB_STAGE_TOKEN_BUDGETS: str = '{"parse": 60000, "code": 250000}'
 
     # Webhook secrets (empty = skip verification)
     JIRA_WEBHOOK_SECRET: str = ""
@@ -96,6 +99,9 @@ class Settings(BaseSettings):
     SANDBOX_ROLES: str = '["coding", "test"]'
     SANDBOX_DUMP_MODEL_API_RESPONSE: bool = True
     SANDBOX_MODEL_API_RAW_LOG_HOST_DIR: str = "/tmp/silicon_agent/model_api_logs"
+    SANDBOX_FORCE_SYSTEM_GRADLE: bool = True
+    SANDBOX_GRADLE_CMD_TIMEOUT_SECONDS: int = 480
+    SANDBOX_ALLOW_WRAPPER_FALLBACK: bool = True
 
     # Memory & compression configuration
     MEMORY_ENABLED: bool = True

@@ -14,6 +14,7 @@ import json
 import logging
 import os
 import re
+import shlex
 import sys
 import time
 from datetime import datetime, timezone
@@ -76,6 +77,10 @@ _JAVA17_PATTERNS = (
     r"sourceCompatibility\s*=\s*(?:['\"]?17['\"]?|JavaVersion\.VERSION_17)",
     r"targetCompatibility\s*=\s*(?:['\"]?17['\"]?|JavaVersion\.VERSION_17)",
 )
+_GRADLE_WRAPPER_CMD_RE = re.compile(r"(?<![\w./-])(?:sh\s+)?(?:\./)?gradlew(?![\w.-])")
+_GRADLE_ANY_CMD_RE = re.compile(r"(?<![\w./-])(?:gradle|(?:sh\s+)?(?:\./)?gradlew)(?![\w.-])")
+_RUNTIME_PREFLIGHT_DONE = False
+_RUNTIME_PREFLIGHT_LOCK = asyncio.Lock()
 
 
 def _normalize_openai_base_url(base_url: str | None) -> str:
@@ -166,6 +171,88 @@ def _sanitize_reasoning_kwargs_for_model(
     else:
         sanitized_kwargs.pop("extra_body", None)
     return sanitized_kwargs
+
+
+def _env_flag(name: str, default: bool) -> bool:
+    raw = (os.environ.get(name) or "").strip().lower()
+    if not raw:
+        return default
+    return raw in {"1", "true", "yes", "on"}
+
+
+def _env_int(name: str, default: int) -> int:
+    raw = (os.environ.get(name) or "").strip()
+    if not raw:
+        return default
+    try:
+        parsed = int(raw)
+    except ValueError:
+        return default
+    return parsed if parsed > 0 else default
+
+
+def _rewrite_gradle_wrapper_command(command: str) -> tuple[str, bool]:
+    rewritten, count = _GRADLE_WRAPPER_CMD_RE.subn("gradle", command)
+    return rewritten, count > 0
+
+
+def _build_gradle_command(
+    *,
+    original_command: str,
+    rewritten_command: str,
+    timeout_seconds: int,
+    allow_wrapper_fallback: bool,
+) -> tuple[str, str]:
+    payload = rewritten_command
+    strategy = "system"
+    if allow_wrapper_fallback and rewritten_command != original_command:
+        strategy = "wrapper_fallback"
+        payload = (
+            f"{rewritten_command}; __sa_rc=$?; "
+            f"if [ $__sa_rc -eq 126 ] || [ $__sa_rc -eq 127 ]; then {original_command}; "
+            f"else exit $__sa_rc; fi"
+        )
+    if timeout_seconds > 0:
+        payload = f"timeout {timeout_seconds}s bash -lc {shlex.quote(payload)}"
+    return payload, strategy
+
+
+async def _run_runtime_preflight_once() -> None:
+    global _RUNTIME_PREFLIGHT_DONE
+    if _RUNTIME_PREFLIGHT_DONE:
+        return
+
+    async with _RUNTIME_PREFLIGHT_LOCK:
+        if _RUNTIME_PREFLIGHT_DONE:
+            return
+
+        async def _run_line(cmd: str, *, timeout: float = 5.0) -> str:
+            proc = await asyncio.create_subprocess_exec(
+                "sh", "-lc", cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.STDOUT,
+            )
+            try:
+                out, _ = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+            except Exception:
+                with contextlib.suppress(Exception):
+                    proc.kill()
+                    await proc.communicate()
+                return ""
+            return (out or b"").decode("utf-8", errors="ignore").strip()
+
+        gradle_line = await _run_line("gradle -v 2>&1 | head -n 5")
+        java_line = await _run_line("java -version 2>&1 | head -n 3")
+        if gradle_line:
+            logger.info("sandbox_runtime_preflight gradle=%s", gradle_line.replace("\n", " | "))
+        else:
+            logger.info("sandbox_runtime_preflight gradle=unavailable")
+        if java_line:
+            logger.info("sandbox_runtime_preflight java=%s", java_line.replace("\n", " | "))
+        else:
+            logger.info("sandbox_runtime_preflight java=unavailable")
+
+        _RUNTIME_PREFLIGHT_DONE = True
 
 
 def _extract_gemini_thought_signatures_from_response(response_obj: Any) -> dict[str, str]:
@@ -463,6 +550,64 @@ class ContainerAgentRunner(ToolExecutionPolicyMixin, AgentRunner):
     async def _execute_tool(self, tool_call, on_output=None):
         return await self._execute_tool_with_policy(tool_call, on_output=on_output)
 
+    def _preprocess_validated_tool_call(
+        self,
+        *,
+        tool_name: str,
+        args: dict[str, Any],
+        tool_call: dict[str, Any],
+    ) -> tuple[dict[str, Any], dict[str, Any], str | None, str | None]:
+        if tool_name != "execute":
+            return super()._preprocess_validated_tool_call(
+                tool_name=tool_name,
+                args=args,
+                tool_call=tool_call,
+            )
+
+        command = str(args.get("command") or "").strip()
+        if not command or not _GRADLE_ANY_CMD_RE.search(command):
+            return super()._preprocess_validated_tool_call(
+                tool_name=tool_name,
+                args=args,
+                tool_call=tool_call,
+            )
+
+        force_system_gradle = _env_flag("SANDBOX_FORCE_SYSTEM_GRADLE", True)
+        allow_wrapper_fallback = _env_flag("SANDBOX_ALLOW_WRAPPER_FALLBACK", True)
+        timeout_seconds = _env_int("SANDBOX_GRADLE_CMD_TIMEOUT_SECONDS", 480)
+        rewritten = command
+        rewritten_flag = False
+        strategy = "wrapper"
+        if force_system_gradle:
+            rewritten, rewritten_flag = _rewrite_gradle_wrapper_command(command)
+            if rewritten_flag:
+                rewritten, strategy = _build_gradle_command(
+                    original_command=command,
+                    rewritten_command=rewritten,
+                    timeout_seconds=timeout_seconds,
+                    allow_wrapper_fallback=allow_wrapper_fallback,
+                )
+            elif timeout_seconds > 0:
+                strategy = "system"
+                rewritten = f"timeout {timeout_seconds}s bash -lc {shlex.quote(rewritten)}"
+        elif timeout_seconds > 0:
+            rewritten = f"timeout {timeout_seconds}s bash -lc {shlex.quote(rewritten)}"
+
+        if rewritten != command:
+            logger.info(
+                "gradle_command_rewrite strategy=%s rewritten=%s original_command=%s rewritten_command=%s",
+                strategy,
+                str(rewritten_flag).lower(),
+                command,
+                rewritten,
+            )
+
+        updated_args = dict(args)
+        updated_args["command"] = rewritten
+        normalized_tool_call = dict(tool_call)
+        normalized_tool_call["arguments"] = json.dumps(updated_args, ensure_ascii=False)
+        return normalized_tool_call, updated_args, None, None
+
     def _on_tool_validation_error(
         self,
         *,
@@ -747,6 +892,7 @@ async def handle_execute(request: web.Request) -> web.Response:
         parsed["workdir"],
         parsed["timeout"],
     )
+    await _run_runtime_preflight_once()
     _configure_java_runtime_for_workspace(parsed["workdir"])
 
     try:
@@ -818,6 +964,7 @@ async def handle_execute_stream(request: web.Request) -> web.StreamResponse:
         parsed["workdir"],
         parsed["timeout"],
     )
+    await _run_runtime_preflight_once()
     _configure_java_runtime_for_workspace(parsed["workdir"])
 
     try:

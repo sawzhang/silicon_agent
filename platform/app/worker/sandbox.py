@@ -482,6 +482,16 @@ class DockerSandboxBackend:
         )
         if capture_model_api_raw and container_raw_log_path:
             parts.extend(["-e", f"SANDBOX_MODEL_API_RAW_LOG_PATH={container_raw_log_path}"])
+        parts.extend(
+            [
+                "-e",
+                f"SANDBOX_FORCE_SYSTEM_GRADLE={'true' if settings.SANDBOX_FORCE_SYSTEM_GRADLE else 'false'}",
+                "-e",
+                f"SANDBOX_GRADLE_CMD_TIMEOUT_SECONDS={int(settings.SANDBOX_GRADLE_CMD_TIMEOUT_SECONDS)}",
+                "-e",
+                f"SANDBOX_ALLOW_WRAPPER_FALLBACK={'true' if settings.SANDBOX_ALLOW_WRAPPER_FALLBACK else 'false'}",
+            ]
+        )
 
         parts.append(image)
 
