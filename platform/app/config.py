@@ -100,7 +100,7 @@ class Settings(BaseSettings):
     SANDBOX_DUMP_MODEL_API_RESPONSE: bool = True
     SANDBOX_MODEL_API_RAW_LOG_HOST_DIR: str = "/tmp/silicon_agent/model_api_logs"
     SANDBOX_GRADLE_CMD_TIMEOUT_SECONDS: int = 480
-    SANDBOX_GRADLE_USER_HOME_HOST_DIR: str = "/var/lib/silicon_agent/gradle-cache"
+    SANDBOX_GRADLE_USER_HOME: str = "/workspace/.gradle"
     SANDBOX_GRADLE_WRAPPER_PREWARM: bool = True
     SANDBOX_GRADLE_WRAPPER_PREWARM_TIMEOUT_SECONDS: int = 180
 
