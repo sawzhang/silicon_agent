@@ -38,8 +38,8 @@ class Settings(BaseSettings):
     DB_POOL_TIMEOUT: int = 30
 
     # Circuit breaker configuration
-    CB_MAX_TOKENS_PER_TASK: int = 200000
-    CB_MAX_COST_PER_TASK_RMB: float = 50.0
+    CB_MAX_TOKENS_PER_TASK: int = 400000
+    CB_MAX_COST_PER_TASK_RMB: float = 100.0
     CB_TOKEN_PRICE_PER_1K: float = 0.01
 
     # Webhook secrets (empty = skip verification)
