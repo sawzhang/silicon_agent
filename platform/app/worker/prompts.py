@@ -45,6 +45,11 @@ SYSTEM_PROMPTS: Dict[str, str] = {
         "你需要生成：API文档、使用说明、变更日志和架构说明。"
         "文档应清晰、准确、易于理解，面向开发者和使用者。"
     ),
+    "verify": (
+        "你是一个构建验证Agent，负责执行编译、Lint和类型检查等验证命令。"
+        "你只需要运行指定的验证命令并如实报告结果，不要修改任何文件。"
+        "如果所有命令都通过，报告成功；如果有失败，详细列出失败的命令和错误信息。"
+    ),
 }
 
 # ---------------------------------------------------------------------------
@@ -124,10 +129,21 @@ STAGE_INSTRUCTIONS: Dict[str, str] = {
         "4. 遗留问题清单（如有）\n"
         "5. 最终签收结论"
     ),
+    "verify": (
+        "请执行附加指令中的验证命令，逐一报告每条命令的结果：\n"
+        "1. 依次执行每条验证命令\n"
+        "2. 记录每条命令的退出码和输出\n"
+        "3. 汇总：全部通过 / 部分失败\n"
+        "4. 对失败的命令，列出完整错误信息"
+    ),
 }
 
 
 STAGE_GUARDRAILS: Dict[str, str] = {
+    "verify": (
+        "只运行验证命令，不要修改任何文件。\n"
+        "不要尝试修复发现的问题，只如实报告验证结果。"
+    ),
     "code": (
         "只完成当前阶段，不要提前执行后续阶段任务。\n"
         "你可以为了验证实现而运行必要命令，但不要提前生成最终签收/验收报告，"
@@ -169,6 +185,8 @@ class StageContext:
     custom_instruction: Optional[str] = None
     # Phase 1.3: Gate rejection feedback context
     gate_rejection_context: Optional[Dict[str, str]] = None  # {"comment": ..., "retry": "2/3"}
+    # Harness: failure redirect context from downstream stage (verify/test → code)
+    failure_redirect_context: Optional[Dict[str, str]] = None  # {"failed_stage": ..., "error": ..., "output": ...}
 
 
 def build_user_prompt(ctx: StageContext) -> str:
@@ -220,6 +238,21 @@ def build_user_prompt(ctx: StageContext) -> str:
                 truncated += "\n...(已截断)"
             parts.append(f"**上次部分输出:**\n{truncated}")
         parts.append("请分析失败原因，避免重复同样的错误，重新完成任务。")
+
+    # Inject failure redirect context (from downstream verify/test failure)
+    if ctx.failure_redirect_context:
+        failed_stage = ctx.failure_redirect_context.get("failed_stage", "")
+        redirect_error = ctx.failure_redirect_context.get("error", "")
+        redirect_output = ctx.failure_redirect_context.get("output", "")
+        parts.append(f"\n## ⚠ 后续阶段失败反馈（来自 {failed_stage} 阶段）")
+        if redirect_error:
+            parts.append(f"**失败原因:** {redirect_error}")
+        if redirect_output:
+            truncated_output = redirect_output[:2000]
+            if len(redirect_output) > 2000:
+                truncated_output += "\n...(已截断)"
+            parts.append(f"**失败阶段输出:** {truncated_output}")
+        parts.append("请分析上述失败原因，修改你的产出以解决这些问题。")
 
     # Inject gate rejection feedback if this is a retry after gate rejection
     if ctx.gate_rejection_context:

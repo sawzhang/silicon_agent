@@ -33,6 +33,7 @@ _MAX_TURNS: dict[str, int] = {
     "coding": 8,
     "doc": 5,
     "test": 8,
+    "verify": 3,
 }
 _DEFAULT_MAX_TURNS = 5
 
@@ -45,6 +46,7 @@ ROLE_TOOLS: dict[str, set[str]] = {
     "review":       {"read", "execute", "skill"},
     "smoke":        {"read", "execute", "skill"},
     "doc":          {"read", "write", "edit", "skill"},
+    "verify":       {"execute", "read"},
 }
 _ALL_TOOLS: set[str] = set()
 _TOOL_ARGUMENT_HINTS: dict[str, str] = {}
@@ -62,6 +64,7 @@ _ROLE_SKILL_DIRS: dict[str, list[str]] = {
     "review":       ["shared", "review"],
     "smoke":        ["shared", "smoke"],
     "doc":          ["shared", "doc"],
+    "verify":       ["shared"],
 }
 
 

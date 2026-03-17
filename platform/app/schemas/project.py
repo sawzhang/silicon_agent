@@ -14,6 +14,7 @@ class ProjectCreateRequest(BaseModel):
     branch: str = "main"
     description: Optional[str] = None
     sandbox_image: Optional[str] = None
+    verify_commands: Optional[List[str]] = None
 
 
 class ProjectUpdateRequest(BaseModel):
@@ -24,6 +25,7 @@ class ProjectUpdateRequest(BaseModel):
     description: Optional[str] = None
     status: Optional[str] = None
     sandbox_image: Optional[str] = None
+    verify_commands: Optional[List[str]] = None
 
 
 class ProjectResponse(BaseModel):
@@ -38,6 +40,7 @@ class ProjectResponse(BaseModel):
     tech_stack: Optional[List[str]] = None
     repo_tree: Optional[str] = None
     sandbox_image: Optional[str] = None
+    verify_commands: Optional[List[str]] = None
     last_synced_at: Optional[datetime] = None
     created_at: datetime
     updated_at: datetime

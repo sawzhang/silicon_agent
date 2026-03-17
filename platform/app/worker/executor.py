@@ -803,6 +803,7 @@ async def execute_stage(
     gate_rejection_context: Optional[Dict[str, str]] = None,
     stage_timeout: Optional[float] = None,
     evaluator_config: Optional[dict] = None,
+    failure_redirect_context: Optional[Dict[str, str]] = None,
 ) -> str:
     """Execute a single stage: call AgentRunner and update DB/broadcast."""
     now = datetime.now(timezone.utc)
@@ -853,6 +854,7 @@ async def execute_stage(
         retry_context=retry_context,
         custom_instruction=custom_instruction,
         gate_rejection_context=gate_rejection_context,
+        failure_redirect_context=failure_redirect_context,
     )
     user_prompt = build_user_prompt(ctx)
 
@@ -1198,6 +1200,7 @@ async def execute_stage_sandboxed(
     stage_model: Optional[str] = None,
     custom_instruction: Optional[str] = None,
     gate_rejection_context: Optional[Dict[str, str]] = None,
+    failure_redirect_context: Optional[Dict[str, str]] = None,
 ) -> str:
     """Execute a stage inside a sandbox container via HTTP.
 
@@ -1253,6 +1256,7 @@ async def execute_stage_sandboxed(
         retry_context=retry_context,
         custom_instruction=custom_instruction,
         gate_rejection_context=gate_rejection_context,
+        failure_redirect_context=failure_redirect_context,
     )
     user_prompt = build_user_prompt(ctx)
     system_prompt = SYSTEM_PROMPTS.get(stage.agent_role, SYSTEM_PROMPTS["orchestrator"])

@@ -1191,8 +1191,9 @@ async def _process_task(session: AsyncSession, task: TaskModel) -> None:
                 project_memory_store = ProjectMemoryStore(str(task.project_id))
             except Exception:
                 logger.warning("Failed to init memory store for project %s", task.project_id, exc_info=True)
-        # Phase 3.1: Graph-based execution when enabled
-        if settings.GRAPH_EXECUTION_ENABLED and task.template:
+        # Phase 3.1: Graph-based execution when enabled or when template uses graph features
+        use_graph = settings.GRAPH_EXECUTION_ENABLED or _template_needs_graph(task)
+        if use_graph and task.template:
             await _process_task_graph(
                 session, task, sorted_stages, stage_defs, gates,
                 prior_outputs, compression, structured_outputs,
@@ -1440,6 +1441,70 @@ async def _process_task(session: AsyncSession, task: TaskModel) -> None:
             )
 
 
+def _template_needs_graph(task: TaskModel) -> bool:
+    """Check if a task's template uses graph features (depends_on / on_failure)."""
+    if not task.template:
+        return False
+    try:
+        stages_raw = task.template.stages
+        if isinstance(stages_raw, str):
+            stages_raw = json.loads(stages_raw)
+        if not isinstance(stages_raw, list):
+            return False
+        for s in stages_raw:
+            if not isinstance(s, dict):
+                continue
+            if s.get("depends_on") or s.get("on_failure"):
+                return True
+    except Exception:
+        pass
+    return False
+
+
+def _resolve_verify_commands(
+    task: TaskModel,
+    stage_defs: Dict[str, dict],
+) -> Optional[List[str]]:
+    """Resolve verify commands by priority: stage def > project > tech_stack auto-detect."""
+    # 1. Stage-level verify_commands
+    verify_def = stage_defs.get("verify", {})
+    stage_cmds = verify_def.get("verify_commands")
+    if stage_cmds:
+        return stage_cmds
+
+    # 2. Project-level verify_commands
+    if task.project:
+        raw = getattr(task.project, "verify_commands", None)
+        if raw:
+            try:
+                cmds = json.loads(raw) if isinstance(raw, str) else raw
+                if isinstance(cmds, list) and cmds:
+                    return cmds
+            except (json.JSONDecodeError, TypeError):
+                pass
+
+    # 3. Auto-detect from tech_stack
+    if task.project:
+        tech_stack = getattr(task.project, "tech_stack", None) or []
+        if isinstance(tech_stack, str):
+            try:
+                tech_stack = json.loads(tech_stack)
+            except (json.JSONDecodeError, TypeError):
+                tech_stack = []
+        tech_lower = [str(t).lower() for t in tech_stack]
+        cmds = []
+        if any(t in tech_lower for t in ("typescript", "nextjs", "react", "vue", "angular")):
+            cmds.append("npx tsc --noEmit")
+            cmds.append("npm run lint --if-present")
+        if any(t in tech_lower for t in ("python", "fastapi", "django", "flask")):
+            cmds.append("ruff check .")
+            cmds.append("python -m py_compile *.py")
+        if cmds:
+            return cmds
+
+    return None
+
+
 async def _process_task_graph(
     session: AsyncSession,
     task: TaskModel,
@@ -1515,6 +1580,9 @@ async def _process_task_graph(
             skipped.add(stage.stage_name)
         execution_counts[stage.stage_name] = stage.execution_count
 
+    # Harness: failure redirect context channel — pass error info to redirect target
+    _pending_redirect_contexts: Dict[str, Dict[str, str]] = {}
+
     max_iterations = settings.GRAPH_MAX_LOOP_ITERATIONS * len(graph.nodes)
     iteration = 0
 
@@ -1564,11 +1632,15 @@ async def _process_task_graph(
             stage.execution_count = execution_counts[node.name]
             await session.commit()
 
+            # Consume pending redirect context for this stage
+            redirect_ctx = _pending_redirect_contexts.pop(node.name, None)
+
             result = await _execute_single_stage(
                 session, task, stage, stage_index,
                 prior_outputs, compression, project_memory_store,
                 repo_context, stage_defs, workspace_path, sandbox_info,
                 sandbox_required_error=sandbox_required_error,
+                failure_redirect_context=redirect_ctx,
             )
             if result is None:
                 failed.add(node.name)
@@ -1578,6 +1650,12 @@ async def _process_task_graph(
                     logger.info(
                         "Stage %s failed, redirecting to %s", node.name, redirect,
                     )
+                    # Capture failure context before resetting
+                    _pending_redirect_contexts[redirect] = {
+                        "failed_stage": node.name,
+                        "error": stage.error_message or "unknown error",
+                        "output": (stage.output_summary or "")[:2000],
+                    }
                     # Reset the redirect target for re-execution
                     redirect_stage = stage_map[redirect]
                     redirect_stage.status = "pending"
@@ -1682,6 +1760,7 @@ async def _execute_single_stage(
     sandbox_info=None,
     gate_rejection_context: Optional[Dict[str, str]] = None,
     sandbox_required_error: Optional[str] = None,
+    failure_redirect_context: Optional[Dict[str, str]] = None,
 ) -> Optional[str]:
     """Execute a single stage with model routing and retry context.
 
@@ -1693,6 +1772,14 @@ async def _execute_single_stage(
     custom_instruction = sdef.get("instruction")  # Phase 1.4
     stage_timeout = sdef.get("timeout")  # Phase 1.4
     evaluator_config = sdef.get("evaluator")  # Phase 2.2
+
+    # Harness: auto-inject verify commands as custom_instruction for verify stages
+    if stage.agent_role == "verify" and not custom_instruction:
+        verify_cmds = _resolve_verify_commands(task, stage_defs)
+        if verify_cmds:
+            custom_instruction = "请依次执行以下验证命令：\n" + "\n".join(
+                f"- `{cmd}`" for cmd in verify_cmds
+            )
 
     # Build project memory for the current role
     project_memory: Optional[str] = None
@@ -1820,6 +1907,7 @@ async def _execute_single_stage(
                 stage_model=stage_model,
                 custom_instruction=custom_instruction,
                 gate_rejection_context=gate_rejection_context,
+                failure_redirect_context=failure_redirect_context,
             )
         else:
             output = await execute_stage(
@@ -1834,6 +1922,7 @@ async def _execute_single_stage(
                 gate_rejection_context=gate_rejection_context,
                 stage_timeout=stage_timeout,
                 evaluator_config=evaluator_config,
+                failure_redirect_context=failure_redirect_context,
             )
         return output
     except Exception as e:
