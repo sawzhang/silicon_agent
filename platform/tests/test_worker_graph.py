@@ -108,3 +108,34 @@ def test_validate_reports_unknown_dependencies_and_cycles():
     errors = graph.validate()
     assert any("unknown stage 'missing'" in e for e in errors)
     assert any("Cycle detected" in e for e in errors)
+
+
+def test_harness_pipeline_graph_failure_redirect():
+    """Verify harness_pipeline template builds a valid graph with redirect paths."""
+    from app.services.template_service import BUILTIN_TEMPLATES
+
+    harness = next(t for t in BUILTIN_TEMPLATES if t["name"] == "harness_pipeline")
+    graph = StageGraph.from_template_stages(harness["stages"])
+
+    # Graph should be valid
+    errors = graph.validate()
+    assert errors == [], f"Graph validation errors: {errors}"
+
+    # verify → code redirect
+    assert graph.get_failure_redirect("verify") == "code"
+    # test → code redirect
+    assert graph.get_failure_redirect("test") == "code"
+    # code has no redirect
+    assert graph.get_failure_redirect("code") is None
+
+    # After spec completes, code should be ready
+    ready = graph.get_ready_stages(
+        completed={"parse", "spec"}, running=set(), failed=set(), skipped=set(),
+    )
+    assert any(n.name == "code" for n in ready)
+
+    # After code completes, verify should be ready
+    ready = graph.get_ready_stages(
+        completed={"parse", "spec", "code"}, running=set(), failed=set(), skipped=set(),
+    )
+    assert any(n.name == "verify" for n in ready)

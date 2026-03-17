@@ -112,6 +112,8 @@ class Settings(BaseSettings):
     CONDITIONS_ENABLED: bool = True
     EVALUATOR_DEFAULT_MIN_CONFIDENCE: float = 0.7
     EVALUATOR_MAX_ITERATIONS: int = 3
+    EVALUATOR_USE_EXTERNAL_SIGNALS: bool = True
+    EVALUATOR_COMPOSITE_WEIGHTS: str = '{"test_pass_rate": 0.4, "build_success": 0.2, "lint_clean": 0.1, "llm_confidence": 0.3}'
     DYNAMIC_GATE_ENABLED: bool = False
     DYNAMIC_GATE_CONFIDENCE_THRESHOLD: float = 0.5
     STAGE_DEFAULT_MAX_RETRIES: int = 3

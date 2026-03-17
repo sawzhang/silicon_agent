@@ -79,6 +79,21 @@ BUILTIN_TEMPLATES = [
         ],
     },
     {
+        "name": "harness_pipeline",
+        "display_name": "闭环流水线",
+        "description": "Code→Verify→Test 自动闭环流水线，验证/测试失败时自动回退重试，最多3轮",
+        "stages": [
+            {"name": "parse", "agent_role": "orchestrator", "order": 0, "depends_on": []},
+            {"name": "spec", "agent_role": "spec", "order": 1, "depends_on": ["parse"]},
+            {"name": "code", "agent_role": "coding", "order": 2, "depends_on": ["spec"], "max_executions": 3},
+            {"name": "verify", "agent_role": "verify", "order": 3, "depends_on": ["code"], "on_failure": "code", "max_executions": 3},
+            {"name": "test", "agent_role": "test", "order": 4, "depends_on": ["verify"], "on_failure": "code", "max_executions": 3},
+            {"name": "review", "agent_role": "review", "order": 5, "depends_on": ["test"]},
+            {"name": "signoff", "agent_role": "orchestrator", "order": 6, "depends_on": ["review"]},
+        ],
+        "gates": [],
+    },
+    {
         "name": "custom",
         "display_name": "自定义",
         "description": "空模版，用户可手动配置阶段",

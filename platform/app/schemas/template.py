@@ -27,6 +27,8 @@ class StageDefinition(BaseModel):
     depends_on: Optional[List[str]] = None
     on_failure: Optional[str] = None
     max_executions: int = 1
+    # Harness: verify commands for verify stages
+    verify_commands: Optional[List[str]] = None
     # Phase 3.3: Dynamic routing
     routing: Optional[dict] = None
 
