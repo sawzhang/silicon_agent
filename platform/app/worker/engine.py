@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import shutil
 import tempfile
 import time
@@ -46,6 +47,24 @@ logger = logging.getLogger(__name__)
 
 _running = False
 _task: Optional[asyncio.Task] = None
+
+_PREFLIGHT_SKIP_DIRS = {
+    ".git",
+    ".hg",
+    ".svn",
+    "node_modules",
+    ".venv",
+    "venv",
+    "build",
+    "dist",
+    "target",
+    ".gradle",
+    ".idea",
+    "__pycache__",
+}
+_PREFLIGHT_MAX_FILES = 2000
+_PREFLIGHT_MAX_DEPTH = 6
+_PREFLIGHT_MAX_CHARS = 1200
 
 
 async def _safe_broadcast(event: str, data: dict) -> None:
@@ -1702,6 +1721,8 @@ async def _execute_single_stage(
         except Exception:
             logger.warning("Failed to load memory for role %s", stage.agent_role, exc_info=True)
 
+    preflight_summary = _build_stage_preflight_summary(stage.stage_name, workspace_path)
+
     # Build compressed prior context via sliding window
     # Phase 1.5: Cross-stage context recall — override compression for specified stages
     context_from = sdef.get("context_from")
@@ -1816,6 +1837,7 @@ async def _execute_single_stage(
                 compressed_outputs=compressed_prior if compressed_prior else None,
                 project_memory=project_memory,
                 repo_context=repo_context,
+                preflight_summary=preflight_summary,
                 retry_context=retry_context,
                 stage_model=stage_model,
                 custom_instruction=custom_instruction,
@@ -1827,6 +1849,7 @@ async def _execute_single_stage(
                 compressed_outputs=compressed_prior if compressed_prior else None,
                 project_memory=project_memory,
                 repo_context=repo_context,
+                preflight_summary=preflight_summary,
                 retry_context=retry_context,
                 stage_model=stage_model,
                 workdir_override=effective_workdir,
@@ -2800,6 +2823,120 @@ def _build_repo_context(project) -> str:
         branch = project.branch or "main"
         parts.append(f"### 仓库\n{project.repo_url} (branch: {branch})")
     return "\n\n".join(parts)
+
+
+def _iter_preflight_files(workspace_path: str):
+    root = Path(workspace_path)
+    scanned = 0
+    for dirpath, dirnames, filenames in os.walk(root):
+        current = Path(dirpath)
+        try:
+            rel = current.relative_to(root)
+            depth = len(rel.parts)
+        except ValueError:
+            depth = 0
+        dirnames[:] = [
+            name for name in dirnames
+            if name not in _PREFLIGHT_SKIP_DIRS and depth < _PREFLIGHT_MAX_DEPTH
+        ]
+        for filename in filenames:
+            scanned += 1
+            yield current / filename
+            if scanned >= _PREFLIGHT_MAX_FILES:
+                return
+
+
+def _format_preflight_section(title: str, items: list[str], *, limit: int = 4) -> str:
+    if not items:
+        return ""
+    unique: list[str] = []
+    seen: set[str] = set()
+    for item in items:
+        if item in seen:
+            continue
+        seen.add(item)
+        unique.append(item)
+        if len(unique) >= limit:
+            break
+    if not unique:
+        return ""
+    return f"- {title}: {', '.join(unique)}"
+
+
+def _build_stage_preflight_summary(stage_name: str, workspace_path: Optional[str]) -> Optional[str]:
+    normalized = (stage_name or "").strip().lower()
+    if normalized not in {"code", "coding", "test"}:
+        return None
+    if not workspace_path:
+        return None
+
+    root = Path(workspace_path)
+    if not root.exists() or not root.is_dir():
+        return None
+
+    build_files: list[str] = []
+    source_roots: list[str] = []
+    impl_examples: list[str] = []
+    test_examples: list[str] = []
+
+    build_file_names = {
+        "build.gradle",
+        "build.gradle.kts",
+        "settings.gradle",
+        "settings.gradle.kts",
+        "pom.xml",
+        "package.json",
+        "pyproject.toml",
+        "go.mod",
+        "cargo.toml",
+    }
+    impl_keywords = ("controller", "handler", "service", "api", "route", "response")
+    test_keywords = ("test", "spec")
+
+    for path in _iter_preflight_files(str(root)):
+        try:
+            rel = path.relative_to(root).as_posix()
+        except ValueError:
+            rel = path.as_posix()
+        lower_rel = rel.lower()
+        name = path.name.lower()
+
+        if name in build_file_names:
+            build_files.append(rel)
+        if any(token in lower_rel for token in ("src/main", "app/", "cmd/", "internal/", "lib/")):
+            parent = str(Path(rel).parent).replace("\\", "/")
+            if parent and parent != ".":
+                source_roots.append(parent)
+        if any(keyword in name for keyword in impl_keywords) or any(
+            segment in lower_rel for segment in ("/controller/", "/handler/", "/service/", "/api/")
+        ):
+            impl_examples.append(rel)
+        if any(keyword in name for keyword in test_keywords) or any(
+            segment in lower_rel for segment in ("/test/", "/tests/", "/__tests__/")
+        ):
+            test_examples.append(rel)
+
+    lines = []
+    if normalized in {"code", "coding"}:
+        lines.append(_format_preflight_section("构建文件", build_files, limit=3))
+        lines.append(_format_preflight_section("源码目录", source_roots, limit=3))
+        lines.append(_format_preflight_section("实现参考", impl_examples, limit=4))
+        lines.append(_format_preflight_section("测试参考", test_examples, limit=3))
+        if not any(lines):
+            lines.append("- 未发现明显的实现参考，请直接聚焦最小修改并谨慎验证。")
+    else:
+        lines.append(_format_preflight_section("构建文件", build_files, limit=3))
+        lines.append(_format_preflight_section("测试参考", test_examples, limit=5))
+        lines.append(_format_preflight_section("实现参考", impl_examples, limit=3))
+        if not any(lines):
+            lines.append("- 未发现明显测试样例，请优先选择最小、最快的验证路径。")
+
+    summary = "\n".join(line for line in lines if line).strip()
+    if not summary:
+        return None
+    if len(summary) > _PREFLIGHT_MAX_CHARS:
+        summary = summary[:_PREFLIGHT_MAX_CHARS] + "\n...(预扫摘要已截断)"
+    return summary
 
 
 async def _fail_task(session: AsyncSession, task: TaskModel, reason: str) -> None:

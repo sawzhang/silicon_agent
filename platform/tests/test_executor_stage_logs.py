@@ -141,10 +141,12 @@ class _ContinuationRunner:
         self.config = SimpleNamespace(model='test-model')
         self.cumulative_usage = SimpleNamespace(total_tokens=11)
         self.prompts: list[str] = []
+        self.resets: list[bool] = []
         self.response_text = response_text
 
     async def chat(self, prompt: str, reset: bool = True, **_: object):
         self.prompts.append(prompt)
+        self.resets.append(reset)
         return SimpleNamespace(text_content=self.response_text)
 
 
@@ -182,6 +184,9 @@ class _ContinuationTracker:
 
     def mark_forced_convergence_used(self) -> None:
         self._forced_convergence_used = True
+
+    def get_completed_tool_runs(self):
+        return []
 
 
 class _CancelledRunner(_FakeRunner):
@@ -726,6 +731,59 @@ async def test_handle_continuations_injects_forced_convergence_for_failed_test_v
     assert runner.prompts == [
         '你已经在当前阶段花了过多轮次进行探索。现在禁止继续扩展测试范围。请直接执行最小、最相关的验证。如果验证命令失败，必须明确给出失败命令、关键报错和唯一阻塞点；不要仅凭代码阅读判断测试通过。'
     ]
+
+
+@pytest.mark.asyncio
+async def test_handle_continuations_uses_checkpoint_restart_with_reset_true():
+    runner = _ContinuationRunner(response_text='final answer')
+    tracker = _ContinuationTracker(stage_name='code', agent_role='coding')
+
+    output, total_tokens = await executor._handle_continuations(
+        runner,
+        "[Max turns reached. Please continue the conversation.]",
+        {},
+        tracker,
+        'code',
+        {
+            'task_title': 'Hello Task',
+            'task_description': 'Implement hello endpoint',
+            'stage_name': 'code',
+            'preflight_summary': '- 构建文件: build.gradle',
+        },
+    )
+
+    assert total_tokens == 11
+    assert output == 'final answer'
+    assert runner.resets == [True]
+    assert '## 任务\n**Hello Task**' in runner.prompts[0]
+    assert '## 阶段预扫摘要' in runner.prompts[0]
+    assert '不要重新展开整段历史' in runner.prompts[0]
+
+
+@pytest.mark.asyncio
+async def test_handle_continuations_restarts_from_checkpoint_for_forced_convergence():
+    runner = _ContinuationRunner(response_text='implemented result')
+    tracker = _ContinuationTracker(stage_name='code', agent_role='coding')
+    tracker._exploration_actions = 4
+
+    output, total_tokens = await executor._handle_continuations(
+        runner,
+        'partial summary',
+        {},
+        tracker,
+        'code',
+        {
+            'task_title': 'Hello Task',
+            'task_description': 'Implement hello endpoint',
+            'stage_name': 'code',
+            'preflight_summary': '- 实现参考: src/main/java/demo/HelloController.java',
+        },
+    )
+
+    assert total_tokens == 11
+    assert output == 'partial summary\n\nimplemented result'
+    assert runner.resets == [True]
+    assert 'restart_reason' not in runner.prompts[0]
 
 
 def test_resolve_stage_max_turns_caps_coding_and_test():

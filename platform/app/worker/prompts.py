@@ -169,6 +169,7 @@ class StageContext:
     compressed_outputs: Optional[List[Dict[str, str]]] = None  # sliding-window compressed
     project_memory: Optional[str] = None  # injected project memory text
     repo_context: Optional[str] = None  # injected repo context (tech stack + dir tree)
+    preflight_summary: Optional[str] = None  # deterministic stage-local workspace scan summary
     # Smart retry: failure context from previous attempt (Ralph Loop V2 pattern)
     retry_context: Optional[Dict[str, str]] = None  # {"error": msg, "prior_output": text}
     # Phase 1.4: Custom instruction from template stage definition
@@ -197,6 +198,9 @@ def build_user_prompt(ctx: StageContext) -> str:
     # Inject project memory from historical tasks
     if ctx.project_memory:
         parts.append(f"\n## 项目上下文（来自历史任务）\n{ctx.project_memory}")
+
+    if ctx.preflight_summary:
+        parts.append(f"\n## 阶段预扫摘要\n{ctx.preflight_summary}")
 
     # Use compressed outputs (sliding-window) when available, otherwise raw
     prior = ctx.compressed_outputs if ctx.compressed_outputs is not None else ctx.prior_outputs

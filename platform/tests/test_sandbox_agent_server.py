@@ -270,6 +270,25 @@ def test_run_gradle_wrapper_prewarm_once_marks_done(tmp_path, monkeypatch):
     assert agent_server._WRAPPER_PREWARM_DONE is True
 
 
+def test_build_restart_prompt_includes_task_excerpt_and_tool_digest():
+    agent_server = _load_agent_server_with_fake_skillkit()
+    prompt = agent_server._build_restart_prompt(
+        "## 任务\n实现 hello 接口",
+        "[Max turns reached. Please continue the conversation.]",
+        [
+            {
+                "tool_name": "execute",
+                "result_preview": "src/main/java/demo/HelloController.java",
+                "status": "success",
+            }
+        ],
+        reason="truncation",
+    )
+    assert "原始任务摘要" in prompt
+    assert "最近关键工具结果" in prompt
+    assert "HelloController.java" in prompt
+
+
 def test_should_retry_with_other_java_on_version_mismatch():
     agent_server = _load_agent_server_with_fake_skillkit()
     assert agent_server._should_retry_with_other_java("Unsupported class file major version 61")

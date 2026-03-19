@@ -782,6 +782,58 @@ def _create_runner(parsed: dict[str, Any]) -> ContainerAgentRunner:
     return runner
 
 
+def _build_restart_prompt(
+    user_prompt: str,
+    text_content: str,
+    tool_calls: list[dict[str, Any]],
+    *,
+    reason: str,
+) -> str:
+    prompt_excerpt = (user_prompt or "").strip()
+    if len(prompt_excerpt) > 1200:
+        prompt_excerpt = prompt_excerpt[:1200] + "\n...(任务上下文已截断)"
+    partial_output = (text_content or "").replace(
+        "[Max turns reached. Please continue the conversation.]",
+        "",
+    ).strip()
+    if len(partial_output) > 1200:
+        partial_output = partial_output[:1200] + "\n...(已有输出已截断)"
+
+    digest_lines: list[str] = []
+    for item in tool_calls[-4:]:
+        status = str(item.get("status") or "success").upper()
+        tool_name = str(item.get("tool_name") or "tool")
+        preview = str(item.get("result_preview") or "").strip()
+        if len(preview) > 240:
+            preview = preview[:240] + "...[truncated]"
+        line = f"- [{status}] {tool_name}"
+        if preview:
+            line += f"\n  结果: {preview}"
+        digest_lines.append(line)
+
+    action_prompt = (
+        "请停止继续广泛探索，直接完成最小必要工作。"
+        if reason == "forced_convergence"
+        else "请不要重复整段历史，只基于当前状态继续完成剩余必要内容。"
+    )
+
+    parts = [
+        "## 原始任务摘要",
+        prompt_excerpt or "（无）",
+    ]
+    if partial_output:
+        parts.extend(["\n## 当前阶段已有部分输出", partial_output])
+    if digest_lines:
+        parts.extend(["\n## 最近关键工具结果", "\n".join(digest_lines)])
+    parts.extend(
+        [
+            "\n## 下一步要求",
+            action_prompt,
+        ]
+    )
+    return "\n".join(parts).strip()
+
+
 async def _run_stage_chat(
     runner: ContainerAgentRunner,
     *,
@@ -807,8 +859,14 @@ async def _run_stage_chat(
             max_continuations,
         )
         try:
+            restart_prompt = _build_restart_prompt(
+                user_prompt,
+                text_content,
+                runner.tool_calls_log,
+                reason="truncation",
+            )
             cont = await asyncio.wait_for(
-                runner.chat("请继续完成上面的输出，从你停下的地方继续。", reset=False),
+                runner.chat(restart_prompt, reset=True),
                 timeout=timeout,
             )
             cont_text = cont.text_content or ""

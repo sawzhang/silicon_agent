@@ -100,6 +100,19 @@ def test_without_project_memory():
     assert "## 项目上下文（来自历史任务）" not in result
 
 
+def test_with_preflight_summary():
+    ctx = _minimal_ctx(preflight_summary="- 构建文件: build.gradle\n- 实现参考: src/main/java/demo/HelloController.java")
+    result = build_user_prompt(ctx)
+    assert "## 阶段预扫摘要" in result
+    assert "HelloController.java" in result
+
+
+def test_without_preflight_summary():
+    ctx = _minimal_ctx(preflight_summary=None)
+    result = build_user_prompt(ctx)
+    assert "## 阶段预扫摘要" not in result
+
+
 # ---------------------------------------------------------------------------
 # With prior_outputs (raw)
 # ---------------------------------------------------------------------------
