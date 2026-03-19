@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib
 import os
 import sys
+from pathlib import Path
 from types import ModuleType, SimpleNamespace
 
 
@@ -274,3 +275,25 @@ def test_should_retry_with_other_java_on_version_mismatch():
     assert agent_server._should_retry_with_other_java("Unsupported class file major version 61")
     assert agent_server._should_retry_with_other_java("invalid source release: 17")
     assert not agent_server._should_retry_with_other_java("Execution failed for task ':test'")
+
+
+def test_detect_java_version_from_java8_fixture():
+    agent_server = _load_agent_server_with_fake_skillkit()
+    fixture = (
+        Path(__file__).resolve().parent
+        / "fixtures"
+        / "sandbox"
+        / "java8-springboot-gradle"
+    )
+    assert agent_server._detect_java_major_version(str(fixture)) == 8
+
+
+def test_detect_java_version_from_java17_fixture():
+    agent_server = _load_agent_server_with_fake_skillkit()
+    fixture = (
+        Path(__file__).resolve().parent
+        / "fixtures"
+        / "sandbox"
+        / "java17-springboot-gradle"
+    )
+    assert agent_server._detect_java_major_version(str(fixture)) == 17
