@@ -267,3 +267,10 @@ def test_run_gradle_wrapper_prewarm_once_marks_done(tmp_path, monkeypatch):
     import asyncio
     asyncio.run(agent_server._run_gradle_wrapper_prewarm_once(str(tmp_path)))
     assert agent_server._WRAPPER_PREWARM_DONE is True
+
+
+def test_should_retry_with_other_java_on_version_mismatch():
+    agent_server = _load_agent_server_with_fake_skillkit()
+    assert agent_server._should_retry_with_other_java("Unsupported class file major version 61")
+    assert agent_server._should_retry_with_other_java("invalid source release: 17")
+    assert not agent_server._should_retry_with_other_java("Execution failed for task ':test'")

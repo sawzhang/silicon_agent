@@ -87,6 +87,12 @@ _JAVA17_PATTERNS = (
     r"^\s*17(?:\.\d+)?\s*$",
     r"(?m)^\s*java\s+(?:temurin-)?17\s*$",
 )
+_JAVA_VERSION_MISMATCH_PATTERNS = (
+    r"Unsupported class file major version",
+    r"invalid source release",
+    r"release version \d+ not supported",
+    r"Could not target platform",
+)
 _GRADLE_ANY_CMD_RE = re.compile(r"(?<![\w./-])(?:gradle|(?:sh\s+)?(?:\./)?gradlew)(?![\w.-])")
 _RUNTIME_PREFLIGHT_DONE = False
 _RUNTIME_PREFLIGHT_LOCK = asyncio.Lock()
@@ -161,6 +167,14 @@ def _configure_java_runtime_for_workspace(workdir: str) -> int | None:
         target_java_home,
     )
     return major
+
+
+def _should_retry_with_other_java(output: str) -> bool:
+    text = str(output or "")
+    return any(
+        re.search(pattern, text, re.IGNORECASE)
+        for pattern in _JAVA_VERSION_MISMATCH_PATTERNS
+    )
 
 
 def _is_gemini_model(model: str | None) -> bool:
