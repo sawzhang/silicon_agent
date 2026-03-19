@@ -239,6 +239,11 @@ def _stage_goal_summary(stage_name: str | None) -> str:
     return "完成当前阶段的最终结果。"
 
 
+def _prefer_restart_continuations(stage_name: str | None) -> bool:
+    normalized = (stage_name or "").strip().lower()
+    return normalized in {"code", "coding", "test"}
+
+
 # ---------------------------------------------------------------------------
 # Module-level helpers extracted from execute_stage
 # ---------------------------------------------------------------------------
@@ -860,6 +865,7 @@ async def _run_stage_restart(
             "max_tokens": runtime_overrides.get("max_tokens"),
             "restart": restart_index,
             "restart_reason": reason,
+            "forced_convergence": reason == "forced_convergence",
             "reset": True,
             "timeout_seconds": settings.WORKER_STAGE_TIMEOUT,
         },
@@ -877,6 +883,7 @@ async def _run_stage_restart(
             response_body={
                 "restart": restart_index,
                 "restart_reason": reason,
+                "forced_convergence": reason == "forced_convergence",
                 "content": restart_text,
             },
             duration_ms=round((time.monotonic() - chat_started) * 1000, 2),
@@ -896,7 +903,12 @@ async def _run_stage_restart(
         await tracker.emit_chat_received(
             chat_correlation,
             status="failed",
-            response_body={"restart": restart_index, "restart_reason": reason, "error": str(exc)},
+            response_body={
+                "restart": restart_index,
+                "restart_reason": reason,
+                "forced_convergence": reason == "forced_convergence",
+                "error": str(exc),
+            },
             duration_ms=round((time.monotonic() - chat_started) * 1000, 2),
         )
         return output
@@ -977,15 +989,19 @@ async def _handle_continuations(
     _MAX_CONTINUATIONS = 3
     _TRUNCATION_SENTINEL = "Max turns reached"
     restarts = 0
+    effective_stage_name = stage_name or tracker.stage_name
+
+    if restart_context is None and _prefer_restart_continuations(effective_stage_name):
+        restart_context = {"stage_name": effective_stage_name}
 
     if restart_context is None:
         continuations = 0
-        output = await _run_forced_convergence(runner, output, runtime_overrides, tracker, stage_name)
+        output = await _run_forced_convergence(runner, output, runtime_overrides, tracker, effective_stage_name)
 
         while _TRUNCATION_SENTINEL in (output or "") and continuations < _MAX_CONTINUATIONS:
             continuations += 1
             continuation_started = time.monotonic()
-            prompt = _build_continuation_prompt(stage_name or tracker.stage_name)
+            prompt = _build_continuation_prompt(effective_stage_name)
             chat_correlation = await tracker.emit_chat_sent(
                 request_body={
                     "prompt": prompt,

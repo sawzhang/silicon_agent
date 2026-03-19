@@ -729,9 +729,9 @@ async def test_handle_continuations_uses_coding_specific_prompt():
 
     assert total_tokens == 11
     assert output == 'done'
-    assert runner.prompts == [
-        '请停止继续广泛探索。基于已知信息直接修改代码；如果仍缺信息，只允许再查看 1 个最关键文件，然后必须完成修改并给出最小验证结果。'
-    ]
+    assert runner.resets == [True]
+    assert '## 当前阶段\ncode' in runner.prompts[0]
+    assert '请停止继续广泛探索。基于已知信息直接修改代码' in runner.prompts[0]
 
 
 @pytest.mark.asyncio
@@ -748,9 +748,9 @@ async def test_handle_continuations_uses_test_specific_prompt():
 
     assert total_tokens == 11
     assert output == 'done'
-    assert runner.prompts == [
-        '请停止扩展测试范围。只做最小、最相关的验证；如果验证命令失败，必须直接给出失败命令、关键报错和唯一阻塞点，不要再用代码阅读代替测试结论。'
-    ]
+    assert runner.resets == [True]
+    assert '## 当前阶段\ntest' in runner.prompts[0]
+    assert '请停止扩展测试范围。只做最小、最相关的验证' in runner.prompts[0]
 
 
 @pytest.mark.asyncio
@@ -768,9 +768,8 @@ async def test_handle_continuations_injects_forced_convergence_for_coding_budget
 
     assert total_tokens == 11
     assert output == 'partial summary\n\ndone'
-    assert runner.prompts == [
-        '你已经在当前阶段花了过多轮次进行探索。现在禁止继续浏览仓库。请直接做最小代码修改，并只执行最小必要验证。如果仍然无法完成，请只输出唯一阻塞点和证据。'
-    ]
+    assert runner.resets == [True]
+    assert '禁止继续浏览仓库' in runner.prompts[0]
 
 
 @pytest.mark.asyncio
@@ -788,9 +787,8 @@ async def test_handle_continuations_injects_forced_convergence_for_failed_test_v
 
     assert total_tokens == 11
     assert output == 'analysis only\n\ndone'
-    assert runner.prompts == [
-        '你已经在当前阶段花了过多轮次进行探索。现在禁止继续扩展测试范围。请直接执行最小、最相关的验证。如果验证命令失败，必须明确给出失败命令、关键报错和唯一阻塞点；不要仅凭代码阅读判断测试通过。'
-    ]
+    assert runner.resets == [True]
+    assert '禁止继续扩展测试范围' in runner.prompts[0]
 
 
 @pytest.mark.asyncio
@@ -818,6 +816,9 @@ async def test_handle_continuations_uses_checkpoint_restart_with_reset_true():
     assert '## 任务\n**Hello Task**' in runner.prompts[0]
     assert '## 阶段预扫摘要' in runner.prompts[0]
     assert '不要重新展开整段历史' in runner.prompts[0]
+    assert tracker.sent[0]['request_body']['restart'] == 1
+    assert tracker.sent[0]['request_body']['restart_reason'] == 'truncation'
+    assert tracker.sent[0]['request_body']['reset'] is True
 
 
 @pytest.mark.asyncio
@@ -843,7 +844,9 @@ async def test_handle_continuations_restarts_from_checkpoint_for_forced_converge
     assert total_tokens == 11
     assert output == 'partial summary\n\nimplemented result'
     assert runner.resets == [True]
-    assert 'restart_reason' not in runner.prompts[0]
+    assert tracker.sent[0]['request_body']['restart'] == 1
+    assert tracker.sent[0]['request_body']['restart_reason'] == 'forced_convergence'
+    assert tracker.sent[0]['request_body']['forced_convergence'] is True
 
 
 def test_resolve_stage_max_turns_caps_coding_and_test():
