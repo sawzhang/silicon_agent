@@ -16,8 +16,9 @@ class Settings(BaseSettings):
     LLM_TIMEOUT: float = 120.0
 
     # Per-role model routing (JSON string: {"coding": "gpt-4o", "review": "claude-sonnet-4-20250514"})
-    # Unspecified roles fall back to LLM_MODEL
-    LLM_ROLE_MODEL_MAP: str = "{}"
+    # Unspecified roles fall back to LLM_MODEL. Keep lightweight defaults on
+    # orchestrator/test so parse + signoff stay cheaper unless env overrides them.
+    LLM_ROLE_MODEL_MAP: str = '{"orchestrator":"gpt-4o-mini","test":"gpt-4o-mini"}'
     # Comma-separated absolute path prefixes allowed in agent config `extra_skill_dirs`.
     # Empty means only built-in platform/skills directory is allowed.
     EXTRA_SKILL_DIR_WHITELIST: str = ""
@@ -38,9 +39,12 @@ class Settings(BaseSettings):
     DB_POOL_TIMEOUT: int = 30
 
     # Circuit breaker configuration
-    CB_MAX_TOKENS_PER_TASK: int = 200000
-    CB_MAX_COST_PER_TASK_RMB: float = 50.0
+    CB_MAX_TOKENS_PER_TASK: int = 400000
+    CB_MAX_COST_PER_TASK_RMB: float = 100.0
     CB_TOKEN_PRICE_PER_1K: float = 0.01
+    # Per-stage token budgets (JSON string). Empty means disabled.
+    # Example: {"parse": 60000, "code": 250000}
+    CB_STAGE_TOKEN_BUDGETS: str = '{"parse": 60000, "code": 250000}'
 
     # Webhook secrets (empty = skip verification)
     JIRA_WEBHOOK_SECRET: str = ""
@@ -96,6 +100,12 @@ class Settings(BaseSettings):
     SANDBOX_ROLES: str = '["coding", "test"]'
     SANDBOX_DUMP_MODEL_API_RESPONSE: bool = True
     SANDBOX_MODEL_API_RAW_LOG_HOST_DIR: str = "/tmp/silicon_agent/model_api_logs"
+    SANDBOX_GRADLE_CMD_TIMEOUT_SECONDS: int = 480
+    SANDBOX_GRADLE_CACHE_HOST_DIR: str = "/var/lib/silicon_agent/gradle-cache"
+    SANDBOX_GRADLE_USER_HOME: str = "/var/lib/silicon_agent/gradle-cache"
+    SANDBOX_DEFAULT_JAVA_VERSION: int = 8
+    SANDBOX_GRADLE_WRAPPER_PREWARM: bool = True
+    SANDBOX_GRADLE_WRAPPER_PREWARM_TIMEOUT_SECONDS: int = 180
 
     # Memory & compression configuration
     MEMORY_ENABLED: bool = True

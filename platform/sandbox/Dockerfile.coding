@@ -2,21 +2,39 @@ FROM eclipse-temurin:8-jdk AS jdk8
 FROM eclipse-temurin:17-jdk AS jdk17
 FROM silicon-agent-sandbox:base
 
+ARG GRADLE_VERSION=8.5
+ENV GRADLE_PREWARM_USER_HOME=/opt/gradle-prewarm
+
 USER root
 
 # Development toolchain
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential gcc g++ make \
     nodejs npm \
+    unzip \
     && rm -rf /var/lib/apt/lists/*
+
+# Install Gradle from the official distribution so we can reuse the bundled
+# JDK 17 and avoid pulling Debian's extra OpenJDK runtime chain.
+RUN wget -q "https://services.gradle.org/distributions/gradle-${GRADLE_VERSION}-bin.zip" -O /tmp/gradle.zip && \
+    unzip -q /tmp/gradle.zip -d /opt && \
+    ln -s "/opt/gradle-${GRADLE_VERSION}/bin/gradle" /usr/local/bin/gradle && \
+    rm -f /tmp/gradle.zip
 
 COPY --from=jdk8 /opt/java/openjdk /opt/jdk8
 COPY --from=jdk17 /opt/java/openjdk /opt/jdk17
+COPY sandbox/scripts/prewarm_gradle_cache.sh /usr/local/bin/prewarm_gradle_cache.sh
 
 ENV JAVA8_HOME=/opt/jdk8
 ENV JAVA17_HOME=/opt/jdk17
 ENV JAVA_HOME=/opt/jdk17
 ENV PATH="${JAVA_HOME}/bin:${PATH}"
+
+RUN ln -sf /opt/jdk17/bin/java /usr/local/bin/java && \
+    ln -sf /opt/jdk17/bin/javac /usr/local/bin/javac
+
+RUN chmod +x /usr/local/bin/prewarm_gradle_cache.sh && \
+    /usr/local/bin/prewarm_gradle_cache.sh
 
 # Common Python dev tools
 RUN pip install --no-cache-dir \

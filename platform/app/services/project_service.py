@@ -7,6 +7,7 @@ from typing import Optional
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import settings
 from app.models.project import ProjectModel
 from app.schemas.project import (
     ProjectCreateRequest,
@@ -75,7 +76,7 @@ class ProjectService:
             repo_local_path=request.repo_local_path,
             branch=request.branch,
             description=request.description,
-            sandbox_image=request.sandbox_image,
+            sandbox_image=request.sandbox_image or settings.SANDBOX_IMAGE,
         )
         self.session.add(project)
         await self.session.commit()

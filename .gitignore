@@ -44,3 +44,6 @@ platform/htmlcov/
 platform/coverage.xml
 platform/**/*.cover
 platform/**/*.py,cover
+
+# Local git worktrees
+.worktrees/

@@ -155,6 +155,28 @@ async def test_get_agent_config_options_fallback_when_gateway_fails(client, monk
 
 
 @pytest.mark.asyncio
+async def test_get_agent_config_options_uses_lightweight_orchestrator_and_test_defaults(
+    client, monkeypatch
+):
+    """Config options should keep orchestrator/test on lighter defaults while coding follows global."""
+
+    monkeypatch.setattr(settings, "LLM_API_KEY", "")
+    monkeypatch.setattr(settings, "LLM_MODEL", "gpt-5.1-codex")
+    monkeypatch.setattr(
+        settings,
+        "LLM_ROLE_MODEL_MAP",
+        '{"orchestrator":"gpt-4o-mini","test":"gpt-4o-mini"}',
+    )
+
+    resp = await client.get("/api/v1/agents/config/options")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["role_defaults"]["orchestrator"] == "gpt-4o-mini"
+    assert data["role_defaults"]["test"] == "gpt-4o-mini"
+    assert data["role_defaults"]["coding"] == "gpt-5.1-codex"
+
+
+@pytest.mark.asyncio
 async def test_update_agent_config_rejects_extra_skill_dirs_outside_whitelist(
     client, seed_agent, tmp_path, monkeypatch
 ):

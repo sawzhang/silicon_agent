@@ -32,6 +32,23 @@ def test_minimal_title_only():
     assert STAGE_INSTRUCTIONS["code"] in result
 
 
+def test_code_guardrail_emphasizes_convergence():
+    ctx = _minimal_ctx(stage_name="code")
+    result = build_user_prompt(ctx)
+    assert "不要为了理解整个仓库而广泛探索" in result
+    assert "最小必要验证" in result
+    assert "最多再检查 3 个关键文件" in result
+
+
+def test_test_guardrail_emphasizes_minimal_validation():
+    ctx = _minimal_ctx(stage_name="test", agent_role="test")
+    result = build_user_prompt(ctx)
+    assert "最小、最相关、最快的验证路径" in result
+    assert "满足验收标准" in result
+    assert "执行 2 条验证命令" in result
+    assert "不要只根据代码阅读就判定测试通过" in result
+
+
 # ---------------------------------------------------------------------------
 # With description
 # ---------------------------------------------------------------------------
@@ -60,6 +77,47 @@ def test_with_repo_context():
     assert "Python 3.11 / FastAPI" in result
 
 
+def test_code_stage_clips_large_repo_context():
+    repo_context = (
+        "### 技术栈\nJava 17, Spring Boot, Gradle\n\n"
+        "### 目录结构\n"
+        "build.gradle\n"
+        "src/main/java/demo/controller/HelloController.java\n"
+        "src/main/java/demo/service/HelloService.java\n"
+        "src/test/java/demo/controller/HelloControllerTest.java\n"
+        "docs/design.md\n"
+    )
+    ctx = _minimal_ctx(stage_name="code", agent_role="coding", repo_context=repo_context)
+    result = build_user_prompt(ctx)
+    assert "## 项目代码库信息" in result
+    assert "- 技术栈: Java 17, Spring Boot, Gradle" in result
+    assert "- 构建入口: build.gradle" in result
+    assert "- 源码目录:" in result
+    assert "- 测试目录:" in result
+    assert "- 参考实现:" in result
+    assert "### 目录结构" not in result
+
+
+def test_spec_stage_keeps_full_repo_context():
+    repo_context = "STACK\n" + ("src/main/java/demo/File.java\n" * 40)
+    ctx = _minimal_ctx(stage_name="spec", agent_role="spec", repo_context=repo_context)
+    result = build_user_prompt(ctx)
+    assert "...(执行阶段上下文已截断)" not in result
+    assert repo_context in result
+
+
+def test_code_stage_omits_repo_context_when_preflight_present():
+    ctx = _minimal_ctx(
+        stage_name="code",
+        agent_role="coding",
+        repo_context="STACK\nsrc/main/java/demo/File.java",
+        preflight_summary="- 构建文件: build.gradle",
+    )
+    result = build_user_prompt(ctx)
+    assert "## 项目代码库信息" not in result
+    assert "## 阶段预扫摘要" in result
+
+
 def test_without_repo_context():
     ctx = _minimal_ctx(repo_context=None)
     result = build_user_prompt(ctx)
@@ -77,10 +135,32 @@ def test_with_project_memory():
     assert "Previous task: added auth module." in result
 
 
+def test_test_stage_clips_large_project_memory():
+    project_memory = "Memory line\n" * 300
+    ctx = _minimal_ctx(stage_name="test", agent_role="test", project_memory=project_memory)
+    result = build_user_prompt(ctx)
+    assert "## 项目上下文（来自历史任务）" in result
+    assert "...(执行阶段记忆已截断)" in result
+    assert len(result) < len(project_memory) + 500
+
+
 def test_without_project_memory():
     ctx = _minimal_ctx(project_memory=None)
     result = build_user_prompt(ctx)
     assert "## 项目上下文（来自历史任务）" not in result
+
+
+def test_with_preflight_summary():
+    ctx = _minimal_ctx(preflight_summary="- 构建文件: build.gradle\n- 实现参考: src/main/java/demo/HelloController.java")
+    result = build_user_prompt(ctx)
+    assert "## 阶段预扫摘要" in result
+    assert "HelloController.java" in result
+
+
+def test_without_preflight_summary():
+    ctx = _minimal_ctx(preflight_summary=None)
+    result = build_user_prompt(ctx)
+    assert "## 阶段预扫摘要" not in result
 
 
 # ---------------------------------------------------------------------------
@@ -99,6 +179,25 @@ def test_with_prior_outputs_raw():
     assert "Parsed requirements:" in result
     assert "### spec 阶段输出" in result
     assert "Spec document:" in result
+
+
+def test_execution_stage_clips_prior_outputs_aggressively():
+    long_parse = "需求分析\n" + ("parse-line\n" * 200)
+    long_spec = "技术方案\n" + ("spec-line\n" * 200)
+    ctx = _minimal_ctx(
+        stage_name="code",
+        agent_role="coding",
+        prior_outputs=[
+            {"stage": "parse", "output": long_parse},
+            {"stage": "spec", "output": long_spec},
+        ],
+    )
+    result = build_user_prompt(ctx)
+    assert "## 前序阶段产出" in result
+    assert "...(前序阶段产出已截断)" in result
+    assert "parse-line\nparse-line\nparse-line" in result
+    assert result.count("parse-line") < 80
+    assert result.count("spec-line") < 100
 
 
 def test_with_empty_prior_outputs():

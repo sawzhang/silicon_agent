@@ -95,6 +95,14 @@ async def cancel_task(task_id: str, service: TaskService = Depends(get_task_serv
     return task
 
 
+@router.post("/{task_id}/clone", response_model=TaskDetailResponse, status_code=201)
+async def clone_task(task_id: str, service: TaskService = Depends(get_task_service)):
+    task = await service.clone_task(task_id)
+    if task is None:
+        raise HTTPException(status_code=404, detail="Task not found")
+    return task
+
+
 @router.post("/{task_id}/retry", response_model=TaskDetailResponse)
 async def retry_task(task_id: str, service: TaskService = Depends(get_task_service)):
     task = await service.retry_task(task_id)

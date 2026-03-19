@@ -56,6 +56,22 @@ def test_compression_result_sliding_window():
     assert ctx[3]["output"] == "l2_3_full_content"
 
 
+def test_compression_result_caps_immediate_prior_l2():
+    cr = CompressionResult()
+    cr.add(
+        CompressedOutput(
+            stage_name="parse",
+            l0="short",
+            l1="brief",
+            l2="x" * 10_000,
+        )
+    )
+
+    ctx = cr.build_prior_context(1)
+    assert ctx[0]["output"].endswith("...(输出已截断)")
+    assert len(ctx[0]["output"]) < 10_000
+
+
 @pytest.mark.asyncio
 async def test_compress_stage_output_fallback():
     """When compression is disabled, should use fallback."""

@@ -165,6 +165,66 @@ async def test_execute_single_stage_reflection_disabled_uses_plain_context(monke
 
 
 @pytest.mark.asyncio
+async def test_execute_single_stage_passes_preflight_summary(monkeypatch, tmp_path):
+    monkeypatch.setattr(engine.settings, "SANDBOX_ENABLED", False)
+    monkeypatch.setattr(engine.settings, "MEMORY_ENABLED", False)
+    execute_stage_mock = AsyncMock(return_value="stage output")
+    monkeypatch.setattr(engine, "execute_stage", execute_stage_mock)
+    monkeypatch.setattr(engine, "execute_stage_sandboxed", execute_stage_mock)
+    monkeypatch.setattr(engine, "_emit_system_log", AsyncMock(return_value="log-id"))
+    monkeypatch.setattr(engine, "_close_started_system_log", AsyncMock())
+
+    (tmp_path / "build.gradle").write_text("plugins {}", encoding="utf-8")
+    (tmp_path / "src/main/java/demo/controller").mkdir(parents=True)
+    (tmp_path / "src/main/java/demo/controller/HelloController.java").write_text("class X {}", encoding="utf-8")
+
+    task_id = "tt-exec-preflight-1"
+    async with async_session_factory() as session:
+        session.add(TaskModel(id=task_id, title="Preflight Test", status="running"))
+        await session.commit()
+
+    async with async_session_factory() as session:
+        task = await session.get(TaskModel, task_id)
+        stage = SimpleNamespace(
+            id="stage-preflight-1",
+            stage_name="coding",
+            agent_role="coding",
+            error_message=None,
+            output_summary=None,
+            output_structured=None,
+            execution_count=0,
+            status="pending",
+        )
+
+        from app.worker.compressor import CompressionResult
+        compression = CompressionResult()
+
+        result = await engine._execute_single_stage(
+            session,  # type: ignore[arg-type]
+            task,  # type: ignore[arg-type]
+            stage,  # type: ignore[arg-type]
+            0,
+            [],
+            compression,
+            None,
+            None,
+            {},
+            str(tmp_path),
+            None,
+        )
+
+    assert result == "stage output"
+    call_kwargs = execute_stage_mock.call_args.kwargs
+    assert "HelloController.java" in (call_kwargs.get("preflight_summary") or "")
+
+    async with async_session_factory() as session:
+        t = await session.get(TaskModel, task_id)
+        if t:
+            await session.delete(t)
+        await session.commit()
+
+
+@pytest.mark.asyncio
 async def test_execute_single_stage_uses_sandbox(monkeypatch):
     """sandbox_info is truthy AND agent_role='coding' → calls execute_stage_sandboxed."""
     monkeypatch.setattr(engine.settings, "SKILL_REFLECTION_ENABLED", False)

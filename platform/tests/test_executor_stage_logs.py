@@ -136,6 +136,71 @@ class _FakePipeline:
         return True
 
 
+class _ContinuationRunner:
+    def __init__(self, *, response_text: str = 'done') -> None:
+        self.config = SimpleNamespace(model='test-model')
+        self.cumulative_usage = SimpleNamespace(total_tokens=11)
+        self.prompts: list[str] = []
+        self.resets: list[bool] = []
+        self.response_text = response_text
+
+    async def chat(self, prompt: str, reset: bool = True, **_: object):
+        self.prompts.append(prompt)
+        self.resets.append(reset)
+        return SimpleNamespace(text_content=self.response_text)
+
+
+class _ContinuationTracker:
+    def __init__(self, stage_name: str, agent_role: str = 'coding') -> None:
+        self.stage_name = stage_name
+        self.agent_role = agent_role
+        self.sent: list[dict[str, object]] = []
+        self.received: list[dict[str, object]] = []
+        self._forced_convergence_used = False
+        self._implementation_actions = 0
+        self._exploration_actions = 0
+        self._verification_failures = 0
+        self._successful_verifications = 0
+        self._verification_attempts = 0
+
+    async def emit_chat_sent(self, **kwargs):
+        self.sent.append(kwargs)
+        return f"sent-{len(self.sent)}"
+
+    async def emit_chat_received(self, *args, **kwargs):
+        self.received.append({"args": args, "kwargs": kwargs})
+        return True
+
+    def should_force_convergence(self) -> bool:
+        if self._forced_convergence_used:
+            return False
+        if self.stage_name == 'code':
+            return self._implementation_actions == 0 and self._exploration_actions >= 4
+        if self.stage_name == 'test':
+            if self._verification_failures > 0 and self._successful_verifications == 0:
+                return True
+            return self._verification_attempts == 0 and self._exploration_actions >= 3
+        return False
+
+    def mark_forced_convergence_used(self) -> None:
+        self._forced_convergence_used = True
+
+    def get_completed_tool_runs(self):
+        return []
+
+
+class _DigestTracker(_ContinuationTracker):
+    def __init__(self, stage_name: str, agent_role: str = 'coding') -> None:
+        super().__init__(stage_name=stage_name, agent_role=agent_role)
+        self._items = [
+            {"status": "success", "command": f"cmd-{i}", "result_preview": f"preview-{i}"}
+            for i in range(4)
+        ]
+
+    def get_completed_tool_runs(self):
+        return self._items
+
+
 class _CancelledRunner(_FakeRunner):
     async def chat(self, _prompt: str, reset: bool = True, **_: object):
         await self.events.emit(
@@ -195,12 +260,50 @@ class _FakeStreamingSandboxManager:
         return self._result
 
 
+def test_output_summary_limit_is_stage_specific():
+    assert executor._output_summary_limit('parse') <= 600
+    assert executor._output_summary_limit('code') <= 1200
+    assert executor._output_summary_limit('test') <= 1200
+    assert executor._output_summary_limit('signoff') <= 1600
+    assert executor._output_summary_limit('spec') > executor._output_summary_limit('parse')
+
+
 def test_is_tool_call_error_matches_gemini_thought_signature_error():
     err = RuntimeError(
         "Error code: 400 - [{'error': {'code': 400, 'message': "
         "'Function call is missing a thought_signature in functionCall parts.'}}]"
     )
     assert executor._is_tool_call_error(err) is True
+
+
+def test_classify_tool_activity_marks_exploration_implementation_and_verification():
+    assert executor._classify_tool_activity('read', {}) == 'exploration'
+    assert executor._classify_tool_activity('edit', {}) == 'implementation'
+    assert executor._classify_tool_activity('execute', {'command': 'find src -name "*.java"'}) == 'exploration'
+    assert executor._classify_tool_activity('execute', {'command': './gradlew test'}) == 'verification'
+
+
+def test_stage_event_tracker_force_convergence_budget_for_code_and_test():
+    tracker = executor.StageEventTracker(
+        pipeline=_FakePipeline(),
+        task_id='task-1',
+        stage_id='stage-1',
+        stage_name='code',
+        agent_role='coding',
+    )
+    for _ in range(4):
+        tracker.record_tool_activity('read', {}, 'success')
+    assert tracker.should_force_convergence() is True
+
+    test_tracker = executor.StageEventTracker(
+        pipeline=_FakePipeline(),
+        task_id='task-2',
+        stage_id='stage-2',
+        stage_name='test',
+        agent_role='test',
+    )
+    test_tracker.record_tool_activity('execute', {'command': './gradlew test'}, 'failed')
+    assert test_tracker.should_force_convergence() is True
 
 
 @pytest.mark.asyncio
@@ -273,6 +376,66 @@ async def test_execute_stage_falls_back_to_text_only_on_thought_signature_error(
         item for item in fake_pipeline.created if item['event_type'] == 'llm_fallback_text_only'
     ]
     assert len(fallback_events) == 1
+
+
+@pytest.mark.asyncio
+async def test_execute_stage_uses_text_only_runner_for_signoff(monkeypatch):
+    session = SimpleNamespace(commit=AsyncMock())
+    task = SimpleNamespace(
+        id='task-signoff-1',
+        title='task title',
+        description='task description',
+        total_tokens=0,
+        total_cost_rmb=0.0,
+    )
+    stage = SimpleNamespace(
+        id='stage-signoff-1',
+        stage_name='signoff',
+        agent_role='orchestrator',
+        status='pending',
+        started_at=None,
+        completed_at=None,
+        duration_seconds=None,
+        tokens_used=0,
+        output_summary=None,
+    )
+
+    fake_pipeline = _FakePipeline()
+    text_only_called = {'value': False}
+
+    monkeypatch.setattr(executor, 'get_task_log_pipeline', lambda: fake_pipeline)
+    monkeypatch.setattr(executor, '_get_agent', AsyncMock(return_value=None))
+    monkeypatch.setattr(executor, '_safe_broadcast', AsyncMock())
+    monkeypatch.setattr(executor, 'build_user_prompt', lambda _ctx: 'signoff prompt')
+
+    def _unexpected_agent(*args, **kwargs):
+        raise AssertionError('signoff should not use tool-enabled get_agent')
+
+    def _text_only_runner(
+        _role,
+        _task_id,
+        model=None,
+        temperature=None,
+        max_tokens=None,
+        max_turns=None,
+        extra_skill_dirs=None,
+        system_prompt_append=None,
+    ):
+        text_only_called['value'] = True
+        return _FakeRunner()
+
+    monkeypatch.setattr(executor, 'get_agent', _unexpected_agent)
+    monkeypatch.setattr(executor, 'get_agent_text_only', _text_only_runner)
+
+    result = await executor.execute_stage(
+        session=session,
+        task=task,
+        stage=stage,
+        prior_outputs=[],
+    )
+
+    assert result == 'stage output'
+    assert text_only_called['value'] is True
 
 
 def test_apply_runner_workspace_override_replaces_prompt_and_cwd():
@@ -438,7 +601,7 @@ async def test_execute_stage_uses_agent_config_runtime_overrides(monkeypatch):
     assert captured_params['model'] == 'gpt-5.1-codex-mini'
     assert captured_params['temperature_override'] == 0.2
     assert captured_params['max_tokens_override'] == 1200
-    assert captured_params['max_turns'] == 18
+    assert captured_params['max_turns'] == 6
     assert captured_params['extra_skill_dirs'] == ['/tmp/skills']
     assert captured_params['system_prompt_append'] == 'extra prompt'
     assert captured_params['temperature'] == 0.2
@@ -570,6 +733,190 @@ async def test_execute_stage_cancellation_still_finalizes_started_logs(monkeypat
     assert turn_updates
     assert turn_updates[-1]['updates']['status'] == 'cancelled'
     assert isinstance(turn_updates[-1]['updates']['duration_ms'], float)
+
+
+@pytest.mark.asyncio
+async def test_handle_continuations_uses_coding_specific_prompt():
+    runner = _ContinuationRunner()
+    tracker = _ContinuationTracker(stage_name='code', agent_role='coding')
+
+    output, total_tokens = await executor._handle_continuations(
+        runner,
+        "[Max turns reached. Please continue the conversation.]",
+        {},
+        tracker,
+    )
+
+    assert total_tokens == 11
+    assert output == 'done'
+    assert runner.resets == [True]
+    assert '## 当前阶段\ncode' in runner.prompts[0]
+    assert '请停止继续广泛探索。基于已知信息直接修改代码' in runner.prompts[0]
+
+
+@pytest.mark.asyncio
+async def test_handle_continuations_uses_test_specific_prompt():
+    runner = _ContinuationRunner()
+    tracker = _ContinuationTracker(stage_name='test', agent_role='test')
+
+    output, total_tokens = await executor._handle_continuations(
+        runner,
+        "[Max turns reached. Please continue the conversation.]",
+        {},
+        tracker,
+    )
+
+    assert total_tokens == 11
+    assert output == 'done'
+    assert runner.resets == [True]
+    assert '## 当前阶段\ntest' in runner.prompts[0]
+    assert '请停止扩展测试范围。只做最小、最相关的验证' in runner.prompts[0]
+
+
+@pytest.mark.asyncio
+async def test_handle_continuations_injects_forced_convergence_for_coding_budget():
+    runner = _ContinuationRunner()
+    tracker = _ContinuationTracker(stage_name='code', agent_role='coding')
+    tracker._exploration_actions = 4
+
+    output, total_tokens = await executor._handle_continuations(
+        runner,
+        'partial summary',
+        {},
+        tracker,
+    )
+
+    assert total_tokens == 11
+    assert output == 'partial summary\n\ndone'
+    assert runner.resets == [True]
+    assert '禁止继续浏览仓库' in runner.prompts[0]
+
+
+@pytest.mark.asyncio
+async def test_handle_continuations_injects_forced_convergence_for_failed_test_verification():
+    runner = _ContinuationRunner()
+    tracker = _ContinuationTracker(stage_name='test', agent_role='test')
+    tracker._verification_failures = 1
+
+    output, total_tokens = await executor._handle_continuations(
+        runner,
+        'analysis only',
+        {},
+        tracker,
+    )
+
+    assert total_tokens == 11
+    assert output == 'analysis only\n\ndone'
+    assert runner.resets == [True]
+    assert '禁止继续扩展测试范围' in runner.prompts[0]
+
+
+@pytest.mark.asyncio
+async def test_handle_continuations_uses_checkpoint_restart_with_reset_true():
+    runner = _ContinuationRunner(response_text='final answer')
+    tracker = _ContinuationTracker(stage_name='code', agent_role='coding')
+
+    output, total_tokens = await executor._handle_continuations(
+        runner,
+        "[Max turns reached. Please continue the conversation.]",
+        {},
+        tracker,
+        'code',
+        {
+            'task_title': 'Hello Task',
+            'task_description': 'Implement hello endpoint',
+            'stage_name': 'code',
+            'preflight_summary': '- 构建文件: build.gradle',
+        },
+    )
+
+    assert total_tokens == 11
+    assert output == 'final answer'
+    assert runner.resets == [True]
+    assert '## 任务\n**Hello Task**' in runner.prompts[0]
+    assert '## 阶段预扫摘要' in runner.prompts[0]
+    assert '不要重新展开整段历史' in runner.prompts[0]
+    assert tracker.sent[0]['request_body']['restart'] == 1
+    assert tracker.sent[0]['request_body']['restart_reason'] == 'truncation'
+    assert tracker.sent[0]['request_body']['reset'] is True
+
+
+@pytest.mark.asyncio
+async def test_handle_continuations_restarts_from_checkpoint_for_forced_convergence():
+    runner = _ContinuationRunner(response_text='implemented result')
+    tracker = _ContinuationTracker(stage_name='code', agent_role='coding')
+    tracker._exploration_actions = 4
+
+    output, total_tokens = await executor._handle_continuations(
+        runner,
+        'partial summary',
+        {},
+        tracker,
+        'code',
+        {
+            'task_title': 'Hello Task',
+            'task_description': 'Implement hello endpoint',
+            'stage_name': 'code',
+            'preflight_summary': '- 实现参考: src/main/java/demo/HelloController.java',
+        },
+    )
+
+    assert total_tokens == 11
+    assert output == 'partial summary\n\nimplemented result'
+    assert runner.resets == [True]
+    assert tracker.sent[0]['request_body']['restart'] == 1
+    assert tracker.sent[0]['request_body']['restart_reason'] == 'forced_convergence'
+    assert tracker.sent[0]['request_body']['forced_convergence'] is True
+
+
+def test_build_stage_restart_prompt_limits_tool_digest_items():
+    tracker = _DigestTracker(stage_name='code', agent_role='coding')
+    prompt = executor._build_stage_restart_prompt(
+        {
+            'task_title': 'Hello Task',
+            'task_description': 'Implement hello endpoint',
+            'stage_name': 'code',
+            'preflight_summary': '- 构建文件: build.gradle',
+        },
+        tracker,
+        'partial output',
+        reason='truncation',
+    )
+
+    assert 'cmd-3' in prompt
+    assert 'cmd-2' in prompt
+    assert 'cmd-1' not in prompt
+    assert 'cmd-0' not in prompt
+
+
+def test_resolve_stage_max_turns_caps_coding_and_test():
+    assert executor._resolve_stage_max_turns('coding', None) == 6
+    assert executor._resolve_stage_max_turns('coding', 18) == 6
+    assert executor._resolve_stage_max_turns('test', 12) == 6
+
+
+def test_resolve_stage_max_turns_preserves_other_roles():
+    assert executor._resolve_stage_max_turns('doc', None) == 10
+    assert executor._resolve_stage_max_turns('doc', 18) == 18
+
+
+@pytest.mark.asyncio
+async def test_handle_continuations_uses_generic_prompt_for_other_stage():
+    runner = _ContinuationRunner()
+    tracker = _ContinuationTracker(stage_name='review', agent_role='review')
+
+    output, total_tokens = await executor._handle_continuations(
+        runner,
+        "[Max turns reached. Please continue the conversation.]",
+        {},
+        tracker,
+    )
+
+    assert total_tokens == 11
+    assert output == 'done'
+    assert runner.prompts == [
+        '请继续完成上面的输出，从你停下的地方继续。'
+    ]
 
 
 @pytest.mark.asyncio

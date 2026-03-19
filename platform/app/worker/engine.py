@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import shutil
 import tempfile
 import time
@@ -46,6 +47,24 @@ logger = logging.getLogger(__name__)
 
 _running = False
 _task: Optional[asyncio.Task] = None
+
+_PREFLIGHT_SKIP_DIRS = {
+    ".git",
+    ".hg",
+    ".svn",
+    "node_modules",
+    ".venv",
+    "venv",
+    "build",
+    "dist",
+    "target",
+    ".gradle",
+    ".idea",
+    "__pycache__",
+}
+_PREFLIGHT_MAX_FILES = 2000
+_PREFLIGHT_MAX_DEPTH = 6
+_PREFLIGHT_MAX_CHARS = 600
 
 
 async def _safe_broadcast(event: str, data: dict) -> None:
@@ -1702,6 +1721,8 @@ async def _execute_single_stage(
         except Exception:
             logger.warning("Failed to load memory for role %s", stage.agent_role, exc_info=True)
 
+    preflight_summary = _build_stage_preflight_summary(stage.stage_name, workspace_path)
+
     # Build compressed prior context via sliding window
     # Phase 1.5: Cross-stage context recall — override compression for specified stages
     context_from = sdef.get("context_from")
@@ -1816,6 +1837,7 @@ async def _execute_single_stage(
                 compressed_outputs=compressed_prior if compressed_prior else None,
                 project_memory=project_memory,
                 repo_context=repo_context,
+                preflight_summary=preflight_summary,
                 retry_context=retry_context,
                 stage_model=stage_model,
                 custom_instruction=custom_instruction,
@@ -1827,6 +1849,7 @@ async def _execute_single_stage(
                 compressed_outputs=compressed_prior if compressed_prior else None,
                 project_memory=project_memory,
                 repo_context=repo_context,
+                preflight_summary=preflight_summary,
                 retry_context=retry_context,
                 stage_model=stage_model,
                 workdir_override=effective_workdir,
@@ -2800,6 +2823,191 @@ def _build_repo_context(project) -> str:
         branch = project.branch or "main"
         parts.append(f"### 仓库\n{project.repo_url} (branch: {branch})")
     return "\n\n".join(parts)
+
+
+def _iter_preflight_files(workspace_path: str):
+    root = Path(workspace_path)
+    scanned = 0
+    for dirpath, dirnames, filenames in os.walk(root):
+        current = Path(dirpath)
+        try:
+            rel = current.relative_to(root)
+            depth = len(rel.parts)
+        except ValueError:
+            depth = 0
+        dirnames[:] = [
+            name for name in dirnames
+            if name not in _PREFLIGHT_SKIP_DIRS and depth < _PREFLIGHT_MAX_DEPTH
+        ]
+        for filename in filenames:
+            scanned += 1
+            yield current / filename
+            if scanned >= _PREFLIGHT_MAX_FILES:
+                return
+
+
+def _format_preflight_section(title: str, items: list[str], *, limit: int = 4) -> str:
+    if not items:
+        return ""
+    unique: list[str] = []
+    seen: set[str] = set()
+    for item in items:
+        if item in seen:
+            continue
+        seen.add(item)
+        unique.append(item)
+        if len(unique) >= limit:
+            break
+    if not unique:
+        return ""
+    return f"- {title}: {', '.join(unique)}"
+
+
+def _rank_preflight_path(rel_path: str, *, kind: str) -> tuple[int, int, int, str]:
+    lowered = rel_path.lower()
+    score = 0
+
+    if kind == "impl":
+        if "src/main/" in lowered:
+            score += 4
+        if any(token in lowered for token in ("/controller/", "/handler/", "/service/", "/api/", "response")):
+            score += 5
+        if "/src/test/" in lowered or lowered.startswith("src/test/"):
+            score -= 6
+    elif kind == "test":
+        if any(token in lowered for token in ("/controller/", "/api/", "controller", "api")):
+            score += 5
+        if lowered.endswith("test.java") or lowered.endswith("tests.java") or lowered.endswith("_test.go"):
+            score += 3
+        if any(token in lowered for token in ("basetest", "sdk/", "mybatisgenerator", "mapper")):
+            score -= 4
+
+    return (-score, len(rel_path.split("/")), len(rel_path), rel_path)
+
+
+def _pick_preflight_paths(items: list[str], *, kind: str, limit: int) -> list[str]:
+    unique = list(dict.fromkeys(items))
+    return sorted(unique, key=lambda value: _rank_preflight_path(value, kind=kind))[:limit]
+
+
+def _infer_validation_command(build_files: list[str]) -> str:
+    lowered = {item.lower() for item in build_files}
+    if "build.gradle" in lowered or "build.gradle.kts" in lowered:
+        return "./gradlew test"
+    if "pom.xml" in lowered:
+        return "./mvnw test"
+    if "package.json" in lowered:
+        return "npm test"
+    if "pyproject.toml" in lowered:
+        return "pytest"
+    if "go.mod" in lowered:
+        return "go test ./..."
+    if "cargo.toml" in lowered:
+        return "cargo test"
+    return "优先执行最小相关验证命令"
+
+
+def _infer_coding_edit_target(source_roots: list[str], impl_examples: list[str]) -> str:
+    if impl_examples:
+        first = impl_examples[0]
+        parent = str(Path(first).parent).replace("\\", "/")
+        return parent if parent and parent != "." else first
+    if source_roots:
+        return source_roots[0]
+    return "优先在现有 controller/service 相邻目录做最小修改"
+
+
+def _infer_test_target(test_examples: list[str], impl_examples: list[str]) -> str:
+    if test_examples:
+        return test_examples[0]
+    if impl_examples:
+        return impl_examples[0]
+    return "优先补充与当前改动直接相关的最小测试"
+
+
+def _build_stage_preflight_summary(stage_name: str, workspace_path: Optional[str]) -> Optional[str]:
+    normalized = (stage_name or "").strip().lower()
+    if normalized not in {"code", "coding", "test"}:
+        return None
+    if not workspace_path:
+        return None
+
+    root = Path(workspace_path)
+    if not root.exists() or not root.is_dir():
+        return None
+
+    build_files: list[str] = []
+    source_roots: list[str] = []
+    impl_examples: list[str] = []
+    test_examples: list[str] = []
+
+    build_file_names = {
+        "build.gradle",
+        "build.gradle.kts",
+        "settings.gradle",
+        "settings.gradle.kts",
+        "pom.xml",
+        "package.json",
+        "pyproject.toml",
+        "go.mod",
+        "cargo.toml",
+    }
+    impl_keywords = ("controller", "handler", "service", "api", "route", "response")
+    test_keywords = ("test", "spec")
+
+    for path in _iter_preflight_files(str(root)):
+        try:
+            rel = path.relative_to(root).as_posix()
+        except ValueError:
+            rel = path.as_posix()
+        lower_rel = rel.lower()
+        name = path.name.lower()
+
+        if name in build_file_names:
+            build_files.append(rel)
+        if any(token in lower_rel for token in ("src/main", "app/", "cmd/", "internal/", "lib/")):
+            parent = str(Path(rel).parent).replace("\\", "/")
+            if parent and parent != ".":
+                source_roots.append(parent)
+        if any(keyword in name for keyword in impl_keywords) or any(
+            segment in lower_rel for segment in ("/controller/", "/handler/", "/service/", "/api/")
+        ):
+            impl_examples.append(rel)
+        if any(keyword in name for keyword in test_keywords) or any(
+            segment in lower_rel for segment in ("/test/", "/tests/", "/__tests__/")
+        ):
+            test_examples.append(rel)
+
+    build_files = list(dict.fromkeys(build_files))
+    source_roots = list(dict.fromkeys(source_roots))
+    impl_examples = _pick_preflight_paths(impl_examples, kind="impl", limit=3)
+    test_examples = _pick_preflight_paths(test_examples, kind="test", limit=3)
+    validation_command = _infer_validation_command(build_files)
+
+    lines = []
+    if normalized in {"code", "coding"}:
+        lines.append(_format_preflight_section("构建入口", build_files, limit=2))
+        lines.append(f"- 推荐修改落点: {_infer_coding_edit_target(source_roots, impl_examples)}")
+        lines.append(_format_preflight_section("最相关实现参考", impl_examples, limit=2))
+        lines.append(_format_preflight_section("最相关测试参考", test_examples, limit=2))
+        lines.append(f"- 推荐最小验证命令: {validation_command}")
+        if not any(lines):
+            lines.append("- 未发现明显的实现参考，请直接聚焦最小修改并谨慎验证。")
+    else:
+        lines.append(_format_preflight_section("构建入口", build_files, limit=2))
+        lines.append(f"- 推荐验证落点: {_infer_test_target(test_examples, impl_examples)}")
+        lines.append(_format_preflight_section("最相关测试参考", test_examples, limit=2))
+        lines.append(_format_preflight_section("对应实现参考", impl_examples, limit=2))
+        lines.append(f"- 推荐最小验证命令: {validation_command}")
+        if not any(lines):
+            lines.append("- 未发现明显测试样例，请优先选择最小、最快的验证路径。")
+
+    summary = "\n".join(line for line in lines if line).strip()
+    if not summary:
+        return None
+    if len(summary) > _PREFLIGHT_MAX_CHARS:
+        summary = summary[:_PREFLIGHT_MAX_CHARS] + "\n...(预扫摘要已截断)"
+    return summary
 
 
 async def _fail_task(session: AsyncSession, task: TaskModel, reason: str) -> None:

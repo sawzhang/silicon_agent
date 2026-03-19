@@ -14,6 +14,7 @@ import json
 import logging
 import os
 import re
+import shlex
 import sys
 import time
 from datetime import datetime, timezone
@@ -63,19 +64,40 @@ _JAVA_DETECT_FILES = (
     "build.gradle",
     "build.gradle.kts",
     "gradle.properties",
+    "settings.gradle",
+    "settings.gradle.kts",
+    ".java-version",
+    ".tool-versions",
 )
 _JAVA8_PATTERNS = (
     r"<java\.version>\s*(?:1\.8|8)\s*</java\.version>",
     r"<maven\.compiler\.(?:source|target|release)>\s*(?:1\.8|8)\s*</maven\.compiler\.(?:source|target|release)>",
     r"sourceCompatibility\s*=\s*(?:['\"]?1\.8['\"]?|JavaVersion\.VERSION_1_8)",
     r"targetCompatibility\s*=\s*(?:['\"]?1\.8['\"]?|JavaVersion\.VERSION_1_8)",
+    r"JavaLanguageVersion\.of\(\s*(?:1\.8|8)\s*\)",
+    r"^\s*8(?:\.\d+)?\s*$",
+    r"(?m)^\s*java\s+(?:temurin-)?(?:1\.8|8)\s*$",
 )
 _JAVA17_PATTERNS = (
     r"<java\.version>\s*17\s*</java\.version>",
     r"<maven\.compiler\.(?:source|target|release)>\s*17\s*</maven\.compiler\.(?:source|target|release)>",
     r"sourceCompatibility\s*=\s*(?:['\"]?17['\"]?|JavaVersion\.VERSION_17)",
     r"targetCompatibility\s*=\s*(?:['\"]?17['\"]?|JavaVersion\.VERSION_17)",
+    r"JavaLanguageVersion\.of\(\s*17\s*\)",
+    r"^\s*17(?:\.\d+)?\s*$",
+    r"(?m)^\s*java\s+(?:temurin-)?17\s*$",
 )
+_JAVA_VERSION_MISMATCH_PATTERNS = (
+    r"Unsupported class file major version",
+    r"invalid source release",
+    r"release version \d+ not supported",
+    r"Could not target platform",
+)
+_GRADLE_ANY_CMD_RE = re.compile(r"(?<![\w./-])(?:gradle|(?:sh\s+)?(?:\./)?gradlew)(?![\w.-])")
+_RUNTIME_PREFLIGHT_DONE = False
+_RUNTIME_PREFLIGHT_LOCK = asyncio.Lock()
+_WRAPPER_PREWARM_DONE = False
+_WRAPPER_PREWARM_LOCK = asyncio.Lock()
 
 
 def _normalize_openai_base_url(base_url: str | None) -> str:
@@ -114,9 +136,14 @@ def _detect_java_major_version(workdir: str) -> int | None:
 
 
 def _configure_java_runtime_for_workspace(workdir: str) -> int | None:
-    major = _detect_java_major_version(workdir)
-    if major is None:
-        return None
+    override_raw = (os.environ.get("SANDBOX_JAVA_VERSION") or "").strip()
+    if override_raw in {"8", "17"}:
+        major = int(override_raw)
+    else:
+        default_major = _env_int("SANDBOX_DEFAULT_JAVA_VERSION", 8)
+        if default_major not in {8, 17}:
+            default_major = 8
+        major = _detect_java_major_version(workdir) or default_major
 
     java_home_key = "JAVA8_HOME" if major == 8 else "JAVA17_HOME"
     target_java_home = (os.environ.get(java_home_key) or "").strip()
@@ -140,6 +167,14 @@ def _configure_java_runtime_for_workspace(workdir: str) -> int | None:
         target_java_home,
     )
     return major
+
+
+def _should_retry_with_other_java(output: str) -> bool:
+    text = str(output or "")
+    return any(
+        re.search(pattern, text, re.IGNORECASE)
+        for pattern in _JAVA_VERSION_MISMATCH_PATTERNS
+    )
 
 
 def _is_gemini_model(model: str | None) -> bool:
@@ -166,6 +201,128 @@ def _sanitize_reasoning_kwargs_for_model(
     else:
         sanitized_kwargs.pop("extra_body", None)
     return sanitized_kwargs
+
+
+def _env_flag(name: str, default: bool) -> bool:
+    raw = (os.environ.get(name) or "").strip().lower()
+    if not raw:
+        return default
+    return raw in {"1", "true", "yes", "on"}
+
+
+def _env_int(name: str, default: int) -> int:
+    raw = (os.environ.get(name) or "").strip()
+    if not raw:
+        return default
+    try:
+        parsed = int(raw)
+    except ValueError:
+        return default
+    return parsed if parsed > 0 else default
+
+
+def _wrap_with_timeout(command: str, timeout_seconds: int) -> str:
+    if timeout_seconds <= 0:
+        return command
+    payload = (
+        "if command -v timeout >/dev/null 2>&1; "
+        f"then timeout {timeout_seconds}s bash -lc {shlex.quote(command)}; "
+        f"else bash -lc {shlex.quote(command)}; fi"
+    )
+    return payload
+
+
+async def _run_runtime_preflight_once() -> None:
+    global _RUNTIME_PREFLIGHT_DONE
+    if _RUNTIME_PREFLIGHT_DONE:
+        return
+
+    async with _RUNTIME_PREFLIGHT_LOCK:
+        if _RUNTIME_PREFLIGHT_DONE:
+            return
+
+        async def _run_line(cmd: str, *, timeout: float = 5.0) -> str:
+            proc = await asyncio.create_subprocess_exec(
+                "sh", "-lc", cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.STDOUT,
+            )
+            try:
+                out, _ = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+            except Exception:
+                with contextlib.suppress(Exception):
+                    proc.kill()
+                    await proc.communicate()
+                return ""
+            return (out or b"").decode("utf-8", errors="ignore").strip()
+
+        gradle_line = await _run_line("gradle -v 2>&1 | head -n 5")
+        java_line = await _run_line("java -version 2>&1 | head -n 3")
+        if gradle_line:
+            logger.info("sandbox_runtime_preflight gradle=%s", gradle_line.replace("\n", " | "))
+        else:
+            logger.info("sandbox_runtime_preflight gradle=unavailable")
+        if java_line:
+            logger.info("sandbox_runtime_preflight java=%s", java_line.replace("\n", " | "))
+        else:
+            logger.info("sandbox_runtime_preflight java=unavailable")
+
+        _RUNTIME_PREFLIGHT_DONE = True
+
+
+async def _run_gradle_wrapper_prewarm_once(workdir: str) -> None:
+    global _WRAPPER_PREWARM_DONE
+    if _WRAPPER_PREWARM_DONE:
+        return
+    if not _env_flag("SANDBOX_GRADLE_WRAPPER_PREWARM", True):
+        return
+
+    gradlew = Path(workdir) / "gradlew"
+    if not gradlew.is_file():
+        return
+
+    timeout_seconds = _env_int("SANDBOX_GRADLE_WRAPPER_PREWARM_TIMEOUT_SECONDS", 180)
+    cmd = _wrap_with_timeout(f"cd {shlex.quote(workdir)} && ./gradlew --version", timeout_seconds)
+
+    async with _WRAPPER_PREWARM_LOCK:
+        if _WRAPPER_PREWARM_DONE:
+            return
+
+        started = time.monotonic()
+        proc = await asyncio.create_subprocess_exec(
+            "sh", "-lc", cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.STDOUT,
+        )
+        try:
+            out, _ = await proc.communicate()
+            elapsed_ms = int((time.monotonic() - started) * 1000)
+            output = (out or b"").decode("utf-8", errors="ignore")
+            if proc.returncode == 0:
+                _WRAPPER_PREWARM_DONE = True
+                logger.info(
+                    "gradle_wrapper_prewarm status=success workdir=%s elapsed_ms=%d gradle_user_home=%s",
+                    workdir,
+                    elapsed_ms,
+                    os.environ.get("GRADLE_USER_HOME", ""),
+                )
+                return
+
+            logger.warning(
+                "gradle_wrapper_prewarm status=failed workdir=%s elapsed_ms=%d exit_code=%s output=%s",
+                workdir,
+                elapsed_ms,
+                proc.returncode,
+                output[-600:].replace("\n", " | "),
+            )
+        except Exception as exc:
+            elapsed_ms = int((time.monotonic() - started) * 1000)
+            logger.warning(
+                "gradle_wrapper_prewarm status=error workdir=%s elapsed_ms=%d error=%s",
+                workdir,
+                elapsed_ms,
+                exc,
+            )
 
 
 def _extract_gemini_thought_signatures_from_response(response_obj: Any) -> dict[str, str]:
@@ -463,6 +620,46 @@ class ContainerAgentRunner(ToolExecutionPolicyMixin, AgentRunner):
     async def _execute_tool(self, tool_call, on_output=None):
         return await self._execute_tool_with_policy(tool_call, on_output=on_output)
 
+    def _preprocess_validated_tool_call(
+        self,
+        *,
+        tool_name: str,
+        args: dict[str, Any],
+        tool_call: dict[str, Any],
+    ) -> tuple[dict[str, Any], dict[str, Any], str | None, str | None]:
+        if tool_name != "execute":
+            return super()._preprocess_validated_tool_call(
+                tool_name=tool_name,
+                args=args,
+                tool_call=tool_call,
+            )
+
+        command = str(args.get("command") or "").strip()
+        if not command or not _GRADLE_ANY_CMD_RE.search(command):
+            return super()._preprocess_validated_tool_call(
+                tool_name=tool_name,
+                args=args,
+                tool_call=tool_call,
+            )
+
+        timeout_seconds = _env_int("SANDBOX_GRADLE_CMD_TIMEOUT_SECONDS", 480)
+        rewritten = command
+        if timeout_seconds > 0:
+            rewritten = _wrap_with_timeout(rewritten, timeout_seconds)
+
+        if rewritten != command:
+            logger.info(
+                "gradle_command_wrap strategy=wrapper rewritten=true original_command=%s rewritten_command=%s",
+                command,
+                rewritten,
+            )
+
+        updated_args = dict(args)
+        updated_args["command"] = rewritten
+        normalized_tool_call = dict(tool_call)
+        normalized_tool_call["arguments"] = json.dumps(updated_args, ensure_ascii=False)
+        return normalized_tool_call, updated_args, None, None
+
     def _on_tool_validation_error(
         self,
         *,
@@ -585,6 +782,58 @@ def _create_runner(parsed: dict[str, Any]) -> ContainerAgentRunner:
     return runner
 
 
+def _build_restart_prompt(
+    user_prompt: str,
+    text_content: str,
+    tool_calls: list[dict[str, Any]],
+    *,
+    reason: str,
+) -> str:
+    prompt_excerpt = (user_prompt or "").strip()
+    if len(prompt_excerpt) > 1200:
+        prompt_excerpt = prompt_excerpt[:1200] + "\n...(任务上下文已截断)"
+    partial_output = (text_content or "").replace(
+        "[Max turns reached. Please continue the conversation.]",
+        "",
+    ).strip()
+    if len(partial_output) > 1200:
+        partial_output = partial_output[:1200] + "\n...(已有输出已截断)"
+
+    digest_lines: list[str] = []
+    for item in tool_calls[-4:]:
+        status = str(item.get("status") or "success").upper()
+        tool_name = str(item.get("tool_name") or "tool")
+        preview = str(item.get("result_preview") or "").strip()
+        if len(preview) > 240:
+            preview = preview[:240] + "...[truncated]"
+        line = f"- [{status}] {tool_name}"
+        if preview:
+            line += f"\n  结果: {preview}"
+        digest_lines.append(line)
+
+    action_prompt = (
+        "请停止继续广泛探索，直接完成最小必要工作。"
+        if reason == "forced_convergence"
+        else "请不要重复整段历史，只基于当前状态继续完成剩余必要内容。"
+    )
+
+    parts = [
+        "## 原始任务摘要",
+        prompt_excerpt or "（无）",
+    ]
+    if partial_output:
+        parts.extend(["\n## 当前阶段已有部分输出", partial_output])
+    if digest_lines:
+        parts.extend(["\n## 最近关键工具结果", "\n".join(digest_lines)])
+    parts.extend(
+        [
+            "\n## 下一步要求",
+            action_prompt,
+        ]
+    )
+    return "\n".join(parts).strip()
+
+
 async def _run_stage_chat(
     runner: ContainerAgentRunner,
     *,
@@ -610,8 +859,14 @@ async def _run_stage_chat(
             max_continuations,
         )
         try:
+            restart_prompt = _build_restart_prompt(
+                user_prompt,
+                text_content,
+                runner.tool_calls_log,
+                reason="truncation",
+            )
             cont = await asyncio.wait_for(
-                runner.chat("请继续完成上面的输出，从你停下的地方继续。", reset=False),
+                runner.chat(restart_prompt, reset=True),
                 timeout=timeout,
             )
             cont_text = cont.text_content or ""
@@ -747,7 +1002,9 @@ async def handle_execute(request: web.Request) -> web.Response:
         parsed["workdir"],
         parsed["timeout"],
     )
+    await _run_runtime_preflight_once()
     _configure_java_runtime_for_workspace(parsed["workdir"])
+    await _run_gradle_wrapper_prewarm_once(parsed["workdir"])
 
     try:
         runner = _create_runner(parsed)
@@ -818,7 +1075,9 @@ async def handle_execute_stream(request: web.Request) -> web.StreamResponse:
         parsed["workdir"],
         parsed["timeout"],
     )
+    await _run_runtime_preflight_once()
     _configure_java_runtime_for_workspace(parsed["workdir"])
+    await _run_gradle_wrapper_prewarm_once(parsed["workdir"])
 
     try:
         runner = _create_runner(parsed)

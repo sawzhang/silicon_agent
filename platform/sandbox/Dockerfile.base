@@ -17,11 +17,13 @@ COPY sandbox/requirements.txt /app/requirements.txt
 RUN pip install --no-cache-dir -r /app/requirements.txt
 
 # Copy agent server
-COPY sandbox/agent_server.py /app/agent_server.py
-COPY sandbox/tool_policy.py /app/tool_policy.py
+COPY --chown=agent:agent sandbox/agent_server.py /app/agent_server.py
+COPY --chown=agent:agent sandbox/tool_policy.py /app/tool_policy.py
 
-# Copy skills
-COPY skills/ /skills/
+# Copy skills and keep them readable for sandbox processes that run as
+# the workspace owner instead of the image's default agent user.
+COPY --chown=agent:agent skills/ /skills/
+RUN chmod -R a+rX /app /skills
 
 EXPOSE 9090
 

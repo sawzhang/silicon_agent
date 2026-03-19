@@ -1,8 +1,26 @@
 """Role-based system prompts and stage instruction templates for Agent Worker."""
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from typing import Dict, List, Optional
+
+_EXECUTION_STAGE_NAMES = {"code", "coding", "test"}
+_EXECUTION_MEMORY_LIMIT = 320
+_EXECUTION_REPO_HINT_LIMIT = 720
+_EXECUTION_PRIOR_LIMITS = {
+    "parse": 520,
+    "approve": 520,
+    "spec": 720,
+    "review": 720,
+    "doc": 720,
+    "code": 960,
+    "coding": 960,
+    "test": 960,
+    "signoff": 960,
+}
+_EXECUTION_PRIOR_MARKER = "\n...(前序阶段产出已截断)"
+_REPO_SECTION_PATTERN = re.compile(r"^###\s+(?P<title>[^\n]+)\n", re.MULTILINE)
 
 
 # ---------------------------------------------------------------------------
@@ -130,13 +148,19 @@ STAGE_INSTRUCTIONS: Dict[str, str] = {
 STAGE_GUARDRAILS: Dict[str, str] = {
     "code": (
         "只完成当前阶段，不要提前执行后续阶段任务。\n"
-        "你可以为了验证实现而运行必要命令，但不要提前生成最终签收/验收报告，"
-        "也不要调用 signoff、review、smoke、e2e-test 等后续阶段能力。\n"
+        "不要为了理解整个仓库而广泛探索，优先基于已知信息直接实现。\n"
+        "只有在缺少关键实现信息时才少量补读文件；最多再检查 3 个关键文件或执行 1 次探索性目录命令，"
+        "之后必须开始修改代码。\n"
+        "你可以为了验证实现而运行必要命令，但目标必须是最小必要验证。\n"
+        "不要提前生成最终签收/验收报告，也不要调用 signoff、review、smoke、e2e-test 等后续阶段能力。\n"
         "完成实现并简要总结本阶段改动后结束。"
     ),
     "test": (
         "只完成当前阶段，不要提前执行后续阶段任务。\n"
-        "请聚焦当前任务直接相关的自动化测试与验证；如果相关测试已经通过，且已覆盖验收标准，请立即停止。\n"
+        "请聚焦当前任务直接相关的自动化测试与验证，优先最小、最相关、最快的验证路径。\n"
+        "最多再补读 2 个关键文件、执行 2 条验证命令；超过后必须停止扩展并给出结论。\n"
+        "如果验证命令失败，必须明确给出失败命令、关键报错和阻塞点；不要只根据代码阅读就判定测试通过。\n"
+        "如果相关测试已经通过，且已满足验收标准，请立即停止。\n"
         "不要继续扩展额外类型的测试，例如 E2E、冒烟、性能或签收报告，除非任务明确要求。"
     ),
     "signoff": (
@@ -163,12 +187,149 @@ class StageContext:
     compressed_outputs: Optional[List[Dict[str, str]]] = None  # sliding-window compressed
     project_memory: Optional[str] = None  # injected project memory text
     repo_context: Optional[str] = None  # injected repo context (tech stack + dir tree)
+    preflight_summary: Optional[str] = None  # deterministic stage-local workspace scan summary
     # Smart retry: failure context from previous attempt (Ralph Loop V2 pattern)
     retry_context: Optional[Dict[str, str]] = None  # {"error": msg, "prior_output": text}
     # Phase 1.4: Custom instruction from template stage definition
     custom_instruction: Optional[str] = None
     # Phase 1.3: Gate rejection feedback context
     gate_rejection_context: Optional[Dict[str, str]] = None  # {"comment": ..., "retry": "2/3"}
+
+
+def _clip_stage_context(value: Optional[str], *, limit: int, marker: str) -> Optional[str]:
+    text = (value or "").strip()
+    if not text:
+        return None
+    if len(text) <= limit:
+        return text
+    keep_len = max(0, limit - len(marker))
+    return text[:keep_len].rstrip() + marker
+
+
+def _is_execution_stage(stage_name: str) -> bool:
+    return (stage_name or "").strip().lower() in _EXECUTION_STAGE_NAMES
+
+
+def _extract_repo_section(repo_context: str, title: str) -> str:
+    text = (repo_context or "").strip()
+    if not text:
+        return ""
+    matches = list(_REPO_SECTION_PATTERN.finditer(text))
+    for index, match in enumerate(matches):
+        if match.group("title").strip() != title:
+            continue
+        start = match.end()
+        end = matches[index + 1].start() if index + 1 < len(matches) else len(text)
+        return text[start:end].strip()
+    return ""
+
+
+def _collect_tree_matches(
+    tree_lines: list[str],
+    *,
+    predicates: tuple[str, ...],
+    limit: int,
+    require_file: bool = False,
+) -> list[str]:
+    matches: list[str] = []
+    seen: set[str] = set()
+    for raw in tree_lines:
+        line = raw.strip()
+        lowered = line.lower()
+        if not line or line.startswith("...(目录树已截断)"):
+            continue
+        if require_file and "." not in line.rsplit("/", 1)[-1]:
+            continue
+        if not any(token in lowered for token in predicates):
+            continue
+        if line in seen:
+            continue
+        seen.add(line)
+        matches.append(line)
+        if len(matches) >= limit:
+            break
+    return matches
+
+
+def _build_execution_repo_hint(repo_context: Optional[str]) -> Optional[str]:
+    text = (repo_context or "").strip()
+    if not text:
+        return None
+
+    tech_stack = _extract_repo_section(text, "技术栈")
+    repo_tree = _extract_repo_section(text, "目录结构")
+    repo_tree_lines = [line for line in repo_tree.splitlines() if line.strip()]
+
+    build_files = _collect_tree_matches(
+        repo_tree_lines,
+        predicates=(
+            "build.gradle",
+            "build.gradle.kts",
+            "pom.xml",
+            "package.json",
+            "pyproject.toml",
+            "go.mod",
+            "cargo.toml",
+        ),
+        limit=3,
+        require_file=True,
+    )
+    source_roots = _collect_tree_matches(
+        repo_tree_lines,
+        predicates=("src/main", "app/", "app\\", "server/", "lib/", "internal/"),
+        limit=3,
+    )
+    test_roots = _collect_tree_matches(
+        repo_tree_lines,
+        predicates=("src/test", "tests/", "__tests__", "spec/"),
+        limit=3,
+    )
+    impl_refs = _collect_tree_matches(
+        repo_tree_lines,
+        predicates=("controller", "handler", "service", "api", "route", "response"),
+        limit=2,
+        require_file=True,
+    )
+
+    parts: list[str] = []
+    if tech_stack:
+        parts.append(f"- 技术栈: {tech_stack[:180].strip()}")
+    if build_files:
+        parts.append(f"- 构建入口: {', '.join(build_files)}")
+    if source_roots:
+        parts.append(f"- 源码目录: {', '.join(source_roots)}")
+    if test_roots:
+        parts.append(f"- 测试目录: {', '.join(test_roots)}")
+    if impl_refs:
+        parts.append(f"- 参考实现: {', '.join(impl_refs)}")
+
+    if not parts:
+        return _clip_stage_context(
+            text,
+            limit=_EXECUTION_REPO_HINT_LIMIT,
+            marker="...(执行阶段仓库信息已截断)",
+        )
+
+    return _clip_stage_context(
+        "\n".join(parts),
+        limit=_EXECUTION_REPO_HINT_LIMIT,
+        marker="...(执行阶段仓库信息已截断)",
+    )
+
+
+def _clip_execution_prior_outputs(prior: List[Dict[str, str]]) -> List[Dict[str, str]]:
+    clipped: List[Dict[str, str]] = []
+    for item in prior:
+        stage = str(item.get("stage") or "").strip()
+        output = str(item.get("output") or "")
+        limit = _EXECUTION_PRIOR_LIMITS.get(stage.lower(), 720)
+        clipped_output = _clip_stage_context(
+            output,
+            limit=limit,
+            marker=_EXECUTION_PRIOR_MARKER,
+        ) or ""
+        clipped.append({"stage": stage, "output": clipped_output})
+    return clipped
 
 
 def build_user_prompt(ctx: StageContext) -> str:
@@ -184,16 +345,34 @@ def build_user_prompt(ctx: StageContext) -> str:
     if ctx.task_description:
         parts.append(f"\n{ctx.task_description}")
 
+    repo_context = ctx.repo_context
+    project_memory = ctx.project_memory
+    if _is_execution_stage(ctx.stage_name):
+        if ctx.preflight_summary:
+            repo_context = None
+        else:
+            repo_context = _build_execution_repo_hint(repo_context)
+        project_memory = _clip_stage_context(
+            project_memory,
+            limit=_EXECUTION_MEMORY_LIMIT,
+            marker="...(执行阶段记忆已截断)",
+        )
+
     # Inject repo context (tech stack + directory structure)
-    if ctx.repo_context:
-        parts.append(f"\n## 项目代码库信息\n{ctx.repo_context}")
+    if repo_context:
+        parts.append(f"\n## 项目代码库信息\n{repo_context}")
 
     # Inject project memory from historical tasks
-    if ctx.project_memory:
-        parts.append(f"\n## 项目上下文（来自历史任务）\n{ctx.project_memory}")
+    if project_memory:
+        parts.append(f"\n## 项目上下文（来自历史任务）\n{project_memory}")
+
+    if ctx.preflight_summary:
+        parts.append(f"\n## 阶段预扫摘要\n{ctx.preflight_summary}")
 
     # Use compressed outputs (sliding-window) when available, otherwise raw
     prior = ctx.compressed_outputs if ctx.compressed_outputs is not None else ctx.prior_outputs
+    if prior and _is_execution_stage(ctx.stage_name):
+        prior = _clip_execution_prior_outputs(prior)
     if prior:
         parts.append("\n## 前序阶段产出")
         for po in prior:
