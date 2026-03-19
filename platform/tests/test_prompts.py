@@ -32,6 +32,20 @@ def test_minimal_title_only():
     assert STAGE_INSTRUCTIONS["code"] in result
 
 
+def test_code_guardrail_emphasizes_convergence():
+    ctx = _minimal_ctx(stage_name="code")
+    result = build_user_prompt(ctx)
+    assert "不要为了理解整个仓库而广泛探索" in result
+    assert "最小必要验证" in result
+
+
+def test_test_guardrail_emphasizes_minimal_validation():
+    ctx = _minimal_ctx(stage_name="test", agent_role="test")
+    result = build_user_prompt(ctx)
+    assert "最小、最相关、最快的验证路径" in result
+    assert "满足验收标准" in result
+
+
 # ---------------------------------------------------------------------------
 # With description
 # ---------------------------------------------------------------------------
