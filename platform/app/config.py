@@ -16,8 +16,9 @@ class Settings(BaseSettings):
     LLM_TIMEOUT: float = 120.0
 
     # Per-role model routing (JSON string: {"coding": "gpt-4o", "review": "claude-sonnet-4-20250514"})
-    # Unspecified roles fall back to LLM_MODEL
-    LLM_ROLE_MODEL_MAP: str = "{}"
+    # Unspecified roles fall back to LLM_MODEL. Keep lightweight defaults on
+    # orchestrator/test so parse + signoff stay cheaper unless env overrides them.
+    LLM_ROLE_MODEL_MAP: str = '{"orchestrator":"gpt-4o-mini","test":"gpt-4o-mini"}'
     # Comma-separated absolute path prefixes allowed in agent config `extra_skill_dirs`.
     # Empty means only built-in platform/skills directory is allowed.
     EXTRA_SKILL_DIR_WHITELIST: str = ""

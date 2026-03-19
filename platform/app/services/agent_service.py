@@ -154,8 +154,8 @@ class AgentService:
         for role, _ in AGENT_ROLES:
             model = (
                 role_model_map.get(role)
-                or FALLBACK_ROLE_DEFAULT_MODELS.get(role)
                 or settings.LLM_MODEL
+                or FALLBACK_ROLE_DEFAULT_MODELS.get(role)
             )
             if model not in available_models and available_models:
                 if settings.LLM_MODEL in available_models:
