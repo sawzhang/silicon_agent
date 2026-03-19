@@ -154,6 +154,12 @@ class _ContinuationTracker:
         self.agent_role = agent_role
         self.sent: list[dict[str, object]] = []
         self.received: list[dict[str, object]] = []
+        self._forced_convergence_used = False
+        self._implementation_actions = 0
+        self._exploration_actions = 0
+        self._verification_failures = 0
+        self._successful_verifications = 0
+        self._verification_attempts = 0
 
     async def emit_chat_sent(self, **kwargs):
         self.sent.append(kwargs)
@@ -162,6 +168,20 @@ class _ContinuationTracker:
     async def emit_chat_received(self, *args, **kwargs):
         self.received.append({"args": args, "kwargs": kwargs})
         return True
+
+    def should_force_convergence(self) -> bool:
+        if self._forced_convergence_used:
+            return False
+        if self.stage_name == 'code':
+            return self._implementation_actions == 0 and self._exploration_actions >= 4
+        if self.stage_name == 'test':
+            if self._verification_failures > 0 and self._successful_verifications == 0:
+                return True
+            return self._verification_attempts == 0 and self._exploration_actions >= 3
+        return False
+
+    def mark_forced_convergence_used(self) -> None:
+        self._forced_convergence_used = True
 
 
 class _CancelledRunner(_FakeRunner):
@@ -229,6 +249,36 @@ def test_is_tool_call_error_matches_gemini_thought_signature_error():
         "'Function call is missing a thought_signature in functionCall parts.'}}]"
     )
     assert executor._is_tool_call_error(err) is True
+
+
+def test_classify_tool_activity_marks_exploration_implementation_and_verification():
+    assert executor._classify_tool_activity('read', {}) == 'exploration'
+    assert executor._classify_tool_activity('edit', {}) == 'implementation'
+    assert executor._classify_tool_activity('execute', {'command': 'find src -name "*.java"'}) == 'exploration'
+    assert executor._classify_tool_activity('execute', {'command': './gradlew test'}) == 'verification'
+
+
+def test_stage_event_tracker_force_convergence_budget_for_code_and_test():
+    tracker = executor.StageEventTracker(
+        pipeline=_FakePipeline(),
+        task_id='task-1',
+        stage_id='stage-1',
+        stage_name='code',
+        agent_role='coding',
+    )
+    for _ in range(4):
+        tracker.record_tool_activity('read', {}, 'success')
+    assert tracker.should_force_convergence() is True
+
+    test_tracker = executor.StageEventTracker(
+        pipeline=_FakePipeline(),
+        task_id='task-2',
+        stage_id='stage-2',
+        stage_name='test',
+        agent_role='test',
+    )
+    test_tracker.record_tool_activity('execute', {'command': './gradlew test'}, 'failed')
+    assert test_tracker.should_force_convergence() is True
 
 
 @pytest.mark.asyncio
@@ -635,6 +685,46 @@ async def test_handle_continuations_uses_test_specific_prompt():
     assert output == 'done'
     assert runner.prompts == [
         '请停止扩展测试范围。只做最小、最相关的验证；如果验证命令失败，必须直接给出失败命令、关键报错和唯一阻塞点，不要再用代码阅读代替测试结论。'
+    ]
+
+
+@pytest.mark.asyncio
+async def test_handle_continuations_injects_forced_convergence_for_coding_budget():
+    runner = _ContinuationRunner()
+    tracker = _ContinuationTracker(stage_name='code', agent_role='coding')
+    tracker._exploration_actions = 4
+
+    output, total_tokens = await executor._handle_continuations(
+        runner,
+        'partial summary',
+        {},
+        tracker,
+    )
+
+    assert total_tokens == 11
+    assert output == 'partial summary\n\ndone'
+    assert runner.prompts == [
+        '你已经在当前阶段花了过多轮次进行探索。现在禁止继续浏览仓库。请直接做最小代码修改，并只执行最小必要验证。如果仍然无法完成，请只输出唯一阻塞点和证据。'
+    ]
+
+
+@pytest.mark.asyncio
+async def test_handle_continuations_injects_forced_convergence_for_failed_test_verification():
+    runner = _ContinuationRunner()
+    tracker = _ContinuationTracker(stage_name='test', agent_role='test')
+    tracker._verification_failures = 1
+
+    output, total_tokens = await executor._handle_continuations(
+        runner,
+        'analysis only',
+        {},
+        tracker,
+    )
+
+    assert total_tokens == 11
+    assert output == 'analysis only\n\ndone'
+    assert runner.prompts == [
+        '你已经在当前阶段花了过多轮次进行探索。现在禁止继续扩展测试范围。请直接执行最小、最相关的验证。如果验证命令失败，必须明确给出失败命令、关键报错和唯一阻塞点；不要仅凭代码阅读判断测试通过。'
     ]
 
 

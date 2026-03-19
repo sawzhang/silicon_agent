@@ -257,6 +257,48 @@ def _clear_current_task_cancellation_state() -> None:
         current.uncancel()
 
 
+_EXPLORATION_EXECUTE_PREFIXES = (
+    "ls ",
+    "find ",
+    "pwd",
+    "cat ",
+    "head ",
+    "tail ",
+    "tree",
+    "rg ",
+)
+_VERIFICATION_EXECUTE_MARKERS = (
+    "pytest",
+    "unittest",
+    "gradlew test",
+    "gradlew build",
+    "gradlew testclasses",
+    "mvn test",
+    "npm test",
+    "pnpm test",
+    "yarn test",
+    "go test",
+    "cargo test",
+)
+
+
+def _classify_tool_activity(tool_name: str, args: dict[str, Any]) -> str:
+    normalized_tool = (tool_name or "").strip().lower()
+    if normalized_tool in {"write", "edit"}:
+        return "implementation"
+    if normalized_tool == "read":
+        return "exploration"
+
+    if normalized_tool in {"execute", "execute_script"}:
+        command = str(args.get("command") or "").strip().lower()
+        if any(marker in command for marker in _VERIFICATION_EXECUTE_MARKERS):
+            return "verification"
+        if any(command.startswith(prefix) for prefix in _EXPLORATION_EXECUTE_PREFIXES):
+            return "exploration"
+
+    return "other"
+
+
 # ---------------------------------------------------------------------------
 # StageEventTracker – encapsulates mutable tracking state and event helpers
 # ---------------------------------------------------------------------------
@@ -286,6 +328,12 @@ class StageEventTracker:
         self._instrumented_runners: list[Any] = []
         self._instrumented_runner_ids: set[int] = set()
         self._completed_tool_runs: list[dict[str, str]] = []
+        self._exploration_actions = 0
+        self._implementation_actions = 0
+        self._verification_attempts = 0
+        self._verification_failures = 0
+        self._successful_verifications = 0
+        self._forced_convergence_used = False
 
     # -- public emit helpers --------------------------------------------------
 
@@ -371,6 +419,37 @@ class StageEventTracker:
 
     def get_completed_tool_runs(self) -> list[dict[str, str]]:
         return list(self._completed_tool_runs)
+
+    def should_force_convergence(self) -> bool:
+        if self._forced_convergence_used:
+            return False
+
+        normalized = self.stage_name.strip().lower()
+        if normalized == "code":
+            return self._implementation_actions == 0 and self._exploration_actions >= 4
+        if normalized == "test":
+            if self._verification_failures > 0 and self._successful_verifications == 0:
+                return True
+            return self._verification_attempts == 0 and self._exploration_actions >= 3
+        return False
+
+    def mark_forced_convergence_used(self) -> None:
+        self._forced_convergence_used = True
+
+    def record_tool_activity(self, tool_name: str, args: dict[str, Any], status: str) -> None:
+        activity = _classify_tool_activity(tool_name, args)
+        if activity == "exploration":
+            self._exploration_actions += 1
+            return
+        if activity == "implementation":
+            self._implementation_actions += 1
+            return
+        if activity == "verification":
+            self._verification_attempts += 1
+            if status == "success":
+                self._successful_verifications += 1
+            else:
+                self._verification_failures += 1
 
     # -- runner event registration -------------------------------------------
 
@@ -515,6 +594,7 @@ class StageEventTracker:
                 args = {}
             output = str(getattr(event, "result", ""))
             status = infer_tool_status(output)
+            tracker.record_tool_activity(tool_name, args, status)
 
             run_info = tracker._tool_runs.get(tool_call_id)
             duration_ms: Optional[float] = None
@@ -691,6 +771,87 @@ def _build_continuation_prompt(stage_name: str | None) -> str:
     return "请继续完成上面的输出，从你停下的地方继续。"
 
 
+def _build_forced_convergence_prompt(stage_name: str | None) -> str:
+    normalized = (stage_name or "").strip().lower()
+    if normalized == "code":
+        return (
+            "你已经在当前阶段花了过多轮次进行探索。现在禁止继续浏览仓库。"
+            "请直接做最小代码修改，并只执行最小必要验证。"
+            "如果仍然无法完成，请只输出唯一阻塞点和证据。"
+        )
+    if normalized == "test":
+        return (
+            "你已经在当前阶段花了过多轮次进行探索。现在禁止继续扩展测试范围。"
+            "请直接执行最小、最相关的验证。"
+            "如果验证命令失败，必须明确给出失败命令、关键报错和唯一阻塞点；"
+            "不要仅凭代码阅读判断测试通过。"
+        )
+    return "请立即收敛到当前阶段的最终结果，不要继续扩展。"
+
+
+async def _run_forced_convergence(
+    runner: Any,
+    output: str,
+    runtime_overrides: dict[str, Any],
+    tracker: StageEventTracker,
+    stage_name: str | None = None,
+) -> str:
+    if not tracker.should_force_convergence():
+        return output
+
+    tracker.mark_forced_convergence_used()
+    prompt = _build_forced_convergence_prompt(stage_name or tracker.stage_name)
+    chat_started = time.monotonic()
+    chat_correlation = await tracker.emit_chat_sent(
+        request_body={
+            "prompt": prompt,
+            "model": getattr(getattr(runner, "config", None), "model", None),
+            "stage": tracker.stage_name,
+            "agent_role": tracker.agent_role,
+            "temperature": runtime_overrides.get("temperature"),
+            "max_tokens": runtime_overrides.get("max_tokens"),
+            "forced_convergence": True,
+            "timeout_seconds": settings.WORKER_STAGE_TIMEOUT,
+        },
+    )
+
+    try:
+        followup_kwargs = _chat_kwargs_for_runner(runner, runtime_overrides)
+        response = await asyncio.wait_for(
+            runner.chat(prompt, reset=False, **followup_kwargs),
+            timeout=settings.WORKER_STAGE_TIMEOUT,
+        )
+        forced_text = response.text_content or ""
+        await tracker.emit_chat_received(
+            chat_correlation,
+            status="success",
+            response_body={"forced_convergence": True, "content": forced_text},
+            duration_ms=round((time.monotonic() - chat_started) * 1000, 2),
+        )
+        cleaned = output.replace(
+            "[Max turns reached. Please continue the conversation.]",
+            "",
+        ).strip()
+        return f"{cleaned}\n\n{forced_text}".strip() if cleaned else forced_text
+    except asyncio.CancelledError:
+        _clear_current_task_cancellation_state()
+        await tracker.emit_chat_received(
+            chat_correlation,
+            status="cancelled",
+            response_body={"forced_convergence": True, "error": "cancelled"},
+            duration_ms=round((time.monotonic() - chat_started) * 1000, 2),
+        )
+        raise
+    except Exception as exc:
+        await tracker.emit_chat_received(
+            chat_correlation,
+            status="failed",
+            response_body={"forced_convergence": True, "error": str(exc)},
+            duration_ms=round((time.monotonic() - chat_started) * 1000, 2),
+        )
+        return output
+
+
 async def _handle_continuations(
     runner: Any,
     output: str,
@@ -702,6 +863,7 @@ async def _handle_continuations(
     _MAX_CONTINUATIONS = 3
     _TRUNCATION_SENTINEL = "Max turns reached"
     continuations = 0
+    output = await _run_forced_convergence(runner, output, runtime_overrides, tracker, stage_name)
 
     while _TRUNCATION_SENTINEL in (output or "") and continuations < _MAX_CONTINUATIONS:
         continuations += 1
