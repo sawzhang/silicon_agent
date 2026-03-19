@@ -118,31 +118,57 @@ class TestBuildStagePreflightSummary:
     def test_build_stage_preflight_summary_for_coding(self, tmp_path: Path):
         (tmp_path / "build.gradle").write_text("plugins {}", encoding="utf-8")
         (tmp_path / "src/main/java/demo/controller").mkdir(parents=True)
+        (tmp_path / "src/main/java/demo/service").mkdir(parents=True)
         (tmp_path / "src/test/java/demo/controller").mkdir(parents=True)
         (tmp_path / "src/main/java/demo/controller/HelloController.java").write_text("class X {}", encoding="utf-8")
+        (tmp_path / "src/main/java/demo/service/HelloService.java").write_text("class S {}", encoding="utf-8")
         (tmp_path / "src/test/java/demo/controller/HelloControllerTest.java").write_text("class T {}", encoding="utf-8")
 
         result = _build_stage_preflight_summary("coding", str(tmp_path))
 
         assert result is not None
-        assert "构建文件" in result
-        assert "实现参考" in result
-        assert "测试参考" in result
+        assert "构建入口" in result
+        assert "推荐修改落点" in result
+        assert "最相关实现参考" in result
+        assert "最相关测试参考" in result
+        assert "推荐最小验证命令" in result
         assert "HelloController.java" in result
+        assert "./gradlew test" in result
 
     def test_build_stage_preflight_summary_for_test(self, tmp_path: Path):
         (tmp_path / "pom.xml").write_text("<project/>", encoding="utf-8")
         (tmp_path / "src/test/java/demo").mkdir(parents=True)
+        (tmp_path / "src/test/java/demo/controller").mkdir(parents=True)
         (tmp_path / "src/main/java/demo/service").mkdir(parents=True)
+        (tmp_path / "src/main/java/demo/controller").mkdir(parents=True)
         (tmp_path / "src/test/java/demo/DemoServiceTest.java").write_text("class T {}", encoding="utf-8")
+        (tmp_path / "src/test/java/demo/controller/HelloControllerTest.java").write_text("class HC {}", encoding="utf-8")
         (tmp_path / "src/main/java/demo/service/DemoService.java").write_text("class S {}", encoding="utf-8")
+        (tmp_path / "src/main/java/demo/controller/HelloController.java").write_text("class C {}", encoding="utf-8")
 
         result = _build_stage_preflight_summary("test", str(tmp_path))
 
         assert result is not None
-        assert "构建文件" in result
-        assert "测试参考" in result
-        assert "DemoServiceTest.java" in result
+        assert "构建入口" in result
+        assert "推荐验证落点" in result
+        assert "最相关测试参考" in result
+        assert "对应实现参考" in result
+        assert "推荐最小验证命令: ./mvnw test" in result
+        assert "HelloControllerTest.java" in result
+
+    def test_build_stage_preflight_summary_prioritizes_controller_tests(self, tmp_path: Path):
+        (tmp_path / "build.gradle").write_text("plugins {}", encoding="utf-8")
+        (tmp_path / "src/test/java/demo/sdk").mkdir(parents=True)
+        (tmp_path / "src/test/java/demo/controller").mkdir(parents=True)
+        (tmp_path / "src/main/java/demo/controller").mkdir(parents=True)
+        (tmp_path / "src/test/java/demo/sdk/TaobaoApiTest.java").write_text("class T {}", encoding="utf-8")
+        (tmp_path / "src/test/java/demo/controller/HelloControllerTest.java").write_text("class C {}", encoding="utf-8")
+        (tmp_path / "src/main/java/demo/controller/HelloController.java").write_text("class X {}", encoding="utf-8")
+
+        result = _build_stage_preflight_summary("test", str(tmp_path))
+
+        assert result is not None
+        assert result.index("HelloControllerTest.java") < result.index("TaobaoApiTest.java")
 
     def test_build_stage_preflight_summary_ignores_other_stages(self, tmp_path: Path):
         assert _build_stage_preflight_summary("signoff", str(tmp_path)) is None

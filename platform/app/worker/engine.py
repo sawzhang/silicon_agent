@@ -64,7 +64,7 @@ _PREFLIGHT_SKIP_DIRS = {
 }
 _PREFLIGHT_MAX_FILES = 2000
 _PREFLIGHT_MAX_DEPTH = 6
-_PREFLIGHT_MAX_CHARS = 1200
+_PREFLIGHT_MAX_CHARS = 600
 
 
 async def _safe_broadcast(event: str, data: dict) -> None:
@@ -2863,6 +2863,68 @@ def _format_preflight_section(title: str, items: list[str], *, limit: int = 4) -
     return f"- {title}: {', '.join(unique)}"
 
 
+def _rank_preflight_path(rel_path: str, *, kind: str) -> tuple[int, int, int, str]:
+    lowered = rel_path.lower()
+    score = 0
+
+    if kind == "impl":
+        if "src/main/" in lowered:
+            score += 4
+        if any(token in lowered for token in ("/controller/", "/handler/", "/service/", "/api/", "response")):
+            score += 5
+        if "/src/test/" in lowered or lowered.startswith("src/test/"):
+            score -= 6
+    elif kind == "test":
+        if any(token in lowered for token in ("/controller/", "/api/", "controller", "api")):
+            score += 5
+        if lowered.endswith("test.java") or lowered.endswith("tests.java") or lowered.endswith("_test.go"):
+            score += 3
+        if any(token in lowered for token in ("basetest", "sdk/", "mybatisgenerator", "mapper")):
+            score -= 4
+
+    return (-score, len(rel_path.split("/")), len(rel_path), rel_path)
+
+
+def _pick_preflight_paths(items: list[str], *, kind: str, limit: int) -> list[str]:
+    unique = list(dict.fromkeys(items))
+    return sorted(unique, key=lambda value: _rank_preflight_path(value, kind=kind))[:limit]
+
+
+def _infer_validation_command(build_files: list[str]) -> str:
+    lowered = {item.lower() for item in build_files}
+    if "build.gradle" in lowered or "build.gradle.kts" in lowered:
+        return "./gradlew test"
+    if "pom.xml" in lowered:
+        return "./mvnw test"
+    if "package.json" in lowered:
+        return "npm test"
+    if "pyproject.toml" in lowered:
+        return "pytest"
+    if "go.mod" in lowered:
+        return "go test ./..."
+    if "cargo.toml" in lowered:
+        return "cargo test"
+    return "优先执行最小相关验证命令"
+
+
+def _infer_coding_edit_target(source_roots: list[str], impl_examples: list[str]) -> str:
+    if impl_examples:
+        first = impl_examples[0]
+        parent = str(Path(first).parent).replace("\\", "/")
+        return parent if parent and parent != "." else first
+    if source_roots:
+        return source_roots[0]
+    return "优先在现有 controller/service 相邻目录做最小修改"
+
+
+def _infer_test_target(test_examples: list[str], impl_examples: list[str]) -> str:
+    if test_examples:
+        return test_examples[0]
+    if impl_examples:
+        return impl_examples[0]
+    return "优先补充与当前改动直接相关的最小测试"
+
+
 def _build_stage_preflight_summary(stage_name: str, workspace_path: Optional[str]) -> Optional[str]:
     normalized = (stage_name or "").strip().lower()
     if normalized not in {"code", "coding", "test"}:
@@ -2916,18 +2978,27 @@ def _build_stage_preflight_summary(stage_name: str, workspace_path: Optional[str
         ):
             test_examples.append(rel)
 
+    build_files = list(dict.fromkeys(build_files))
+    source_roots = list(dict.fromkeys(source_roots))
+    impl_examples = _pick_preflight_paths(impl_examples, kind="impl", limit=3)
+    test_examples = _pick_preflight_paths(test_examples, kind="test", limit=3)
+    validation_command = _infer_validation_command(build_files)
+
     lines = []
     if normalized in {"code", "coding"}:
-        lines.append(_format_preflight_section("构建文件", build_files, limit=3))
-        lines.append(_format_preflight_section("源码目录", source_roots, limit=3))
-        lines.append(_format_preflight_section("实现参考", impl_examples, limit=4))
-        lines.append(_format_preflight_section("测试参考", test_examples, limit=3))
+        lines.append(_format_preflight_section("构建入口", build_files, limit=2))
+        lines.append(f"- 推荐修改落点: {_infer_coding_edit_target(source_roots, impl_examples)}")
+        lines.append(_format_preflight_section("最相关实现参考", impl_examples, limit=2))
+        lines.append(_format_preflight_section("最相关测试参考", test_examples, limit=2))
+        lines.append(f"- 推荐最小验证命令: {validation_command}")
         if not any(lines):
             lines.append("- 未发现明显的实现参考，请直接聚焦最小修改并谨慎验证。")
     else:
-        lines.append(_format_preflight_section("构建文件", build_files, limit=3))
-        lines.append(_format_preflight_section("测试参考", test_examples, limit=5))
-        lines.append(_format_preflight_section("实现参考", impl_examples, limit=3))
+        lines.append(_format_preflight_section("构建入口", build_files, limit=2))
+        lines.append(f"- 推荐验证落点: {_infer_test_target(test_examples, impl_examples)}")
+        lines.append(_format_preflight_section("最相关测试参考", test_examples, limit=2))
+        lines.append(_format_preflight_section("对应实现参考", impl_examples, limit=2))
+        lines.append(f"- 推荐最小验证命令: {validation_command}")
         if not any(lines):
             lines.append("- 未发现明显测试样例，请优先选择最小、最快的验证路径。")
 

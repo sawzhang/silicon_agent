@@ -192,7 +192,16 @@ def _is_signoff_stage(stage_name: str) -> bool:
 
 def _output_summary_limit(stage_name: str) -> int:
     # Cap stage output stored in DB to limit downstream prior-context injection.
-    return 50_000
+    normalized = (stage_name or "").strip().lower()
+    if normalized == "parse":
+        return 600
+    if normalized in {"code", "coding", "test"}:
+        return 1200
+    if _is_signoff_stage(normalized):
+        return 1500
+    if normalized in {"spec", "approve", "review", "doc"}:
+        return 1800
+    return 1500
 
 
 def _format_tool_digest(tool_items: list[dict[str, str]], limit: int = 6) -> str:

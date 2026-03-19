@@ -260,6 +260,14 @@ class _FakeStreamingSandboxManager:
         return self._result
 
 
+def test_output_summary_limit_is_stage_specific():
+    assert executor._output_summary_limit('parse') <= 600
+    assert executor._output_summary_limit('code') <= 1200
+    assert executor._output_summary_limit('test') <= 1200
+    assert executor._output_summary_limit('signoff') <= 1600
+    assert executor._output_summary_limit('spec') > executor._output_summary_limit('parse')
+
+
 def test_is_tool_call_error_matches_gemini_thought_signature_error():
     err = RuntimeError(
         "Error code: 400 - [{'error': {'code': 400, 'message': "

@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 # Fallback truncation limits when LLM is unavailable
 _L0_FALLBACK_CHARS = 200
 _L1_FALLBACK_CHARS = 1500
-_L2_MAX_CHARS = 20_000  # Hard cap on full-text prior output to prevent token explosion
+_L2_MAX_CHARS = 4_000  # Hard cap on full-text prior output to prevent token explosion
 
 
 @dataclass

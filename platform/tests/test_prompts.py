@@ -78,12 +78,24 @@ def test_with_repo_context():
 
 
 def test_code_stage_clips_large_repo_context():
-    repo_context = "STACK\n" + ("src/main/java/demo/File.java\n" * 200)
+    repo_context = (
+        "### 技术栈\nJava 17, Spring Boot, Gradle\n\n"
+        "### 目录结构\n"
+        "build.gradle\n"
+        "src/main/java/demo/controller/HelloController.java\n"
+        "src/main/java/demo/service/HelloService.java\n"
+        "src/test/java/demo/controller/HelloControllerTest.java\n"
+        "docs/design.md\n"
+    )
     ctx = _minimal_ctx(stage_name="code", agent_role="coding", repo_context=repo_context)
     result = build_user_prompt(ctx)
     assert "## 项目代码库信息" in result
-    assert "...(执行阶段上下文已截断)" in result
-    assert len(result) < len(repo_context) + 500
+    assert "- 技术栈: Java 17, Spring Boot, Gradle" in result
+    assert "- 构建入口: build.gradle" in result
+    assert "- 源码目录:" in result
+    assert "- 测试目录:" in result
+    assert "- 参考实现:" in result
+    assert "### 目录结构" not in result
 
 
 def test_spec_stage_keeps_full_repo_context():
@@ -167,6 +179,25 @@ def test_with_prior_outputs_raw():
     assert "Parsed requirements:" in result
     assert "### spec 阶段输出" in result
     assert "Spec document:" in result
+
+
+def test_execution_stage_clips_prior_outputs_aggressively():
+    long_parse = "需求分析\n" + ("parse-line\n" * 200)
+    long_spec = "技术方案\n" + ("spec-line\n" * 200)
+    ctx = _minimal_ctx(
+        stage_name="code",
+        agent_role="coding",
+        prior_outputs=[
+            {"stage": "parse", "output": long_parse},
+            {"stage": "spec", "output": long_spec},
+        ],
+    )
+    result = build_user_prompt(ctx)
+    assert "## 前序阶段产出" in result
+    assert "...(前序阶段产出已截断)" in result
+    assert "parse-line\nparse-line\nparse-line" in result
+    assert result.count("parse-line") < 80
+    assert result.count("spec-line") < 100
 
 
 def test_with_empty_prior_outputs():

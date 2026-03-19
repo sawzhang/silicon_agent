@@ -1,11 +1,26 @@
 """Role-based system prompts and stage instruction templates for Agent Worker."""
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from typing import Dict, List, Optional
 
 _EXECUTION_STAGE_NAMES = {"code", "coding", "test"}
 _EXECUTION_MEMORY_LIMIT = 320
+_EXECUTION_REPO_HINT_LIMIT = 720
+_EXECUTION_PRIOR_LIMITS = {
+    "parse": 520,
+    "approve": 520,
+    "spec": 720,
+    "review": 720,
+    "doc": 720,
+    "code": 960,
+    "coding": 960,
+    "test": 960,
+    "signoff": 960,
+}
+_EXECUTION_PRIOR_MARKER = "\n...(前序阶段产出已截断)"
+_REPO_SECTION_PATTERN = re.compile(r"^###\s+(?P<title>[^\n]+)\n", re.MULTILINE)
 
 
 # ---------------------------------------------------------------------------
@@ -195,6 +210,128 @@ def _is_execution_stage(stage_name: str) -> bool:
     return (stage_name or "").strip().lower() in _EXECUTION_STAGE_NAMES
 
 
+def _extract_repo_section(repo_context: str, title: str) -> str:
+    text = (repo_context or "").strip()
+    if not text:
+        return ""
+    matches = list(_REPO_SECTION_PATTERN.finditer(text))
+    for index, match in enumerate(matches):
+        if match.group("title").strip() != title:
+            continue
+        start = match.end()
+        end = matches[index + 1].start() if index + 1 < len(matches) else len(text)
+        return text[start:end].strip()
+    return ""
+
+
+def _collect_tree_matches(
+    tree_lines: list[str],
+    *,
+    predicates: tuple[str, ...],
+    limit: int,
+    require_file: bool = False,
+) -> list[str]:
+    matches: list[str] = []
+    seen: set[str] = set()
+    for raw in tree_lines:
+        line = raw.strip()
+        lowered = line.lower()
+        if not line or line.startswith("...(目录树已截断)"):
+            continue
+        if require_file and "." not in line.rsplit("/", 1)[-1]:
+            continue
+        if not any(token in lowered for token in predicates):
+            continue
+        if line in seen:
+            continue
+        seen.add(line)
+        matches.append(line)
+        if len(matches) >= limit:
+            break
+    return matches
+
+
+def _build_execution_repo_hint(repo_context: Optional[str]) -> Optional[str]:
+    text = (repo_context or "").strip()
+    if not text:
+        return None
+
+    tech_stack = _extract_repo_section(text, "技术栈")
+    repo_tree = _extract_repo_section(text, "目录结构")
+    repo_tree_lines = [line for line in repo_tree.splitlines() if line.strip()]
+
+    build_files = _collect_tree_matches(
+        repo_tree_lines,
+        predicates=(
+            "build.gradle",
+            "build.gradle.kts",
+            "pom.xml",
+            "package.json",
+            "pyproject.toml",
+            "go.mod",
+            "cargo.toml",
+        ),
+        limit=3,
+        require_file=True,
+    )
+    source_roots = _collect_tree_matches(
+        repo_tree_lines,
+        predicates=("src/main", "app/", "app\\", "server/", "lib/", "internal/"),
+        limit=3,
+    )
+    test_roots = _collect_tree_matches(
+        repo_tree_lines,
+        predicates=("src/test", "tests/", "__tests__", "spec/"),
+        limit=3,
+    )
+    impl_refs = _collect_tree_matches(
+        repo_tree_lines,
+        predicates=("controller", "handler", "service", "api", "route", "response"),
+        limit=2,
+        require_file=True,
+    )
+
+    parts: list[str] = []
+    if tech_stack:
+        parts.append(f"- 技术栈: {tech_stack[:180].strip()}")
+    if build_files:
+        parts.append(f"- 构建入口: {', '.join(build_files)}")
+    if source_roots:
+        parts.append(f"- 源码目录: {', '.join(source_roots)}")
+    if test_roots:
+        parts.append(f"- 测试目录: {', '.join(test_roots)}")
+    if impl_refs:
+        parts.append(f"- 参考实现: {', '.join(impl_refs)}")
+
+    if not parts:
+        return _clip_stage_context(
+            text,
+            limit=_EXECUTION_REPO_HINT_LIMIT,
+            marker="...(执行阶段仓库信息已截断)",
+        )
+
+    return _clip_stage_context(
+        "\n".join(parts),
+        limit=_EXECUTION_REPO_HINT_LIMIT,
+        marker="...(执行阶段仓库信息已截断)",
+    )
+
+
+def _clip_execution_prior_outputs(prior: List[Dict[str, str]]) -> List[Dict[str, str]]:
+    clipped: List[Dict[str, str]] = []
+    for item in prior:
+        stage = str(item.get("stage") or "").strip()
+        output = str(item.get("output") or "")
+        limit = _EXECUTION_PRIOR_LIMITS.get(stage.lower(), 720)
+        clipped_output = _clip_stage_context(
+            output,
+            limit=limit,
+            marker=_EXECUTION_PRIOR_MARKER,
+        ) or ""
+        clipped.append({"stage": stage, "output": clipped_output})
+    return clipped
+
+
 def build_user_prompt(ctx: StageContext) -> str:
     """Build the user prompt text for an AgentRunner chat call.
 
@@ -214,11 +351,7 @@ def build_user_prompt(ctx: StageContext) -> str:
         if ctx.preflight_summary:
             repo_context = None
         else:
-            repo_context = _clip_stage_context(
-                repo_context,
-                limit=320,
-                marker="...(执行阶段上下文已截断)",
-            )
+            repo_context = _build_execution_repo_hint(repo_context)
         project_memory = _clip_stage_context(
             project_memory,
             limit=_EXECUTION_MEMORY_LIMIT,
@@ -238,6 +371,8 @@ def build_user_prompt(ctx: StageContext) -> str:
 
     # Use compressed outputs (sliding-window) when available, otherwise raw
     prior = ctx.compressed_outputs if ctx.compressed_outputs is not None else ctx.prior_outputs
+    if prior and _is_execution_stage(ctx.stage_name):
+        prior = _clip_execution_prior_outputs(prior)
     if prior:
         parts.append("\n## 前序阶段产出")
         for po in prior:
