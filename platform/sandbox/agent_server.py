@@ -130,9 +130,14 @@ def _detect_java_major_version(workdir: str) -> int | None:
 
 
 def _configure_java_runtime_for_workspace(workdir: str) -> int | None:
-    major = _detect_java_major_version(workdir)
-    if major is None:
-        return None
+    override_raw = (os.environ.get("SANDBOX_JAVA_VERSION") or "").strip()
+    if override_raw in {"8", "17"}:
+        major = int(override_raw)
+    else:
+        default_major = _env_int("SANDBOX_DEFAULT_JAVA_VERSION", 8)
+        if default_major not in {8, 17}:
+            default_major = 8
+        major = _detect_java_major_version(workdir) or default_major
 
     java_home_key = "JAVA8_HOME" if major == 8 else "JAVA17_HOME"
     target_java_home = (os.environ.get(java_home_key) or "").strip()

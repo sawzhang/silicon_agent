@@ -102,6 +102,7 @@ class Settings(BaseSettings):
     SANDBOX_GRADLE_CMD_TIMEOUT_SECONDS: int = 480
     SANDBOX_GRADLE_CACHE_HOST_DIR: str = "/var/lib/silicon_agent/gradle-cache"
     SANDBOX_GRADLE_USER_HOME: str = "/var/lib/silicon_agent/gradle-cache"
+    SANDBOX_DEFAULT_JAVA_VERSION: int = 8
     SANDBOX_GRADLE_WRAPPER_PREWARM: bool = True
     SANDBOX_GRADLE_WRAPPER_PREWARM_TIMEOUT_SECONDS: int = 180
 

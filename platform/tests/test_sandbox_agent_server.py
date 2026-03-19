@@ -200,6 +200,33 @@ def test_configure_java_runtime_sets_java_home_and_path(tmp_path, monkeypatch):
     assert os.environ["PATH"].split(":")[0] == "/opt/jdk8/bin"
 
 
+def test_configure_java_runtime_respects_explicit_override(tmp_path, monkeypatch):
+    agent_server = _load_agent_server_with_fake_skillkit()
+    monkeypatch.setenv("SANDBOX_JAVA_VERSION", "17")
+    monkeypatch.setenv("JAVA17_HOME", "/opt/jdk17")
+    monkeypatch.setenv("JAVA_HOME", "/opt/jdk8")
+    monkeypatch.setenv("PATH", "/opt/jdk8/bin:/usr/bin:/bin")
+
+    selected = agent_server._configure_java_runtime_for_workspace(str(tmp_path))
+    assert selected == 17
+    assert os.environ["JAVA_HOME"] == "/opt/jdk17"
+    assert os.environ["PATH"].split(":")[0] == "/opt/jdk17/bin"
+
+
+def test_configure_java_runtime_defaults_to_java8_without_markers(tmp_path, monkeypatch):
+    agent_server = _load_agent_server_with_fake_skillkit()
+    monkeypatch.delenv("SANDBOX_JAVA_VERSION", raising=False)
+    monkeypatch.setenv("SANDBOX_DEFAULT_JAVA_VERSION", "8")
+    monkeypatch.setenv("JAVA8_HOME", "/opt/jdk8")
+    monkeypatch.setenv("JAVA_HOME", "/opt/jdk17")
+    monkeypatch.setenv("PATH", "/opt/jdk17/bin:/usr/bin:/bin")
+
+    selected = agent_server._configure_java_runtime_for_workspace(str(tmp_path))
+    assert selected == 8
+    assert os.environ["JAVA_HOME"] == "/opt/jdk8"
+    assert os.environ["PATH"].split(":")[0] == "/opt/jdk8/bin"
+
+
 def test_container_runner_keeps_gradlew_and_wraps_timeout(monkeypatch):
     agent_server = _load_agent_server_with_fake_skillkit()
     monkeypatch.setenv("SANDBOX_GRADLE_CMD_TIMEOUT_SECONDS", "480")

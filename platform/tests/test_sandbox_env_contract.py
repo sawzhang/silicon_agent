@@ -52,6 +52,7 @@ def test_build_docker_run_cmd_includes_skillkit_compat_env(monkeypatch, tmp_path
     monkeypatch.setattr(sandbox_mod.settings, "SANDBOX_GRADLE_USER_HOME", "/var/lib/silicon_agent/gradle-cache")
     monkeypatch.setattr(sandbox_mod.settings, "SANDBOX_GRADLE_WRAPPER_PREWARM", True)
     monkeypatch.setattr(sandbox_mod.settings, "SANDBOX_GRADLE_WRAPPER_PREWARM_TIMEOUT_SECONDS", 180)
+    monkeypatch.setattr(sandbox_mod.settings, "SANDBOX_DEFAULT_JAVA_VERSION", 8)
 
     backend = DockerSandboxBackend()
     cmd = backend._build_docker_run_cmd(
@@ -74,6 +75,7 @@ def test_build_docker_run_cmd_includes_skillkit_compat_env(monkeypatch, tmp_path
     assert env["SANDBOX_MODEL_API_RAW_LOG_PATH"] == "/model_api_logs/task-123.jsonl"
     assert env["SANDBOX_GRADLE_CMD_TIMEOUT_SECONDS"] == "480"
     assert env["GRADLE_USER_HOME"] == "/var/lib/silicon_agent/gradle-cache"
+    assert env["SANDBOX_DEFAULT_JAVA_VERSION"] == "8"
     assert env["SANDBOX_GRADLE_WRAPPER_PREWARM"] == "true"
     assert env["SANDBOX_GRADLE_WRAPPER_PREWARM_TIMEOUT_SECONDS"] == "180"
     assert f"type=bind,src={raw_log_dir},dst=/model_api_logs" in mounts
