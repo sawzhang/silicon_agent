@@ -77,6 +77,23 @@ def test_with_repo_context():
     assert "Python 3.11 / FastAPI" in result
 
 
+def test_code_stage_clips_large_repo_context():
+    repo_context = "STACK\n" + ("src/main/java/demo/File.java\n" * 200)
+    ctx = _minimal_ctx(stage_name="code", agent_role="coding", repo_context=repo_context)
+    result = build_user_prompt(ctx)
+    assert "## 项目代码库信息" in result
+    assert "...(执行阶段上下文已截断)" in result
+    assert len(result) < len(repo_context) + 500
+
+
+def test_spec_stage_keeps_full_repo_context():
+    repo_context = "STACK\n" + ("src/main/java/demo/File.java\n" * 40)
+    ctx = _minimal_ctx(stage_name="spec", agent_role="spec", repo_context=repo_context)
+    result = build_user_prompt(ctx)
+    assert "...(执行阶段上下文已截断)" not in result
+    assert repo_context in result
+
+
 def test_without_repo_context():
     ctx = _minimal_ctx(repo_context=None)
     result = build_user_prompt(ctx)
@@ -92,6 +109,15 @@ def test_with_project_memory():
     result = build_user_prompt(ctx)
     assert "## 项目上下文（来自历史任务）" in result
     assert "Previous task: added auth module." in result
+
+
+def test_test_stage_clips_large_project_memory():
+    project_memory = "Memory line\n" * 300
+    ctx = _minimal_ctx(stage_name="test", agent_role="test", project_memory=project_memory)
+    result = build_user_prompt(ctx)
+    assert "## 项目上下文（来自历史任务）" in result
+    assert "...(执行阶段记忆已截断)" in result
+    assert len(result) < len(project_memory) + 500
 
 
 def test_without_project_memory():

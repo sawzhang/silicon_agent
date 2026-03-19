@@ -4,6 +4,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Dict, List, Optional
 
+_EXECUTION_STAGE_NAMES = {"code", "coding", "test"}
+_EXECUTION_REPO_CONTEXT_LIMIT = 900
+_EXECUTION_MEMORY_LIMIT = 700
+
 
 # ---------------------------------------------------------------------------
 # System prompts per agent role
@@ -178,6 +182,20 @@ class StageContext:
     gate_rejection_context: Optional[Dict[str, str]] = None  # {"comment": ..., "retry": "2/3"}
 
 
+def _clip_stage_context(value: Optional[str], *, limit: int, marker: str) -> Optional[str]:
+    text = (value or "").strip()
+    if not text:
+        return None
+    if len(text) <= limit:
+        return text
+    keep_len = max(0, limit - len(marker))
+    return text[:keep_len].rstrip() + marker
+
+
+def _is_execution_stage(stage_name: str) -> bool:
+    return (stage_name or "").strip().lower() in _EXECUTION_STAGE_NAMES
+
+
 def build_user_prompt(ctx: StageContext) -> str:
     """Build the user prompt text for an AgentRunner chat call.
 
@@ -191,13 +209,27 @@ def build_user_prompt(ctx: StageContext) -> str:
     if ctx.task_description:
         parts.append(f"\n{ctx.task_description}")
 
+    repo_context = ctx.repo_context
+    project_memory = ctx.project_memory
+    if _is_execution_stage(ctx.stage_name):
+        repo_context = _clip_stage_context(
+            repo_context,
+            limit=_EXECUTION_REPO_CONTEXT_LIMIT,
+            marker="...(执行阶段上下文已截断)",
+        )
+        project_memory = _clip_stage_context(
+            project_memory,
+            limit=_EXECUTION_MEMORY_LIMIT,
+            marker="...(执行阶段记忆已截断)",
+        )
+
     # Inject repo context (tech stack + directory structure)
-    if ctx.repo_context:
-        parts.append(f"\n## 项目代码库信息\n{ctx.repo_context}")
+    if repo_context:
+        parts.append(f"\n## 项目代码库信息\n{repo_context}")
 
     # Inject project memory from historical tasks
-    if ctx.project_memory:
-        parts.append(f"\n## 项目上下文（来自历史任务）\n{ctx.project_memory}")
+    if project_memory:
+        parts.append(f"\n## 项目上下文（来自历史任务）\n{project_memory}")
 
     if ctx.preflight_summary:
         parts.append(f"\n## 阶段预扫摘要\n{ctx.preflight_summary}")
