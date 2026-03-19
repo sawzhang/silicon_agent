@@ -21,6 +21,20 @@ def test_test_has_core_tools():
     assert {"read", "write", "edit", "execute", "execute_script", "skill"}.issubset(ROLE_TOOLS["test"])
 
 
+def test_coding_skill_dirs_exclude_shared_by_default():
+    dirs = agents_mod._get_skill_dirs("coding")
+    rendered = [p.name for p in dirs]
+    assert "coding" in rendered
+    assert "shared" not in rendered
+
+
+def test_test_skill_dirs_exclude_shared_by_default():
+    dirs = agents_mod._get_skill_dirs("test")
+    rendered = [p.name for p in dirs]
+    assert "test" in rendered
+    assert "shared" not in rendered
+
+
 def test_spec_no_execute():
     tools = ROLE_TOOLS["spec"]
     assert "execute" not in tools

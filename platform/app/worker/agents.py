@@ -57,8 +57,8 @@ _SKILLS_ROOT = Path(__file__).resolve().parent.parent.parent / "skills"
 _ROLE_SKILL_DIRS: dict[str, list[str]] = {
     "orchestrator": ["shared", "orchestrator"],
     "spec":         ["shared", "spec"],
-    "coding":       ["shared", "coding"],
-    "test":         ["shared", "test"],
+    "coding":       ["coding"],
+    "test":         ["test"],
     "review":       ["shared", "review"],
     "smoke":        ["shared", "smoke"],
     "doc":          ["shared", "doc"],
