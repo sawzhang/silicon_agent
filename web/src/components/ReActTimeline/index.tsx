@@ -19,6 +19,11 @@ import './styles.css';
 
 const { Text, Paragraph } = Typography;
 
+export interface TurnBadge {
+    label: string;
+    color: string;
+}
+
 interface ReActTurn {
     id: string;
     turnNumber: number;
@@ -33,6 +38,8 @@ interface ReActViewProps {
     logs: TaskLogEvent[];
     loading?: boolean;
 }
+
+const MAX_TURNS_SENTINEL = '[Max turns reached. Please continue the conversation.]';
 
 function getLogContent(log?: TaskLogEvent): string {
     if (!log || !log.response_body) return '';
@@ -54,6 +61,64 @@ function getLogContent(log?: TaskLogEvent): string {
             .trim();
     }
     return '';
+}
+
+function getRecordValue(record: Record<string, unknown> | null | undefined, key: string): unknown {
+    if (!record) return undefined;
+    return record[key];
+}
+
+function getContinuationNumber(log?: TaskLogEvent): number | null {
+    const requestValue = getRecordValue(log?.request_body, 'continuation');
+    const responseValue = getRecordValue(log?.response_body, 'continuation');
+    const candidate = requestValue ?? responseValue;
+    if (typeof candidate === 'number' && Number.isFinite(candidate)) return candidate;
+    if (typeof candidate === 'string' && candidate.trim()) {
+        const parsed = Number(candidate);
+        if (Number.isFinite(parsed)) return parsed;
+    }
+    return null;
+}
+
+function hasForcedConvergence(log?: TaskLogEvent): boolean {
+    return Boolean(getRecordValue(log?.request_body, 'forced_convergence') || getRecordValue(log?.response_body, 'forced_convergence'));
+}
+
+export function getTurnBadges(log?: TaskLogEvent): TurnBadge[] {
+    if (!log) return [];
+
+    const badges: TurnBadge[] = [];
+    const continuation = getContinuationNumber(log);
+    if (continuation != null) {
+        badges.push({ label: `Continuation #${continuation}`, color: 'blue' });
+    }
+
+    if (hasForcedConvergence(log)) {
+        badges.push({ label: 'Forced Convergence', color: 'gold' });
+    }
+
+    return badges;
+}
+
+export function stripMaxTurnsSentinel(text: string): { text: string; truncated: boolean } {
+    if (!text.includes(MAX_TURNS_SENTINEL)) {
+        return { text, truncated: false };
+    }
+
+    return {
+        text: text.replace(MAX_TURNS_SENTINEL, '\n').replace(/\n{2,}/g, '\n').trim(),
+        truncated: true,
+    };
+}
+
+export function getThoughtDisplay(log?: TaskLogEvent): { text: string; truncated: boolean; badges: TurnBadge[] } {
+    const content = getLogContent(log);
+    const { text, truncated } = stripMaxTurnsSentinel(content);
+    return {
+        text,
+        truncated,
+        badges: getTurnBadges(log),
+    };
 }
 
 function parseReActTurns(logs: TaskLogEvent[]): ReActTurn[] {
@@ -100,7 +165,21 @@ function parseReActTurns(logs: TaskLogEvent[]): ReActTurn[] {
     return Array.from(turnsMap.values());
 }
 
-const ExpandablePromptBlock: React.FC<{ content: string; title: string; maxHeight?: number }> = ({ content, title, maxHeight = 150 }) => {
+const BadgeRow: React.FC<{ badges: TurnBadge[] }> = ({ badges }) => {
+    if (badges.length === 0) return null;
+
+    return (
+        <div className="react-gemini-badge-row">
+            {badges.map((badge) => (
+                <Tag key={badge.label} color={badge.color} className="react-gemini-badge">
+                    {badge.label}
+                </Tag>
+            ))}
+        </div>
+    );
+};
+
+const ExpandablePromptBlock: React.FC<{ content: string; title: string; badges?: TurnBadge[]; maxHeight?: number }> = ({ content, title, badges = [], maxHeight = 150 }) => {
     const [expanded, setExpanded] = useState(false);
     const [isOverflowing, setIsOverflowing] = useState(false);
     const contentRef = useRef<HTMLDivElement>(null);
@@ -127,6 +206,8 @@ const ExpandablePromptBlock: React.FC<{ content: string; title: string; maxHeigh
                 )}
             </div>
 
+            <BadgeRow badges={badges} />
+
             <div className="message-bubble user-bubble" style={{ width: '100%', boxSizing: 'border-box' }}>
                 <div
                     style={{
@@ -147,8 +228,10 @@ const ExpandablePromptBlock: React.FC<{ content: string; title: string; maxHeigh
 const CursorStyleThoughtBlock: React.FC<{
     thoughtText: string;
     durationMs?: number | null;
+    badges?: TurnBadge[];
+    truncated?: boolean;
     defaultExpanded?: boolean;
-}> = ({ thoughtText, durationMs, defaultExpanded = false }) => {
+}> = ({ thoughtText, durationMs, badges = [], truncated = false, defaultExpanded = false }) => {
     const [expanded, setExpanded] = useState(defaultExpanded);
 
     // In some cases duration_ms might be tiny or null; default to <1s or omit
@@ -164,6 +247,13 @@ const CursorStyleThoughtBlock: React.FC<{
                 {expanded ? <DownOutlined style={{ fontSize: 10, marginRight: 8 }} /> : <RightOutlined style={{ fontSize: 10, marginRight: 8 }} />}
                 <Text type="secondary">{label}</Text>
             </div>
+            <BadgeRow badges={badges} />
+            {truncated && (
+                <div className="react-gemini-truncation-note">
+                    <Tag color="default" className="react-gemini-badge">Max turns reached</Tag>
+                    <Text type="secondary">系统已截断当前轮次并请求继续，下面展示的是后续收敛输出。</Text>
+                </div>
+            )}
             {expanded && (
                 <div className="cursor-thought-content markdown-body message-body">
                     <ReactMarkdown remarkPlugins={[remarkGfm]}>{thoughtText}</ReactMarkdown>
@@ -214,17 +304,22 @@ export const ReActTimeline: React.FC<ReActViewProps> = ({ logs, loading }) => {
                 const isRunning = turn.thought?.status === 'running' || turn.action?.status === 'running' || turn.observation?.status === 'running';
 
                 const promptContent = turn.prompt?.request_body?.prompt as string;
+                const promptBadges = getTurnBadges(turn.prompt);
 
                 const isLLMRunning = turn.thought_sent?.status === 'running' && !turn.thought;
                 const streamLogId = turn.thought_sent?.id;
 
-                let thoughtText = getLogContent(turn.thought);
+                const thoughtDisplay = getThoughtDisplay(turn.thought);
+                let thoughtText = thoughtDisplay.text;
                 if (isLLMRunning && streamLogId) {
                     const streamLines = linesByLog[streamLogId];
                     if (streamLines && streamLines.length > 0) {
                         thoughtText = streamLines.join('');
                     }
                 }
+
+                const thoughtBadges = getTurnBadges(turn.thought);
+                const thoughtTruncated = thoughtDisplay.truncated || thoughtText.includes(MAX_TURNS_SENTINEL);
 
                 if (thoughtText && thoughtText.includes('<thought>')) {
                     const match = thoughtText.match(/<thought>([\s\S]*?)(?:<\/thought>|$)/);
@@ -234,7 +329,7 @@ export const ReActTimeline: React.FC<ReActViewProps> = ({ logs, loading }) => {
                 }
 
                 // AI Response Segment needs to show up if it's currently running, even if text is empty yet
-                const hasAIActivity = thoughtText || turn.action?.command || isLLMRunning;
+                const hasAIActivity = thoughtText || thoughtTruncated || thoughtBadges.length > 0 || turn.action?.command || isLLMRunning;
 
                 const actionCommand = turn.action?.command || turn.observation?.command;
                 const actionArgs = turn.action?.command_args || turn.observation?.command_args;
@@ -252,7 +347,7 @@ export const ReActTimeline: React.FC<ReActViewProps> = ({ logs, loading }) => {
                             <div className="react-gemini-message user-message">
                                 <Avatar icon={<UserOutlined />} className="message-avatar" style={{ backgroundColor: '#87d068' }} />
                                 <div className="message-content" style={{ minWidth: 0, width: '100%' }}>
-                                    <ExpandablePromptBlock content={promptContent} title="System / User" maxHeight={120} />
+                                    <ExpandablePromptBlock content={promptContent} title="System / User" badges={promptBadges} maxHeight={120} />
                                 </div>
                             </div>
                         )}
@@ -265,10 +360,12 @@ export const ReActTimeline: React.FC<ReActViewProps> = ({ logs, loading }) => {
                                     <Text strong className="message-author">Silicon Agent</Text>
 
                                     {/* Thought formatted with Cursor-style collapse */}
-                                    {thoughtText && (
+                                    {(thoughtText || thoughtTruncated || thoughtBadges.length > 0) && (
                                         <CursorStyleThoughtBlock
                                             thoughtText={thoughtText}
                                             durationMs={turn.thought?.duration_ms || turn.thought_sent?.duration_ms}
+                                            badges={thoughtBadges}
+                                            truncated={thoughtTruncated}
                                             defaultExpanded={turn.thought?.event_type === 'llm_turn_received'}
                                         />
                                     )}
