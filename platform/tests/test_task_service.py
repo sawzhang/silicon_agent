@@ -352,6 +352,70 @@ async def test_create_task_template_not_found():
 
 
 # ---------------------------------------------------------------------------
+# clone_task
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_clone_task_not_found():
+    """clone_task returns None when source task is missing."""
+    session = _make_session()
+    session.execute.return_value = _mock_result(scalar_one_or_none=None)
+    svc = TaskService(session)
+
+    result = await svc.clone_task("missing-task")
+
+    assert result is None
+
+
+@pytest.mark.asyncio
+async def test_clone_task_reuses_create_task_with_whitelisted_fields():
+    """clone_task should create a fresh task from copy-safe source fields only."""
+    session = _make_session()
+    source = _make_task(
+        id="task-source",
+        title="Clone Me",
+        description="Original task body",
+        status="failed",
+        jira_id="JIRA-1",
+        template_id="tmpl-1",
+        project_id="proj-1",
+        target_branch="silicon_agent/source",
+        yunxiao_task_id="YX-1",
+        branch_name="feature/source",
+        pr_url="https://example.com/pr/1",
+    )
+    session.execute.return_value = _mock_result(scalar_one_or_none=source)
+    svc = TaskService(session)
+    cloned = _make_task(
+        id="task-clone",
+        title="Clone Me",
+        description="Original task body",
+        status="pending",
+        jira_id="JIRA-1",
+        template_id="tmpl-1",
+        project_id="proj-1",
+        target_branch="silicon_agent/clone",
+        yunxiao_task_id="YX-1",
+    )
+    svc.create_task = AsyncMock(return_value=svc._task_to_response(cloned))
+
+    result = await svc.clone_task("task-source")
+
+    assert result.id == "task-clone"
+    svc.create_task.assert_awaited_once()
+    request = svc.create_task.await_args.args[0]
+    assert isinstance(request, TaskCreateRequest)
+    assert request.title == "Clone Me"
+    assert request.description == "Original task body"
+    assert request.jira_id == "JIRA-1"
+    assert request.template_id == "tmpl-1"
+    assert request.project_id == "proj-1"
+    assert request.yunxiao_task_id == "YX-1"
+    assert request.target_branch is None
+
+
+# ---------------------------------------------------------------------------
 # get_task (lines 133-136)
 # ---------------------------------------------------------------------------
 

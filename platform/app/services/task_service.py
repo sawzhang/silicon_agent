@@ -129,6 +129,24 @@ class TaskService:
         task = result.scalar_one()
         return self._task_to_response(task)
 
+    async def clone_task(self, task_id: str) -> Optional[TaskDetailResponse]:
+        """Create a new task by copying only safe creation fields from a source task."""
+        source_task = await self._load_task_with_relations_optional(task_id)
+        if source_task is None:
+            return None
+
+        return await self.create_task(
+            TaskCreateRequest(
+                jira_id=source_task.jira_id,
+                title=source_task.title,
+                description=source_task.description,
+                template_id=source_task.template_id,
+                project_id=source_task.project_id,
+                yunxiao_task_id=source_task.yunxiao_task_id,
+                github_issue_number=getattr(source_task, "github_issue_number", None),
+            )
+        )
+
     async def get_task(self, task_id: str) -> Optional[TaskDetailResponse]:
         result = await self.session.execute(
             select(TaskModel)

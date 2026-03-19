@@ -261,6 +261,80 @@ async def test_get_task_404(client):
     assert resp.status_code == 404
 
 
+@pytest.mark.asyncio
+async def test_clone_task_creates_fresh_pending_copy(client, seed_template_with_stages):
+    """POST /api/v1/tasks/{id}/clone creates a new task without inheriting runtime state."""
+    template_id = seed_template_with_stages
+    create_resp = await client.post("/api/v1/tasks", json={
+        "title": "TT Clone Source",
+        "description": "Clone this task",
+        "template_id": template_id,
+        "jira_id": "TT-123",
+        "project_id": None,
+        "yunxiao_task_id": "YX-123",
+    })
+    assert create_resp.status_code == 201
+    source = create_resp.json()
+
+    async with async_session_factory() as session:
+        result = await session.execute(select(TaskModel).where(TaskModel.id == source["id"]))
+        task = result.scalar_one()
+        task.status = "failed"
+        task.branch_name = "feature/original"
+        task.pr_url = "https://example.com/pr/123"
+
+        stage_result = await session.execute(
+            select(TaskStageModel).where(TaskStageModel.task_id == source["id"])
+        )
+        stages = stage_result.scalars().all()
+        stages[0].status = "completed"
+        stages[1].status = "failed"
+        stages[1].retry_count = 2
+        stages[1].error_message = "compile failed"
+        await session.commit()
+
+    clone_resp = await client.post(f"/api/v1/tasks/{source['id']}/clone")
+    assert clone_resp.status_code == 201
+    cloned = clone_resp.json()
+
+    assert cloned["id"] != source["id"]
+    assert cloned["title"] == source["title"]
+    assert cloned["description"] == source["description"]
+    assert cloned["jira_id"] == source["jira_id"]
+    assert cloned["template_id"] == source["template_id"]
+    assert cloned["yunxiao_task_id"] == source["yunxiao_task_id"]
+    assert cloned["status"] == "pending"
+    assert cloned["branch_name"] is None
+    assert cloned["pr_url"] is None
+    assert cloned["target_branch"] == f"silicon_agent/{cloned['id'].rsplit('-', 1)[-1]}"
+    assert len(cloned["stages"]) == 3
+    for stage in cloned["stages"]:
+        assert stage["status"] == "pending"
+        assert stage["retry_count"] == 0
+        assert stage["error_message"] is None
+
+    async with async_session_factory() as session:
+        stage_result = await session.execute(
+            select(TaskStageModel).where(TaskStageModel.task_id.in_([source["id"], cloned["id"]]))
+        )
+        for stage in stage_result.scalars().all():
+            await session.delete(stage)
+
+        task_result = await session.execute(
+            select(TaskModel).where(TaskModel.id.in_([source["id"], cloned["id"]]))
+        )
+        for task in task_result.scalars().all():
+            await session.delete(task)
+        await session.commit()
+
+
+@pytest.mark.asyncio
+async def test_clone_task_404(client):
+    """POST /api/v1/tasks/{id}/clone returns 404 for nonexistent task."""
+    resp = await client.post("/api/v1/tasks/tt-nonexistent-id/clone")
+    assert resp.status_code == 404
+
+
 # ── List Tasks Tests ──────────────────────────────────────
 
 
