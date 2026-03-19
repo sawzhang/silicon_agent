@@ -64,18 +64,34 @@ _JAVA_DETECT_FILES = (
     "build.gradle",
     "build.gradle.kts",
     "gradle.properties",
+    "settings.gradle",
+    "settings.gradle.kts",
+    ".java-version",
+    ".tool-versions",
 )
 _JAVA8_PATTERNS = (
     r"<java\.version>\s*(?:1\.8|8)\s*</java\.version>",
     r"<maven\.compiler\.(?:source|target|release)>\s*(?:1\.8|8)\s*</maven\.compiler\.(?:source|target|release)>",
     r"sourceCompatibility\s*=\s*(?:['\"]?1\.8['\"]?|JavaVersion\.VERSION_1_8)",
     r"targetCompatibility\s*=\s*(?:['\"]?1\.8['\"]?|JavaVersion\.VERSION_1_8)",
+    r"JavaLanguageVersion\.of\(\s*(?:1\.8|8)\s*\)",
+    r"^\s*8(?:\.\d+)?\s*$",
+    r"(?m)^\s*java\s+(?:temurin-)?(?:1\.8|8)\s*$",
 )
 _JAVA17_PATTERNS = (
     r"<java\.version>\s*17\s*</java\.version>",
     r"<maven\.compiler\.(?:source|target|release)>\s*17\s*</maven\.compiler\.(?:source|target|release)>",
     r"sourceCompatibility\s*=\s*(?:['\"]?17['\"]?|JavaVersion\.VERSION_17)",
     r"targetCompatibility\s*=\s*(?:['\"]?17['\"]?|JavaVersion\.VERSION_17)",
+    r"JavaLanguageVersion\.of\(\s*17\s*\)",
+    r"^\s*17(?:\.\d+)?\s*$",
+    r"(?m)^\s*java\s+(?:temurin-)?17\s*$",
+)
+_JAVA_VERSION_MISMATCH_PATTERNS = (
+    r"Unsupported class file major version",
+    r"invalid source release",
+    r"release version \d+ not supported",
+    r"Could not target platform",
 )
 _GRADLE_ANY_CMD_RE = re.compile(r"(?<![\w./-])(?:gradle|(?:sh\s+)?(?:\./)?gradlew)(?![\w.-])")
 _RUNTIME_PREFLIGHT_DONE = False
@@ -120,9 +136,14 @@ def _detect_java_major_version(workdir: str) -> int | None:
 
 
 def _configure_java_runtime_for_workspace(workdir: str) -> int | None:
-    major = _detect_java_major_version(workdir)
-    if major is None:
-        return None
+    override_raw = (os.environ.get("SANDBOX_JAVA_VERSION") or "").strip()
+    if override_raw in {"8", "17"}:
+        major = int(override_raw)
+    else:
+        default_major = _env_int("SANDBOX_DEFAULT_JAVA_VERSION", 8)
+        if default_major not in {8, 17}:
+            default_major = 8
+        major = _detect_java_major_version(workdir) or default_major
 
     java_home_key = "JAVA8_HOME" if major == 8 else "JAVA17_HOME"
     target_java_home = (os.environ.get(java_home_key) or "").strip()
@@ -146,6 +167,14 @@ def _configure_java_runtime_for_workspace(workdir: str) -> int | None:
         target_java_home,
     )
     return major
+
+
+def _should_retry_with_other_java(output: str) -> bool:
+    text = str(output or "")
+    return any(
+        re.search(pattern, text, re.IGNORECASE)
+        for pattern in _JAVA_VERSION_MISMATCH_PATTERNS
+    )
 
 
 def _is_gemini_model(model: str | None) -> bool:

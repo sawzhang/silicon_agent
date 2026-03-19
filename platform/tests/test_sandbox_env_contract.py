@@ -52,6 +52,7 @@ def test_build_docker_run_cmd_includes_skillkit_compat_env(monkeypatch, tmp_path
     monkeypatch.setattr(sandbox_mod.settings, "SANDBOX_GRADLE_USER_HOME", "/var/lib/silicon_agent/gradle-cache")
     monkeypatch.setattr(sandbox_mod.settings, "SANDBOX_GRADLE_WRAPPER_PREWARM", True)
     monkeypatch.setattr(sandbox_mod.settings, "SANDBOX_GRADLE_WRAPPER_PREWARM_TIMEOUT_SECONDS", 180)
+    monkeypatch.setattr(sandbox_mod.settings, "SANDBOX_DEFAULT_JAVA_VERSION", 8)
 
     backend = DockerSandboxBackend()
     cmd = backend._build_docker_run_cmd(
@@ -74,6 +75,7 @@ def test_build_docker_run_cmd_includes_skillkit_compat_env(monkeypatch, tmp_path
     assert env["SANDBOX_MODEL_API_RAW_LOG_PATH"] == "/model_api_logs/task-123.jsonl"
     assert env["SANDBOX_GRADLE_CMD_TIMEOUT_SECONDS"] == "480"
     assert env["GRADLE_USER_HOME"] == "/var/lib/silicon_agent/gradle-cache"
+    assert env["SANDBOX_DEFAULT_JAVA_VERSION"] == "8"
     assert env["SANDBOX_GRADLE_WRAPPER_PREWARM"] == "true"
     assert env["SANDBOX_GRADLE_WRAPPER_PREWARM_TIMEOUT_SECONDS"] == "180"
     assert f"type=bind,src={raw_log_dir},dst=/model_api_logs" in mounts
@@ -154,6 +156,15 @@ def test_coding_sandbox_image_provides_java_toolchain():
     assert "JAVA8_HOME" in content
     assert "JAVA17_HOME" in content
     assert "ENV JAVA_HOME=/opt/jdk17" in content
+
+
+def test_coding_sandbox_image_prepares_offline_gradle_cache():
+    dockerfile_path = Path(__file__).resolve().parents[1] / "sandbox" / "Dockerfile.coding"
+    content = dockerfile_path.read_text(encoding="utf-8")
+
+    assert "sandbox/scripts/prewarm_gradle_cache.sh" in content
+    assert "GRADLE_PREWARM_USER_HOME" in content
+    assert "prewarm_gradle_cache.sh" in content
 
 
 def test_base_sandbox_image_makes_runtime_entrypoints_world_readable():

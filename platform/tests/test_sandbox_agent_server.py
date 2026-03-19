@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib
 import os
 import sys
+from pathlib import Path
 from types import ModuleType, SimpleNamespace
 
 
@@ -161,6 +162,29 @@ def test_detect_java_version_finds_java17_markers(tmp_path):
     assert agent_server._detect_java_major_version(str(tmp_path)) == 17
 
 
+def test_detect_java_version_finds_gradle_toolchain_markers(tmp_path):
+    agent_server = _load_agent_server_with_fake_skillkit()
+    gradle = tmp_path / "build.gradle.kts"
+    gradle.write_text(
+        """
+        java {
+            toolchain {
+                languageVersion.set(JavaLanguageVersion.of(17))
+            }
+        }
+        """.strip(),
+        encoding="utf-8",
+    )
+    assert agent_server._detect_java_major_version(str(tmp_path)) == 17
+
+
+def test_detect_java_version_returns_none_without_markers(tmp_path):
+    agent_server = _load_agent_server_with_fake_skillkit()
+    settings = tmp_path / "settings.gradle"
+    settings.write_text('rootProject.name = "demo"', encoding="utf-8")
+    assert agent_server._detect_java_major_version(str(tmp_path)) is None
+
+
 def test_configure_java_runtime_sets_java_home_and_path(tmp_path, monkeypatch):
     agent_server = _load_agent_server_with_fake_skillkit()
     gradle = tmp_path / "build.gradle"
@@ -168,6 +192,33 @@ def test_configure_java_runtime_sets_java_home_and_path(tmp_path, monkeypatch):
 
     monkeypatch.setenv("JAVA8_HOME", "/opt/jdk8")
     monkeypatch.setenv("JAVA17_HOME", "/opt/jdk17")
+    monkeypatch.setenv("JAVA_HOME", "/opt/jdk17")
+    monkeypatch.setenv("PATH", "/opt/jdk17/bin:/usr/bin:/bin")
+
+    selected = agent_server._configure_java_runtime_for_workspace(str(tmp_path))
+    assert selected == 8
+    assert os.environ["JAVA_HOME"] == "/opt/jdk8"
+    assert os.environ["PATH"].split(":")[0] == "/opt/jdk8/bin"
+
+
+def test_configure_java_runtime_respects_explicit_override(tmp_path, monkeypatch):
+    agent_server = _load_agent_server_with_fake_skillkit()
+    monkeypatch.setenv("SANDBOX_JAVA_VERSION", "17")
+    monkeypatch.setenv("JAVA17_HOME", "/opt/jdk17")
+    monkeypatch.setenv("JAVA_HOME", "/opt/jdk8")
+    monkeypatch.setenv("PATH", "/opt/jdk8/bin:/usr/bin:/bin")
+
+    selected = agent_server._configure_java_runtime_for_workspace(str(tmp_path))
+    assert selected == 17
+    assert os.environ["JAVA_HOME"] == "/opt/jdk17"
+    assert os.environ["PATH"].split(":")[0] == "/opt/jdk17/bin"
+
+
+def test_configure_java_runtime_defaults_to_java8_without_markers(tmp_path, monkeypatch):
+    agent_server = _load_agent_server_with_fake_skillkit()
+    monkeypatch.delenv("SANDBOX_JAVA_VERSION", raising=False)
+    monkeypatch.setenv("SANDBOX_DEFAULT_JAVA_VERSION", "8")
+    monkeypatch.setenv("JAVA8_HOME", "/opt/jdk8")
     monkeypatch.setenv("JAVA_HOME", "/opt/jdk17")
     monkeypatch.setenv("PATH", "/opt/jdk17/bin:/usr/bin:/bin")
 
@@ -217,3 +268,32 @@ def test_run_gradle_wrapper_prewarm_once_marks_done(tmp_path, monkeypatch):
     import asyncio
     asyncio.run(agent_server._run_gradle_wrapper_prewarm_once(str(tmp_path)))
     assert agent_server._WRAPPER_PREWARM_DONE is True
+
+
+def test_should_retry_with_other_java_on_version_mismatch():
+    agent_server = _load_agent_server_with_fake_skillkit()
+    assert agent_server._should_retry_with_other_java("Unsupported class file major version 61")
+    assert agent_server._should_retry_with_other_java("invalid source release: 17")
+    assert not agent_server._should_retry_with_other_java("Execution failed for task ':test'")
+
+
+def test_detect_java_version_from_java8_fixture():
+    agent_server = _load_agent_server_with_fake_skillkit()
+    fixture = (
+        Path(__file__).resolve().parent
+        / "fixtures"
+        / "sandbox"
+        / "java8-springboot-gradle"
+    )
+    assert agent_server._detect_java_major_version(str(fixture)) == 8
+
+
+def test_detect_java_version_from_java17_fixture():
+    agent_server = _load_agent_server_with_fake_skillkit()
+    fixture = (
+        Path(__file__).resolve().parent
+        / "fixtures"
+        / "sandbox"
+        / "java17-springboot-gradle"
+    )
+    assert agent_server._detect_java_major_version(str(fixture)) == 17

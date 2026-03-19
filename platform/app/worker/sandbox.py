@@ -499,6 +499,8 @@ class DockerSandboxBackend:
                 "-e",
                 f"GRADLE_USER_HOME={gradle_cache_container_dir}",
                 "-e",
+                f"SANDBOX_DEFAULT_JAVA_VERSION={int(settings.SANDBOX_DEFAULT_JAVA_VERSION)}",
+                "-e",
                 f"SANDBOX_GRADLE_WRAPPER_PREWARM={'true' if settings.SANDBOX_GRADLE_WRAPPER_PREWARM else 'false'}",
                 "-e",
                 f"SANDBOX_GRADLE_WRAPPER_PREWARM_TIMEOUT_SECONDS={int(settings.SANDBOX_GRADLE_WRAPPER_PREWARM_TIMEOUT_SECONDS)}",
