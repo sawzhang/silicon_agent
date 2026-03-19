@@ -158,6 +158,15 @@ def test_coding_sandbox_image_provides_java_toolchain():
     assert "ENV JAVA_HOME=/opt/jdk17" in content
 
 
+def test_coding_sandbox_image_prepares_offline_gradle_cache():
+    dockerfile_path = Path(__file__).resolve().parents[1] / "sandbox" / "Dockerfile.coding"
+    content = dockerfile_path.read_text(encoding="utf-8")
+
+    assert "sandbox/scripts/prewarm_gradle_cache.sh" in content
+    assert "GRADLE_PREWARM_USER_HOME" in content
+    assert "prewarm_gradle_cache.sh" in content
+
+
 def test_base_sandbox_image_makes_runtime_entrypoints_world_readable():
     dockerfile_path = Path(__file__).resolve().parents[1] / "sandbox" / "Dockerfile.base"
     content = dockerfile_path.read_text(encoding="utf-8")
