@@ -655,11 +655,21 @@ class StageEventTracker:
 # Extracted helpers: continuations and stage success
 # ---------------------------------------------------------------------------
 
+def _build_continuation_prompt(stage_name: str | None) -> str:
+    normalized = (stage_name or "").strip().lower()
+    if normalized == "code":
+        return "请停止继续广泛探索，基于已知信息直接补全代码修改。"
+    if normalized == "test":
+        return "请停止扩展测试范围，直接执行最小、最相关的验证并给出结果。"
+    return "请继续完成上面的输出，从你停下的地方继续。"
+
+
 async def _handle_continuations(
     runner: Any,
     output: str,
     runtime_overrides: dict[str, Any],
     tracker: StageEventTracker,
+    stage_name: str | None = None,
 ) -> tuple[str, int]:
     """Follow up with continuation prompts when the LLM output was truncated."""
     _MAX_CONTINUATIONS = 3
@@ -669,7 +679,7 @@ async def _handle_continuations(
     while _TRUNCATION_SENTINEL in (output or "") and continuations < _MAX_CONTINUATIONS:
         continuations += 1
         continuation_started = time.monotonic()
-        prompt = "请继续完成上面的输出，从你停下的地方继续。"
+        prompt = _build_continuation_prompt(stage_name or tracker.stage_name)
         chat_correlation = await tracker.emit_chat_sent(
             request_body={
                 "prompt": prompt,
@@ -1017,7 +1027,7 @@ async def execute_stage(
     total_tokens = runner.cumulative_usage.total_tokens
 
     output, total_tokens = await _handle_continuations(
-        runner, output, runtime_overrides, tracker
+        runner, output, runtime_overrides, tracker, stage.stage_name
     )
 
     # Phase 2.2: Evaluator-optimizer loop (if configured for this stage)

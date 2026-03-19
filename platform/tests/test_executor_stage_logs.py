@@ -136,6 +136,34 @@ class _FakePipeline:
         return True
 
 
+class _ContinuationRunner:
+    def __init__(self, *, response_text: str = 'done') -> None:
+        self.config = SimpleNamespace(model='test-model')
+        self.cumulative_usage = SimpleNamespace(total_tokens=11)
+        self.prompts: list[str] = []
+        self.response_text = response_text
+
+    async def chat(self, prompt: str, reset: bool = True, **_: object):
+        self.prompts.append(prompt)
+        return SimpleNamespace(text_content=self.response_text)
+
+
+class _ContinuationTracker:
+    def __init__(self, stage_name: str, agent_role: str = 'coding') -> None:
+        self.stage_name = stage_name
+        self.agent_role = agent_role
+        self.sent: list[dict[str, object]] = []
+        self.received: list[dict[str, object]] = []
+
+    async def emit_chat_sent(self, **kwargs):
+        self.sent.append(kwargs)
+        return f"sent-{len(self.sent)}"
+
+    async def emit_chat_received(self, *args, **kwargs):
+        self.received.append({"args": args, "kwargs": kwargs})
+        return True
+
+
 class _CancelledRunner(_FakeRunner):
     async def chat(self, _prompt: str, reset: bool = True, **_: object):
         await self.events.emit(
@@ -570,6 +598,63 @@ async def test_execute_stage_cancellation_still_finalizes_started_logs(monkeypat
     assert turn_updates
     assert turn_updates[-1]['updates']['status'] == 'cancelled'
     assert isinstance(turn_updates[-1]['updates']['duration_ms'], float)
+
+
+@pytest.mark.asyncio
+async def test_handle_continuations_uses_coding_specific_prompt():
+    runner = _ContinuationRunner()
+    tracker = _ContinuationTracker(stage_name='code', agent_role='coding')
+
+    output, total_tokens = await executor._handle_continuations(
+        runner,
+        "[Max turns reached. Please continue the conversation.]",
+        {},
+        tracker,
+    )
+
+    assert total_tokens == 11
+    assert output == 'done'
+    assert runner.prompts == [
+        '请停止继续广泛探索，基于已知信息直接补全代码修改。'
+    ]
+
+
+@pytest.mark.asyncio
+async def test_handle_continuations_uses_test_specific_prompt():
+    runner = _ContinuationRunner()
+    tracker = _ContinuationTracker(stage_name='test', agent_role='test')
+
+    output, total_tokens = await executor._handle_continuations(
+        runner,
+        "[Max turns reached. Please continue the conversation.]",
+        {},
+        tracker,
+    )
+
+    assert total_tokens == 11
+    assert output == 'done'
+    assert runner.prompts == [
+        '请停止扩展测试范围，直接执行最小、最相关的验证并给出结果。'
+    ]
+
+
+@pytest.mark.asyncio
+async def test_handle_continuations_uses_generic_prompt_for_other_stage():
+    runner = _ContinuationRunner()
+    tracker = _ContinuationTracker(stage_name='review', agent_role='review')
+
+    output, total_tokens = await executor._handle_continuations(
+        runner,
+        "[Max turns reached. Please continue the conversation.]",
+        {},
+        tracker,
+    )
+
+    assert total_tokens == 11
+    assert output == 'done'
+    assert runner.prompts == [
+        '请继续完成上面的输出，从你停下的地方继续。'
+    ]
 
 
 @pytest.mark.asyncio
