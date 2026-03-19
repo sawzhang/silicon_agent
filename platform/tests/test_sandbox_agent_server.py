@@ -161,6 +161,29 @@ def test_detect_java_version_finds_java17_markers(tmp_path):
     assert agent_server._detect_java_major_version(str(tmp_path)) == 17
 
 
+def test_detect_java_version_finds_gradle_toolchain_markers(tmp_path):
+    agent_server = _load_agent_server_with_fake_skillkit()
+    gradle = tmp_path / "build.gradle.kts"
+    gradle.write_text(
+        """
+        java {
+            toolchain {
+                languageVersion.set(JavaLanguageVersion.of(17))
+            }
+        }
+        """.strip(),
+        encoding="utf-8",
+    )
+    assert agent_server._detect_java_major_version(str(tmp_path)) == 17
+
+
+def test_detect_java_version_returns_none_without_markers(tmp_path):
+    agent_server = _load_agent_server_with_fake_skillkit()
+    settings = tmp_path / "settings.gradle"
+    settings.write_text('rootProject.name = "demo"', encoding="utf-8")
+    assert agent_server._detect_java_major_version(str(tmp_path)) is None
+
+
 def test_configure_java_runtime_sets_java_home_and_path(tmp_path, monkeypatch):
     agent_server = _load_agent_server_with_fake_skillkit()
     gradle = tmp_path / "build.gradle"
