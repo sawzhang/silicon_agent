@@ -302,6 +302,20 @@ async def test_create_project_minimal():
     await _cleanup_project(resp.id)
 
 
+@pytest.mark.asyncio
+async def test_create_project_defaults_sandbox_image():
+    """create_project falls back to the configured sandbox image when none is provided."""
+    name = _unique_name("svc-create-default-image")
+    request = ProjectCreateRequest(name=name, display_name="Default Image")
+    async with async_session_factory() as session:
+        svc = ProjectService(session)
+        resp = await svc.create_project(request)
+
+    assert resp.sandbox_image == "silicon-agent-sandbox:coding"
+
+    await _cleanup_project(resp.id)
+
+
 # ── update_project ────────────────────────────────────────────────────────────
 
 
