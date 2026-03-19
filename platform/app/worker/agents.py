@@ -40,8 +40,8 @@ _DEFAULT_MAX_TURNS = 5
 ROLE_TOOLS: dict[str, set[str]] = {
     "orchestrator": {"read", "execute", "skill"},
     "spec":         {"read", "write", "edit", "skill"},
-    "coding":       {"read", "write", "edit", "execute", "execute_script", "skill"},
-    "test":         {"read", "write", "edit", "execute", "execute_script", "skill"},
+    "coding":       {"read", "write", "edit", "execute", "execute_script"},
+    "test":         {"read", "write", "edit", "execute", "execute_script"},
     "review":       {"read", "execute", "skill"},
     "smoke":        {"read", "execute", "skill"},
     "doc":          {"read", "write", "edit", "skill"},
@@ -57,8 +57,8 @@ _SKILLS_ROOT = Path(__file__).resolve().parent.parent.parent / "skills"
 _ROLE_SKILL_DIRS: dict[str, list[str]] = {
     "orchestrator": ["shared", "orchestrator"],
     "spec":         ["shared", "spec"],
-    "coding":       ["coding"],
-    "test":         ["test"],
+    "coding":       [],
+    "test":         [],
     "review":       ["shared", "review"],
     "smoke":        ["shared", "smoke"],
     "doc":          ["shared", "doc"],

@@ -189,6 +189,18 @@ class _ContinuationTracker:
         return []
 
 
+class _DigestTracker(_ContinuationTracker):
+    def __init__(self, stage_name: str, agent_role: str = 'coding') -> None:
+        super().__init__(stage_name=stage_name, agent_role=agent_role)
+        self._items = [
+            {"status": "success", "command": f"cmd-{i}", "result_preview": f"preview-{i}"}
+            for i in range(4)
+        ]
+
+    def get_completed_tool_runs(self):
+        return self._items
+
+
 class _CancelledRunner(_FakeRunner):
     async def chat(self, _prompt: str, reset: bool = True, **_: object):
         await self.events.emit(
@@ -847,6 +859,26 @@ async def test_handle_continuations_restarts_from_checkpoint_for_forced_converge
     assert tracker.sent[0]['request_body']['restart'] == 1
     assert tracker.sent[0]['request_body']['restart_reason'] == 'forced_convergence'
     assert tracker.sent[0]['request_body']['forced_convergence'] is True
+
+
+def test_build_stage_restart_prompt_limits_tool_digest_items():
+    tracker = _DigestTracker(stage_name='code', agent_role='coding')
+    prompt = executor._build_stage_restart_prompt(
+        {
+            'task_title': 'Hello Task',
+            'task_description': 'Implement hello endpoint',
+            'stage_name': 'code',
+            'preflight_summary': '- 构建文件: build.gradle',
+        },
+        tracker,
+        'partial output',
+        reason='truncation',
+    )
+
+    assert 'cmd-3' in prompt
+    assert 'cmd-2' in prompt
+    assert 'cmd-1' not in prompt
+    assert 'cmd-0' not in prompt
 
 
 def test_resolve_stage_max_turns_caps_coding_and_test():

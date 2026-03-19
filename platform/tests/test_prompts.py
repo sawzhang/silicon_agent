@@ -94,6 +94,18 @@ def test_spec_stage_keeps_full_repo_context():
     assert repo_context in result
 
 
+def test_code_stage_omits_repo_context_when_preflight_present():
+    ctx = _minimal_ctx(
+        stage_name="code",
+        agent_role="coding",
+        repo_context="STACK\nsrc/main/java/demo/File.java",
+        preflight_summary="- 构建文件: build.gradle",
+    )
+    result = build_user_prompt(ctx)
+    assert "## 项目代码库信息" not in result
+    assert "## 阶段预扫摘要" in result
+
+
 def test_without_repo_context():
     ctx = _minimal_ctx(repo_context=None)
     result = build_user_prompt(ctx)

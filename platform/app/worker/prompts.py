@@ -5,8 +5,7 @@ from dataclasses import dataclass
 from typing import Dict, List, Optional
 
 _EXECUTION_STAGE_NAMES = {"code", "coding", "test"}
-_EXECUTION_REPO_CONTEXT_LIMIT = 900
-_EXECUTION_MEMORY_LIMIT = 700
+_EXECUTION_MEMORY_LIMIT = 320
 
 
 # ---------------------------------------------------------------------------
@@ -212,11 +211,14 @@ def build_user_prompt(ctx: StageContext) -> str:
     repo_context = ctx.repo_context
     project_memory = ctx.project_memory
     if _is_execution_stage(ctx.stage_name):
-        repo_context = _clip_stage_context(
-            repo_context,
-            limit=_EXECUTION_REPO_CONTEXT_LIMIT,
-            marker="...(执行阶段上下文已截断)",
-        )
+        if ctx.preflight_summary:
+            repo_context = None
+        else:
+            repo_context = _clip_stage_context(
+                repo_context,
+                limit=320,
+                marker="...(执行阶段上下文已截断)",
+            )
         project_memory = _clip_stage_context(
             project_memory,
             limit=_EXECUTION_MEMORY_LIMIT,

@@ -294,7 +294,7 @@ _VERIFICATION_EXECUTE_MARKERS = (
     "go test",
     "cargo test",
 )
-_RESTART_OUTPUT_CHARS = 1500
+_RESTART_OUTPUT_CHARS = 700
 
 
 def _classify_tool_activity(tool_name: str, args: dict[str, Any]) -> str:
@@ -817,7 +817,7 @@ def _build_stage_restart_prompt(
     stage_name = str(context.get("stage_name") or tracker.stage_name).strip()
     preflight_summary = str(context.get("preflight_summary") or "").strip()
     partial_output = _clip_text((output or "").replace("[Max turns reached. Please continue the conversation.]", "").strip(), _RESTART_OUTPUT_CHARS)
-    tool_digest = _format_tool_digest(tracker.get_completed_tool_runs(), limit=4)
+    tool_digest = _format_tool_digest(tracker.get_completed_tool_runs(), limit=2)
     action_prompt = (
         _build_forced_convergence_prompt(stage_name)
         if reason == "forced_convergence"
