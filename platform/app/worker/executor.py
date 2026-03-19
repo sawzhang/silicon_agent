@@ -77,6 +77,26 @@ def _build_runtime_overrides(
     }
 
 
+_DEFAULT_STAGE_MAX_TURNS: dict[str, int] = {
+    "spec": 10,
+    "coding": 6,
+    "doc": 10,
+    "test": 6,
+}
+
+_STAGE_MAX_TURN_CAPS: dict[str, int] = {
+    "coding": 6,
+    "test": 6,
+}
+
+
+def _resolve_stage_max_turns(agent_role: str, override: Optional[int]) -> int:
+    default_value = _DEFAULT_STAGE_MAX_TURNS.get(agent_role, 10)
+    requested = override if isinstance(override, int) and override > 0 else default_value
+    cap = _STAGE_MAX_TURN_CAPS.get(agent_role)
+    return min(requested, cap) if cap else requested
+
+
 def _chat_kwargs_for_runner(runner: Any, runtime_overrides: dict[str, Any]) -> dict[str, Any]:
     kwargs: dict[str, Any] = {}
     try:
@@ -658,9 +678,16 @@ class StageEventTracker:
 def _build_continuation_prompt(stage_name: str | None) -> str:
     normalized = (stage_name or "").strip().lower()
     if normalized == "code":
-        return "请停止继续广泛探索，基于已知信息直接补全代码修改。"
+        return (
+            "请停止继续广泛探索。基于已知信息直接修改代码；"
+            "如果仍缺信息，只允许再查看 1 个最关键文件，然后必须完成修改并给出最小验证结果。"
+        )
     if normalized == "test":
-        return "请停止扩展测试范围，直接执行最小、最相关的验证并给出结果。"
+        return (
+            "请停止扩展测试范围。只做最小、最相关的验证；"
+            "如果验证命令失败，必须直接给出失败命令、关键报错和唯一阻塞点，"
+            "不要再用代码阅读代替测试结论。"
+        )
     return "请继续完成上面的输出，从你停下的地方继续。"
 
 
@@ -867,13 +894,14 @@ async def execute_stage(
     user_prompt = build_user_prompt(ctx)
 
     runtime_overrides = _build_runtime_overrides(agent, stage_model)
+    stage_max_turns = _resolve_stage_max_turns(stage.agent_role, runtime_overrides["max_turns"])
     runner = get_agent(
         stage.agent_role,
         task_id,
         model=runtime_overrides["model"],
         temperature=runtime_overrides["temperature"],
         max_tokens=runtime_overrides["max_tokens"],
-        max_turns=runtime_overrides["max_turns"],
+        max_turns=stage_max_turns,
         extra_skill_dirs=runtime_overrides["extra_skill_dirs"],
         system_prompt_append=runtime_overrides["system_prompt_append"],
     )
@@ -905,6 +933,7 @@ async def execute_stage(
                     "agent_role": stage.agent_role,
                     "temperature": runtime_overrides.get("temperature"),
                     "max_tokens": runtime_overrides.get("max_tokens"),
+                    "max_turns": stage_max_turns,
                     "attempt": attempt + 1,
                     "timeout_seconds": settings.WORKER_STAGE_TIMEOUT,
                 },
@@ -978,7 +1007,7 @@ async def execute_stage(
                         model=runtime_overrides["model"],
                         temperature=runtime_overrides["temperature"],
                         max_tokens=runtime_overrides["max_tokens"],
-                        max_turns=runtime_overrides["max_turns"],
+                        max_turns=stage_max_turns,
                         extra_skill_dirs=runtime_overrides["extra_skill_dirs"],
                         system_prompt_append=runtime_overrides["system_prompt_append"],
                     )
@@ -1279,8 +1308,7 @@ async def execute_stage_sandboxed(
     from app.worker.agents import _get_skill_dirs
     skill_dirs = [f"/skills/{d.name}" for d in _get_skill_dirs(stage.agent_role)]
 
-    max_turns_map = {"spec": 20, "coding": 20, "doc": 20, "test": 20}
-    max_turns = max_turns_map.get(stage.agent_role, 10)
+    max_turns = _resolve_stage_max_turns(stage.agent_role, runtime_overrides["max_turns"])
 
     # 5. Log the request via shared pipeline contract
     pipeline = get_task_log_pipeline()
@@ -1301,6 +1329,7 @@ async def execute_stage_sandboxed(
             "model": resolved_model,
             "temperature": runtime_overrides.get("temperature"),
             "max_tokens": runtime_overrides.get("max_tokens"),
+            "max_turns": max_turns,
             "stage": stage.stage_name,
             "agent_role": stage.agent_role,
             "prompt": user_prompt,

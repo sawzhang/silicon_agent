@@ -466,7 +466,7 @@ async def test_execute_stage_uses_agent_config_runtime_overrides(monkeypatch):
     assert captured_params['model'] == 'gpt-5.1-codex-mini'
     assert captured_params['temperature_override'] == 0.2
     assert captured_params['max_tokens_override'] == 1200
-    assert captured_params['max_turns'] == 18
+    assert captured_params['max_turns'] == 6
     assert captured_params['extra_skill_dirs'] == ['/tmp/skills']
     assert captured_params['system_prompt_append'] == 'extra prompt'
     assert captured_params['temperature'] == 0.2
@@ -615,7 +615,7 @@ async def test_handle_continuations_uses_coding_specific_prompt():
     assert total_tokens == 11
     assert output == 'done'
     assert runner.prompts == [
-        '请停止继续广泛探索，基于已知信息直接补全代码修改。'
+        '请停止继续广泛探索。基于已知信息直接修改代码；如果仍缺信息，只允许再查看 1 个最关键文件，然后必须完成修改并给出最小验证结果。'
     ]
 
 
@@ -634,8 +634,19 @@ async def test_handle_continuations_uses_test_specific_prompt():
     assert total_tokens == 11
     assert output == 'done'
     assert runner.prompts == [
-        '请停止扩展测试范围，直接执行最小、最相关的验证并给出结果。'
+        '请停止扩展测试范围。只做最小、最相关的验证；如果验证命令失败，必须直接给出失败命令、关键报错和唯一阻塞点，不要再用代码阅读代替测试结论。'
     ]
+
+
+def test_resolve_stage_max_turns_caps_coding_and_test():
+    assert executor._resolve_stage_max_turns('coding', None) == 6
+    assert executor._resolve_stage_max_turns('coding', 18) == 6
+    assert executor._resolve_stage_max_turns('test', 12) == 6
+
+
+def test_resolve_stage_max_turns_preserves_other_roles():
+    assert executor._resolve_stage_max_turns('doc', None) == 10
+    assert executor._resolve_stage_max_turns('doc', 18) == 18
 
 
 @pytest.mark.asyncio

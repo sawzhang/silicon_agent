@@ -37,6 +37,7 @@ def test_code_guardrail_emphasizes_convergence():
     result = build_user_prompt(ctx)
     assert "不要为了理解整个仓库而广泛探索" in result
     assert "最小必要验证" in result
+    assert "最多再检查 3 个关键文件" in result
 
 
 def test_test_guardrail_emphasizes_minimal_validation():
@@ -44,6 +45,8 @@ def test_test_guardrail_emphasizes_minimal_validation():
     result = build_user_prompt(ctx)
     assert "最小、最相关、最快的验证路径" in result
     assert "满足验收标准" in result
+    assert "执行 2 条验证命令" in result
+    assert "不要只根据代码阅读就判定测试通过" in result
 
 
 # ---------------------------------------------------------------------------
