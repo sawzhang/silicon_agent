@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 import pytest
 
+from app.worker import agents as agents_mod
 from app.worker.agents import SandboxedAgentRunner
 from app.worker.executor import infer_tool_status
 
@@ -13,6 +15,7 @@ def _make_runner(workspace: Path) -> SandboxedAgentRunner:
     runner = object.__new__(SandboxedAgentRunner)
     runner.default_cwd = str(workspace)
     runner.allowed_tools = {"read", "write", "edit", "execute", "execute_script", "skill"}
+    runner.task_id = None
     return runner
 
 
@@ -136,3 +139,43 @@ def test_infer_tool_status_treats_read_errors_as_failed():
     assert infer_tool_status("Error: File not found: package.json") == "failed"
     assert infer_tool_status("Error (exit 1): command failed") == "failed"
     assert infer_tool_status("normal output") == "success"
+
+
+def test_build_tool_runtime_env_includes_issue_feedback_context(monkeypatch):
+    monkeypatch.setattr(agents_mod.settings, "GHE_TOKEN", "secret-token")
+    monkeypatch.setattr(agents_mod.settings, "GHE_BASE_URL", "https://scm.starbucks.com/api/v3")
+
+    env = agents_mod._build_tool_runtime_env("task-123")
+
+    assert env["GHE_TOKEN"] == "secret-token"
+    assert env["GHE_BASE_URL"] == "https://scm.starbucks.com/api/v3"
+    assert env["SILICON_AGENT_TASK_URL"] == "http://127.0.0.1:3000/tasks/task-123"
+
+
+@pytest.mark.asyncio
+async def test_execute_script_receives_runtime_env(monkeypatch, tmp_path: Path):
+    runner = _make_runner(tmp_path)
+    runner.task_id = "task-xyz"
+    monkeypatch.setattr(agents_mod.settings, "GHE_TOKEN", "secret-token")
+    monkeypatch.setattr(agents_mod.settings, "GHE_BASE_URL", "https://scm.starbucks.com/api/v3")
+
+    captured: dict[str, str | None] = {}
+
+    async def _fake_super_execute(self, tool_call, on_output=None):
+        captured["ghe_token"] = os.environ.get("GHE_TOKEN")
+        captured["ghe_base_url"] = os.environ.get("GHE_BASE_URL")
+        captured["task_url"] = os.environ.get("SILICON_AGENT_TASK_URL")
+        return "ok"
+
+    monkeypatch.setattr(agents_mod._BaseRunner, "_execute_tool", _fake_super_execute, raising=False)
+
+    result = await runner._execute_tool_base(
+        {"name": "execute_script", "arguments": json.dumps({"script": "env"})}
+    )
+
+    assert result == "ok"
+    assert captured == {
+        "ghe_token": "secret-token",
+        "ghe_base_url": "https://scm.starbucks.com/api/v3",
+        "task_url": "http://127.0.0.1:3000/tasks/task-xyz",
+    }

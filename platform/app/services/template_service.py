@@ -85,6 +85,16 @@ BUILTIN_TEMPLATES = [
         "stages": [],
         "gates": [],
     },
+    {
+        "name": "github_issue_template",
+        "display_name": "GitHub Issue Template",
+        "description": "GitHub issue 统一入口模板，先分发再执行",
+        "stages": [
+            {"name": "dispatch_issue", "agent_role": "issue distribution agent", "order": 0},
+            {"name": "process_security_issue", "agent_role": "安全加密agent", "order": 1},
+        ],
+        "gates": [],
+    },
 ]
 
 

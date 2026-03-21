@@ -5,7 +5,7 @@ import re
 from dataclasses import dataclass
 from typing import Dict, List, Optional
 
-_EXECUTION_STAGE_NAMES = {"code", "coding", "test"}
+_EXECUTION_STAGE_NAMES = {"code", "coding", "test", "process_security_issue"}
 _EXECUTION_MEMORY_LIMIT = 320
 _EXECUTION_REPO_HINT_LIMIT = 720
 _EXECUTION_PRIOR_LIMITS = {
@@ -59,9 +59,30 @@ SYSTEM_PROMPTS: Dict[str, str] = {
         "包括关键用户场景、API端点可用性和数据流完整性。"
     ),
     "doc": (
-        "你是一个文档生成Agent，负责编写技术文档。"
         "你需要生成：API文档、使用说明、变更日志和架构说明。"
         "文档应清晰、准确、易于理解，面向开发者和使用者。"
+    ),
+    "issue distribution agent": (
+        "你是负责理解并分发 GitHub Issue 任务的 issue distribution agent。\n"
+        "你必须先阅读完整的 GitHub Issue 上下文，再严格按照 `github_issue_dispatch` skill 输出结构化分发结果。\n"
+        "输出中必须显式包含以下字段：`selected_agent_role`、`intent`、`issue_number`、`issue_url`、"
+        "`repo_full_name`、`task_title`、`work_summary`、`acceptance_criteria`、`dispatch_reason`。\n"
+        "当前如果 issue 属于安全加密类需求，你必须把 `selected_agent_role` 指向 `安全加密agent`，"
+        "并把完整处理指令整理给下一阶段。你只负责分析和分发，不直接改代码。\n"
+    ),
+    "dispatch agent": (
+        "你是负责理解并分发 GitHub Issue 任务的 issue distribution agent。\n"
+        "你必须先阅读完整的 GitHub Issue 上下文，再严格按照 `github_issue_dispatch` skill 输出结构化分发结果。\n"
+        "输出中必须显式包含以下字段：`selected_agent_role`、`intent`、`issue_number`、`issue_url`、"
+        "`repo_full_name`、`task_title`、`work_summary`、`acceptance_criteria`、`dispatch_reason`。\n"
+        "当前如果 issue 属于安全加密类需求，你必须把 `selected_agent_role` 指向 `安全加密agent`，"
+        "并把完整处理指令整理给下一阶段。你只负责分析和分发，不直接改代码。\n"
+    ),
+    "安全加密agent": (
+        "你是 '安全加密agent'。\n"
+        "你需要使用你的内置技能严格完成以下两件事情：\n"
+        "1. **使用技能进行 Coding**：结合收到的项目上下文，按照你配置的 `des_encrypt` (安全加密) 等 skill 的描述说明，找到需要加密的字段直接进行加密逻辑的代码修改。若 issue 已明确字段范围（如只提到 `phone`），默认采用最小改动方案，只修改直接承载该字段的实体、Mapper、必要支撑类与最小验证代码，不要把任务扩展成整套基础设施改造。完成后提交并推送到远端新分支。\n"
+        "2. **处理信息返回给 Github**：Coding 并 Push 完成后，必须调用 curl 按照 `github_issue_feedback` 的技能要求，将生成的 Git 分支名以及 Silicon Agent task URL 作为评论贴回到原始的 GitHub Issue 中。\n"
     ),
 }
 
@@ -142,6 +163,19 @@ STAGE_INSTRUCTIONS: Dict[str, str] = {
         "4. 遗留问题清单（如有）\n"
         "5. 最终签收结论"
     ),
+    "dispatch_issue": (
+        "请立即阅读传入的 GitHub Issue 上下文，执行你的 dispatch 任务。"
+        "你必须输出包含 `selected_agent_role`、`intent`、`issue_number`、`issue_url`、"
+        "`repo_full_name`、`task_title`、`work_summary`、`acceptance_criteria`、`dispatch_reason` 的结构化结果，"
+        "然后给出发往下一阶段 `安全加密agent` 的完整处理指令。"
+    ),
+    "process_security_issue": (
+        "请接手 issue distribution agent 传来的上下文，立即执行代码检索、修改（按 des_encrypt 规范），"
+        "随后推送到远端，并通过 `github_issue_feedback` 技能回填 GitHub Issue 评论。\n"
+        "目标仓库已经在当前 task workspace 根目录检出；请直接在当前 workspace 根目录读写、commit、push，"
+        "不要再次 `git clone` 到子目录。提交前先在当前 workspace 根目录执行 `git status --short`，确认改动就在这个仓库里。\n"
+        "如果 issue 只要求对特定字段（例如 `phone`）做安全加密，请优先落地该字段的最小闭环，不要默认扩展到日志、生成器、环境配置或其他与该字段无直接关系的文件。"
+    ),
 }
 
 
@@ -162,6 +196,14 @@ STAGE_GUARDRAILS: Dict[str, str] = {
         "如果验证命令失败，必须明确给出失败命令、关键报错和阻塞点；不要只根据代码阅读就判定测试通过。\n"
         "如果相关测试已经通过，且已满足验收标准，请立即停止。\n"
         "不要继续扩展额外类型的测试，例如 E2E、冒烟、性能或签收报告，除非任务明确要求。"
+    ),
+    "process_security_issue": (
+        "只完成当前阶段，不要提前执行后续阶段任务。\n"
+        "当前 task workspace 根目录已经是可提交的目标仓库，请直接在这里修改、提交和推送。\n"
+        "禁止再次 `git clone` 到子目录，也不要把 read/write/edit/commit 分散到两个不同仓库路径。\n"
+        "开始提交前必须先在当前 workspace 根目录执行 `git status --short`，确认改动出现在同一个仓库。\n"
+        "如果 issue 已明确只处理 `phone` 等单一字段，请把改动限制在直接相关的实体、Mapper、必要支撑类和最小验证；不要顺手修改 logback、代码生成器、环境模板或其他无直接关联文件。\n"
+        "如果没有产生 git 变更，不要伪造完成结果；必须继续定位原因或明确失败点。"
     ),
     "signoff": (
         "此阶段负责输出最终签收结果。\n"

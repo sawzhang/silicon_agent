@@ -234,3 +234,13 @@ async def test_agent_session_404(client):
     """GET /api/v1/agents/nonexistent/session returns 404."""
     resp = await client.get("/api/v1/agents/nonexistent/session")
     assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_get_agent_config_options_include_issue_roles(client):
+    """Config options should expose defaults for the GitHub issue workflow roles."""
+    resp = await client.get("/api/v1/agents/config/options")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "issue distribution agent" in data["role_defaults"]
+    assert "安全加密agent" in data["role_defaults"]

@@ -3,7 +3,12 @@ from __future__ import annotations
 
 import pytest
 
-from app.worker.prompts import STAGE_INSTRUCTIONS, StageContext, build_user_prompt
+from app.worker.prompts import (
+    STAGE_INSTRUCTIONS,
+    SYSTEM_PROMPTS,
+    StageContext,
+    build_user_prompt,
+)
 
 
 def _minimal_ctx(**overrides) -> StageContext:
@@ -47,6 +52,63 @@ def test_test_guardrail_emphasizes_minimal_validation():
     assert "满足验收标准" in result
     assert "执行 2 条验证命令" in result
     assert "不要只根据代码阅读就判定测试通过" in result
+
+
+def test_dispatch_issue_prompt_contract():
+    ctx = _minimal_ctx(
+        stage_name="dispatch_issue",
+        agent_role="issue distribution agent",
+        task_description="Issue URL: https://scm.starbucks.com/china/starbucks-asg-api/issues/13",
+    )
+    result = build_user_prompt(ctx)
+    assert "GitHub Issue" in STAGE_INSTRUCTIONS["dispatch_issue"]
+    assert "安全加密agent" in STAGE_INSTRUCTIONS["dispatch_issue"]
+    assert "selected_agent_role" in SYSTEM_PROMPTS["issue distribution agent"]
+    assert "acceptance_criteria" in SYSTEM_PROMPTS["issue distribution agent"]
+    assert STAGE_INSTRUCTIONS["dispatch_issue"] in result
+
+
+def test_process_security_issue_prompt_contract():
+    ctx = _minimal_ctx(
+        stage_name="process_security_issue",
+        agent_role="安全加密agent",
+        task_description="Issue #13 要求对 phone 字段进行安全加密",
+        prior_outputs=[
+            {
+                "stage": "dispatch_issue",
+                "output": '{"selected_agent_role":"安全加密agent","issue_number":13}',
+            }
+        ],
+    )
+    result = build_user_prompt(ctx)
+    assert "des_encrypt" in SYSTEM_PROMPTS["安全加密agent"]
+    assert "github_issue_feedback" in SYSTEM_PROMPTS["安全加密agent"]
+    assert "task URL" in SYSTEM_PROMPTS["安全加密agent"]
+    assert STAGE_INSTRUCTIONS["process_security_issue"] in result
+    assert "dispatch_issue" in result
+
+
+def test_process_security_issue_prompt_forbids_nested_clone():
+    ctx = _minimal_ctx(
+        stage_name="process_security_issue",
+        agent_role="安全加密agent",
+        preflight_summary="- 当前工作区: 目标仓库已在当前 workspace 根目录检出；直接在这里读写、commit、push，不要再次 git clone 到子目录。",
+    )
+    result = build_user_prompt(ctx)
+    assert "不要再次 git clone" in result
+    assert "当前 workspace 根目录" in result
+
+
+def test_process_security_issue_prompt_enforces_minimal_issue_scope():
+    ctx = _minimal_ctx(
+        stage_name="process_security_issue",
+        agent_role="安全加密agent",
+        task_description="Issue #13: 仅对 phone 字段进行安全加密",
+    )
+    result = build_user_prompt(ctx)
+    assert "最小闭环" in result
+    assert "不要默认扩展到日志、生成器、环境配置" in result
+    assert "只处理 `phone`" in result
 
 
 # ---------------------------------------------------------------------------

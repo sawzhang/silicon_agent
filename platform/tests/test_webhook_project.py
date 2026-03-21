@@ -12,6 +12,7 @@ from uuid import uuid4
 from app.db.session import async_session_factory
 from app.models.project import ProjectModel
 from app.models.integration import ProjectIntegrationModel
+from app.models.task import TaskModel
 from app.models.trigger import TriggerRuleModel, TriggerEventModel
 from sqlalchemy import delete
 
@@ -153,6 +154,95 @@ async def test_github_project_webhook_no_integration(client):
         },
     )
     assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_github_issue_project_webhook_persists_issue_metadata(client):
+    name = _unique_name()
+    resp = await client.post("/api/v1/projects", json={
+        "name": name,
+        "display_name": f"Display {name}",
+    })
+    assert resp.status_code == 201
+    project = resp.json()
+    pid = project["id"]
+
+    resp = await client.post(f"/api/v1/projects/{pid}/integrations", json={
+        "provider": "github",
+    })
+    assert resp.status_code == 201
+    integration = resp.json()
+    secret = integration["webhook_secret"]
+
+    async with async_session_factory() as session:
+        rule = TriggerRuleModel(
+            name="test-github-issue-rule",
+            source="github",
+            event_type="issue_opened",
+            project_id=pid,
+            title_template="Issue: {issue_title}",
+            template_id=None,
+            enabled=True,
+        )
+        session.add(rule)
+        await session.commit()
+
+    payload = {
+        "action": "opened",
+        "issue": {
+            "number": 13,
+            "title": "安全加密",
+            "body": "安全加密agent，对本项目的phone字段进行安全加密",
+            "html_url": "https://scm.starbucks.com/china/starbucks-asg-api/issues/13",
+            "user": {"login": "jowang"},
+            "labels": [],
+        },
+        "repository": {"name": "starbucks-asg-api", "full_name": "china/starbucks-asg-api"},
+        "sender": {"login": "jowang"},
+    }
+    body = json.dumps(payload).encode()
+    signature = _github_signature(body, secret)
+
+    resp = await client.post(
+        f"/webhooks/github/{pid}",
+        content=body,
+        headers={
+            "X-GitHub-Event": "issues",
+            "X-Hub-Signature-256": signature,
+            "Content-Type": "application/json",
+        },
+    )
+    assert resp.status_code == 200
+    task_id = resp.json()["task_id"]
+    assert task_id is not None
+
+    task_resp = await client.get(f"/api/v1/tasks/{task_id}")
+    assert task_resp.status_code == 200
+    task_data = task_resp.json()
+    assert task_data["github_issue_number"] == 13
+    assert "china/starbucks-asg-api" in (task_data["description"] or "")
+    assert "https://scm.starbucks.com/china/starbucks-asg-api/issues/13" in (task_data["description"] or "")
+    assert "phone字段进行安全加密" in (task_data["description"] or "")
+
+    async with async_session_factory() as session:
+        await session.execute(
+            delete(TriggerEventModel).where(TriggerEventModel.project_id == pid)
+        )
+        await session.execute(
+            delete(TriggerRuleModel).where(TriggerRuleModel.project_id == pid)
+        )
+        await session.execute(
+            delete(ProjectIntegrationModel).where(
+                ProjectIntegrationModel.project_id == pid
+            )
+        )
+        task = await session.get(TaskModel, task_id)
+        if task:
+            await session.delete(task)
+        proj = await session.get(ProjectModel, pid)
+        if proj:
+            await session.delete(proj)
+        await session.commit()
 
 
 # ── Jira project-level webhook ────────────────────────────────

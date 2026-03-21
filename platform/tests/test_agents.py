@@ -68,6 +68,28 @@ def test_orchestrator_no_write():
     assert "execute_script" not in tools
 
 
+def test_issue_distribution_agent_tools_are_dispatch_only():
+    tools = ROLE_TOOLS["issue distribution agent"]
+    assert tools == {"read", "execute", "skill"}
+
+
+def test_security_agent_tools_allow_coding_and_skills():
+    tools = ROLE_TOOLS["安全加密agent"]
+    assert {"read", "write", "edit", "execute", "execute_script", "skill"} == tools
+
+
+def test_issue_distribution_agent_uses_shared_skills():
+    dirs = agents_mod._get_skill_dirs("issue distribution agent")
+    rendered = [p.name for p in dirs]
+    assert rendered == ["shared"]
+
+
+def test_security_agent_uses_shared_skills():
+    dirs = agents_mod._get_skill_dirs("安全加密agent")
+    rendered = [p.name for p in dirs]
+    assert rendered == ["shared"]
+
+
 def test_validate_role_tools_raises_on_unknown(monkeypatch):
     monkeypatch.setattr(agents_mod, "_ALL_TOOLS", {"read"})
     monkeypatch.setattr(agents_mod, "ROLE_TOOLS", {"coding": {"read", "write"}})

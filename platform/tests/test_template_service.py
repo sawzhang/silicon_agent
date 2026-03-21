@@ -656,6 +656,39 @@ async def test_seed_builtin_templates_idempotent():
         assert len(names_found) == len(set(names_found))
 
 
+@pytest.mark.asyncio
+async def test_seed_builtin_templates_includes_github_issue_template():
+    """github_issue_template should be seeded with distribution + security stages."""
+    async with async_session_factory() as session:
+        svc = TemplateService(session)
+        await svc.seed_builtin_templates()
+
+    async with async_session_factory() as session:
+        result = await session.execute(
+            select(TaskTemplateModel).where(
+                TaskTemplateModel.name == "github_issue_template"
+            )
+        )
+        template = result.scalar_one_or_none()
+
+    assert template is not None
+    assert template.is_builtin is True
+    assert template.display_name == "GitHub Issue Template"
+    stages = json.loads(template.stages)
+    assert stages == [
+        {
+            "name": "dispatch_issue",
+            "agent_role": "issue distribution agent",
+            "order": 0,
+        },
+        {
+            "name": "process_security_issue",
+            "agent_role": "安全加密agent",
+            "order": 1,
+        },
+    ]
+
+
 # ── API-level tests for additional coverage ───────────────────────────────────
 
 

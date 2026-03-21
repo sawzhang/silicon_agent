@@ -118,13 +118,13 @@ def _normalize_github_payload(gh_event: str, event_type: str, body: dict) -> dic
             "title": f"push to {push_branch}",
         })
 
-    # Issues 事件
     elif gh_event == "issues":
         issue = body.get("issue") or {}
         labels = [lb.get("name", "") for lb in (issue.get("labels") or [])]
         base.update({
             "issue_number": issue.get("number", ""),
             "issue_title": issue.get("title", ""),
+            "issue_body": issue.get("body", "")[:2000],
             "issue_url": issue.get("html_url", ""),
             "issue_author": (issue.get("user") or {}).get("login", ""),
             "labels": labels,

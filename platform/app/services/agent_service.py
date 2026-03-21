@@ -29,6 +29,8 @@ AGENT_ROLES = [
     ("review", "Review Agent"),
     ("smoke", "Smoke Test Agent"),
     ("doc", "Documentation Agent"),
+    ("issue distribution agent", "Issue Distribution Agent"),
+    ("安全加密agent", "Security Encryption Agent"),
 ]
 
 DEFAULT_AVAILABLE_MODELS = [
@@ -47,6 +49,8 @@ FALLBACK_ROLE_DEFAULT_MODELS = {
     "review": "claude-opus-4-20250514",
     "smoke": "claude-sonnet-4-20250514",
     "doc": "claude-sonnet-4-20250514",
+    "issue distribution agent": "claude-sonnet-4-20250514",
+    "安全加密agent": "claude-sonnet-4-20250514",
 }
 
 
