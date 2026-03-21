@@ -1399,10 +1399,17 @@ async def execute_stage(
 
     # Phase 2.2: Evaluator-optimizer loop (if configured for this stage)
     if evaluator_config and evaluator_config.get("enabled"):
-        output, total_tokens = await _run_evaluator_loop_inner(
-            runner, output, total_tokens, stage, runtime_overrides,
-            evaluator_config,
-        )
+        eval_type = evaluator_config.get("type", "self_assessment")
+        if eval_type == "objective":
+            output, total_tokens = await _run_objective_loop(
+                runner, output, total_tokens, stage, runtime_overrides,
+                evaluator_config, workdir_override,
+            )
+        else:
+            output, total_tokens = await _run_evaluator_loop_inner(
+                runner, output, total_tokens, stage, runtime_overrides,
+                evaluator_config,
+            )
 
     final_output = _resolve_stage_output_summary(
         stage.stage_name,
@@ -1501,6 +1508,115 @@ async def _run_evaluator_loop_inner(
             total_tokens = runner.cumulative_usage.total_tokens
         except Exception:
             logger.warning("Improvement prompt failed for stage %s", stage.stage_name, exc_info=True)
+            break
+
+    return output, total_tokens
+
+
+async def _run_objective_loop(
+    runner: Any,
+    output: str,
+    total_tokens: int,
+    stage: TaskStageModel,
+    runtime_overrides: dict[str, Any],
+    evaluator_config: dict,
+    workdir: Optional[str] = None,
+) -> tuple[str, int]:
+    """Objective verification loop — run shell commands to validate output.
+
+    Instead of asking the LLM to self-assess, this runs real commands
+    (pytest, ruff, tsc, etc.) and feeds concrete failure details back
+    to the agent for targeted fixes.
+
+    evaluator_config: {
+        "enabled": True,
+        "type": "objective",
+        "commands": ["ruff check .", "pytest tests/ --tb=short -q"],
+        "success_criteria": "all_pass",
+        "max_iterations": 5,
+        "token_budget": 50000,
+    }
+    """
+    from app.worker.verifier import build_fix_prompt, run_verification
+
+    commands = evaluator_config.get("commands")
+    if not commands or not workdir:
+        logger.info(
+            "Objective loop skipped for stage %s: commands=%s workdir=%s",
+            stage.stage_name, bool(commands), bool(workdir),
+        )
+        return output, total_tokens
+
+    max_iterations = evaluator_config.get(
+        "max_iterations", settings.VERIFIER_MAX_ITERATIONS,
+    )
+    success_criteria = evaluator_config.get("success_criteria", "all_pass")
+    token_budget = evaluator_config.get(
+        "token_budget", settings.VERIFIER_TOKEN_BUDGET,
+    )
+    cmd_timeout = evaluator_config.get("cmd_timeout")
+
+    tokens_at_start = total_tokens
+
+    for iteration in range(1, max_iterations + 1):
+        # Step 1: Run objective verification
+        verify_result = await run_verification(
+            commands, cwd=workdir,
+            success_criteria=success_criteria,
+            timeout=cmd_timeout,
+        )
+
+        logger.info(
+            "Objective verify iteration %d/%d for stage %s: passed=%s metrics=%s",
+            iteration, max_iterations, stage.stage_name,
+            verify_result.passed, verify_result.metrics,
+        )
+
+        # Store pass rate as self_assessment_score for consistency
+        stage.self_assessment_score = verify_result.metrics.get("pass_rate", 0.0)
+
+        if verify_result.passed:
+            logger.info(
+                "Objective verification passed for stage %s on iteration %d",
+                stage.stage_name, iteration,
+            )
+            break
+
+        # Check token budget before requesting a fix
+        tokens_used = total_tokens - tokens_at_start
+        if tokens_used >= token_budget:
+            logger.warning(
+                "Objective loop token budget exhausted for stage %s "
+                "(%d/%d tokens used after %d iterations)",
+                stage.stage_name, tokens_used, token_budget, iteration,
+            )
+            break
+
+        # Last iteration — no point requesting another fix
+        if iteration == max_iterations:
+            logger.warning(
+                "Objective loop max iterations reached for stage %s",
+                stage.stage_name,
+            )
+            break
+
+        # Step 2: Ask agent to fix based on concrete failure details
+        fix_prompt = build_fix_prompt(
+            stage.stage_name, iteration, max_iterations, verify_result,
+        )
+        chat_kwargs = _chat_kwargs_for_runner(runner, runtime_overrides)
+        try:
+            fix_response = await asyncio.wait_for(
+                runner.chat(fix_prompt, reset=False, **chat_kwargs),
+                timeout=settings.WORKER_STAGE_TIMEOUT,
+            )
+            output = fix_response.text_content
+            total_tokens = runner.cumulative_usage.total_tokens
+        except Exception:
+            logger.warning(
+                "Objective fix prompt failed for stage %s iteration %d",
+                stage.stage_name, iteration, exc_info=True,
+            )
             break
 
     return output, total_tokens

@@ -140,6 +140,11 @@ class Settings(BaseSettings):
     SKILL_REFLECTION_ENABLED: bool = True     # Enable structured reflection on failure
     SKILL_REFLECTION_MODEL: str = ""          # Model for reflection (empty = default)
 
+    # Objective verifier (autoresearch-inspired iteration loop)
+    VERIFIER_CMD_TIMEOUT: float = 120.0          # Per-command timeout in seconds
+    VERIFIER_MAX_ITERATIONS: int = 5             # Max fix-verify cycles per stage
+    VERIFIER_TOKEN_BUDGET: int = 50000           # Max tokens for all iterations combined
+
     # Task log pipeline
     TASK_LOG_PIPELINE_QUEUE_SIZE: int = 4000
     TASK_LOG_PIPELINE_FLUSH_INTERVAL_SECONDS: float = 1.0
