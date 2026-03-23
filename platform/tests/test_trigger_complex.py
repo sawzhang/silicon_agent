@@ -59,6 +59,31 @@ class TestComplexFilters:
         node = {"type": "nonexistent", "value": "x"}
         assert _eval_filter_node(node, {}) is True
 
+    def test_leaf_field_equals_pass(self):
+        node = {
+            "type": "field_equals",
+            "field": "silicon_agent_command_triggered",
+            "value": True,
+        }
+        assert _eval_filter_node(node, {"silicon_agent_command_triggered": True}) is True
+
+    def test_leaf_field_equals_fail(self):
+        node = {
+            "type": "field_equals",
+            "field": "silicon_agent_command_triggered",
+            "value": True,
+        }
+        assert _eval_filter_node(node, {"silicon_agent_command_triggered": False}) is False
+
+    def test_leaf_field_equals_supports_flattened_paths(self):
+        node = {
+            "type": "field_equals",
+            "field": "silicon_agent.command.triggered",
+            "value": True,
+        }
+        payload = {"silicon_agent": {"command": {"triggered": True}}}
+        assert _eval_filter_node(node, payload) is True
+
     # AND 节点
     def test_and_all_pass(self):
         node = {

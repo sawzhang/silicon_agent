@@ -98,6 +98,41 @@ async def seed_rule_with_filter(seed_project):
             await session.commit()
 
 
+@pytest_asyncio.fixture
+async def seed_issue_comment_rule(seed_project):
+    """用于 issue comment 命令触发的规则。"""
+    rule_id = "tt-mock-rule-issue-comment-1"
+    async with async_session_factory() as session:
+        rule = TriggerRuleModel(
+            id=rule_id,
+            name="mock github issue comment rule",
+            source="github",
+            event_type="issue_comment_created",
+            filters={
+                "op": "and",
+                "conditions": [
+                    {
+                        "type": "field_equals",
+                        "field": "silicon_agent_command_triggered",
+                        "value": True,
+                    }
+                ],
+            },
+            title_template="Issue command #{number}: {title}",
+            dedup_key_template="github:{repo_full_name}:issue_comment:{comment_id}",
+            project_id=seed_project,
+            enabled=True,
+        )
+        session.add(rule)
+        await session.commit()
+    yield rule_id
+    async with async_session_factory() as session:
+        r = await session.get(TriggerRuleModel, rule_id)
+        if r:
+            await session.delete(r)
+            await session.commit()
+
+
 # ── Dry-Run Tests ─────────────────────────────────────────────────────────────
 
 
@@ -156,6 +191,57 @@ class TestMockWebhookDryRun:
         assert resp.status_code == 200
         data = resp.json()
         assert data["result"] in ("skipped_filter", "skipped_no_rule")
+
+    @pytest.mark.asyncio
+    async def test_dry_run_issue_comment_command_matches(
+        self, client, seed_issue_comment_rule, seed_project
+    ):
+        resp = await client.post(
+            f"/api/v1/projects/{seed_project}/mock-webhook",
+            json={
+                "source": "github",
+                "event_type": "issue_comment_created",
+                "title": "安全加密",
+                "body": "@silicon_agent 只处理 phone 字段",
+                "number": 13,
+                "author": "alice",
+                "extra": {
+                    "repo_full_name": "china/starbucks-asg-api",
+                    "comment_id": 1001,
+                    "issue_body": "安全加密agent，对本项目的phone字段进行安全加密",
+                },
+                "dry_run": True,
+            },
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["matched"] is True
+        assert data["result"] == "would_trigger"
+
+    @pytest.mark.asyncio
+    async def test_dry_run_issue_comment_without_command_skips(
+        self, client, seed_issue_comment_rule, seed_project
+    ):
+        resp = await client.post(
+            f"/api/v1/projects/{seed_project}/mock-webhook",
+            json={
+                "source": "github",
+                "event_type": "issue_comment_created",
+                "title": "安全加密",
+                "body": "帮忙看看这个 issue",
+                "number": 13,
+                "author": "alice",
+                "extra": {
+                    "repo_full_name": "china/starbucks-asg-api",
+                    "comment_id": 1002,
+                },
+                "dry_run": True,
+            },
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["matched"] is False
+        assert data["result"] == "skipped_filter"
 
 
 # ── Actual Trigger Tests ──────────────────────────────────────────────────────
@@ -279,6 +365,35 @@ class TestBuildNormalizedPayload:
         assert "pull_request" in payload
         assert payload["pull_request"]["title"] == "Add feature"
         assert payload["pull_request"]["head"]["ref"] == "refs/heads/feature"
+
+    def test_github_issue_comment_payload_extracts_command(self):
+        from app.schemas.trigger import MockWebhookRequest
+        from app.services.trigger_service import _build_normalized_payload
+
+        req = MockWebhookRequest(
+            source="github",
+            event_type="issue_comment_created",
+            title="Issue title",
+            body="@silicon_agent 只处理 phone 字段",
+            number=13,
+            author="alice",
+            extra={
+                "issue_body": "原始 issue 描述",
+                "issue_url": "https://scm.starbucks.com/china/starbucks-asg-api/issues/13",
+                "comment_id": 1001,
+                "comment_url": "https://scm.starbucks.com/china/starbucks-asg-api/issues/13#issuecomment-1001",
+            },
+        )
+
+        payload = _build_normalized_payload(req)
+
+        assert payload["issue"]["title"] == "Issue title"
+        assert payload["issue"]["number"] == 13
+        assert payload["comment"]["body"] == "@silicon_agent 只处理 phone 字段"
+        assert payload["silicon_agent_command_triggered"] is True
+        assert payload["silicon_agent_command_style"] == "mention"
+        assert payload["silicon_agent_command_text"] == "@silicon_agent"
+        assert payload["silicon_agent_command_note"] == "只处理 phone 字段"
 
     def test_gitlab_payload(self):
         from app.schemas.trigger import MockWebhookRequest

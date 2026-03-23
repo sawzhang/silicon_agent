@@ -15,6 +15,7 @@
 2. 作为平台维护者，我希望当前版本只接入一个 worker agent：`安全加密agent`，但未来可平滑扩展更多 issue worker agent。
 3. 作为 issue 发起人，我希望 worker 执行完成后，GitHub issue 能收到评论，看到生成的 Git 分支和 Silicon Agent task URL。
 4. 作为研发，我希望 task 能保留 issue 号、issue URL、repo 信息，便于排查和回归验证。
+5. 作为仓库协作者，我希望在 issue 评论里通过 `@silicon_agent` 或 `/silicon_agent` 显式触发工作流，而不是只能依赖 issue 创建事件。
 
 ## 4. 功能范围
 1. 新增内置模板 `github_issue_template`。
@@ -27,6 +28,7 @@
 6. `安全加密agent` 执行完成后，向原始 GitHub issue 回帖：
    - Git 分支名
    - Silicon Agent task URL
+7. 支持 GitHub issue comment 事件中的 `@silicon_agent` 与 `/silicon_agent` 命令触发，继续复用同一模板与 worker 链路。
 
 ## 5. 验收标准
 1. GitHub issue 命中 `github_issue_template` 后，task stages 顺序固定为：
@@ -38,6 +40,8 @@
 5. task 必须保留 issue URL、repo_full_name、issue body 等关键上下文。
 6. `安全加密agent` 完成后必须尝试回帖 issue；评论内容至少包含分支名和 task URL。
 7. 若分支推送失败或评论失败，日志中必须能定位失败原因，不能出现静默成功。
+8. 普通 issue 评论不得触发任务；只有命令评论会命中 trigger。
+9. 当前版本不做评论人权限校验，任何可评论用户均可触发；该行为必须在文档中标记为高风险默认值。
 
 ## 6. 文件路径
 ### 6.1 预计修改文件

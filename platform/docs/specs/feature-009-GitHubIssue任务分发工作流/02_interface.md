@@ -63,7 +63,7 @@ class TemplateService:
 ```json
 {
   "name": "github_issue_template",
-  "display_name": "GitHub Issue Template",
+  "display_name": "Github Issue",
   "description": "GitHub issue 统一入口模板，先分发再执行",
   "stages": [
     {
@@ -147,7 +147,27 @@ class TaskDetailResponse(BaseModel):
 }
 ```
 
-### 6.2 任务详情响应
+### 6.2 GitHub issue comment 命令标准化 payload
+```json
+{
+  "event_type": "issue_comment_created",
+  "repo_full_name": "china/starbucks-asg-api",
+  "issue_number": 13,
+  "issue_title": "安全加密",
+  "issue_body": "安全加密agent，对本项目的phone字段进行安全加密",
+  "issue_url": "https://scm.starbucks.com/china/starbucks-asg-api/issues/13",
+  "comment_id": 1001,
+  "comment_url": "https://scm.starbucks.com/china/starbucks-asg-api/issues/13#issuecomment-1001",
+  "comment_body": "@silicon_agent 只处理 phone 字段",
+  "comment_author": "jowang",
+  "silicon_agent_command_triggered": true,
+  "silicon_agent_command_style": "mention",
+  "silicon_agent_command_text": "@silicon_agent",
+  "silicon_agent_command_note": "只处理 phone 字段"
+}
+```
+
+### 6.3 任务详情响应
 ```json
 {
   "id": "task-123",
@@ -159,5 +179,24 @@ class TaskDetailResponse(BaseModel):
     {"stage_name": "dispatch_issue", "agent_role": "issue distribution agent"},
     {"stage_name": "process_security_issue", "agent_role": "安全加密agent"}
   ]
+}
+```
+
+### 6.4 GitHub issue comment 触发规则示例
+```json
+{
+  "source": "github",
+  "event_type": "issue_comment_created",
+  "filters": {
+    "op": "and",
+    "conditions": [
+      {
+        "type": "field_equals",
+        "field": "silicon_agent_command_triggered",
+        "value": true
+      }
+    ]
+  },
+  "dedup_key_template": "github:{repo_full_name}:issue_comment:{comment_id}"
 }
 ```

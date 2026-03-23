@@ -8,13 +8,20 @@
    - `issue_title`
    - `issue_body`
    - `repo_full_name`
-3. `TriggerService.process_event(...)` 匹配到 `github_issue_template` 规则。
-4. `TaskService.create_task(...)` 创建 task，并回填 `github_issue_number`。
-5. 模板自动生成两个 stages：
+3. GitHub issue comment webhook 进入同一个 `/webhooks/github/{project_id}`，并标准化出：
+   - `comment_id`
+   - `comment_body`
+   - `comment_author`
+   - `silicon_agent_command_triggered`
+   - `silicon_agent_command_style`
+   - `silicon_agent_command_note`
+4. `TriggerService.process_event(...)` 匹配到 `github_issue_template` 规则。
+5. `TaskService.create_task(...)` 创建 task，并回填 `github_issue_number`。
+6. 模板自动生成两个 stages：
    - `dispatch_issue`
    - `process_security_issue`
-6. worker 执行 `dispatch_issue`，输出结构化分发结果。
-7. worker 执行 `process_security_issue`，读取 dispatch 结果后按 `des_encrypt` skill 改代码、推分支、回帖 issue。
+7. worker 执行 `dispatch_issue`，输出结构化分发结果。
+8. worker 执行 `process_security_issue`，读取 dispatch 结果后按 `des_encrypt` skill 改代码、推分支、回帖 issue。
 
 ## 2. 关键改动点
 
@@ -40,10 +47,18 @@
 - issue URL
 - repo_full_name
 - issue body
+- comment body
+- comment author
+- `silicon_agent_command_*`
 
 其中 `github_issue_number` 不能只在 mock 流程补写，真实 webhook 创建 task 时也必须持久化。
 
-### 2.4 prompt 合约
+### 2.4 trigger filter 扩展
+触发器过滤器需要支持通用字段比较：
+- `type = "field_equals"`
+- 通过 `_flatten(payload)` 后的字段路径读取值
+- 用于 `silicon_agent_command_triggered == true` 这类 comment command 规则
+### 2.5 prompt 合约
 `app/worker/prompts.py` 中需要把以下语义写死：
 
 #### distribution stage
@@ -76,6 +91,8 @@ distribution 预期输出：
 ### 4.2 webhook / task
 - 验证真实 webhook 创建的 task 含 `github_issue_number`
 - 验证 description 中保留 issue URL 与 repo 信息
+- 验证 `issue_comment_created` 的命令评论会创建 task，普通评论不会
+- 验证 description 中保留 comment body、command style、command note
 
 ### 4.3 prompt / contract
 - 验证 distribution prompt 明确要求结构化 dispatch 输出
