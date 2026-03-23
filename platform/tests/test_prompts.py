@@ -62,23 +62,23 @@ def test_dispatch_issue_prompt_contract():
     )
     result = build_user_prompt(ctx)
     assert "GitHub Issue" in SYSTEM_PROMPTS["dispatch issue"]
-    assert "`github_dispatch_issue` skill" in SYSTEM_PROMPTS["dispatch issue"]
+    assert "`skill` 工具" in SYSTEM_PROMPTS["dispatch issue"]
+    assert "github_dispatch_issue" in SYSTEM_PROMPTS["dispatch issue"]
     assert "github_dispatch_issue" in STAGE_INSTRUCTIONS["dispatch_issue"]
     assert "不得直接修改任何代码" in STAGE_INSTRUCTIONS["dispatch_issue"]
     assert STAGE_INSTRUCTIONS["dispatch_issue"] in result
 
 
-def test_dispatch_issue_prompt_embeds_dispatch_skill_body():
+def test_dispatch_issue_prompt_does_not_embed_skill_body():
+    """Skill content should NOT be injected into prompt; agent loads via skill tool."""
     ctx = _minimal_ctx(
         stage_name="dispatch_issue",
         agent_role="dispatch issue",
         task_description="Issue URL: https://scm.starbucks.com/china/starbucks-asg-api/issues/13",
     )
     result = build_user_prompt(ctx)
-    assert "## 分发技能" in result
-    assert "# GitHub Issue Dispatch Skill" in result
-    assert "JSON Schema" in result
-    assert "selected_agent_role" in result
+    assert "## 分发技能" not in result
+    assert "# GitHub Issue Dispatch Skill" not in result
 
 
 def test_issue_distribution_has_single_canonical_prompt_name():
@@ -107,17 +107,18 @@ def test_des_encrypt_prompt_contract():
     assert "dispatch_issue" in result
 
 
-def test_des_encrypt_prompt_embeds_role_skill_bodies():
+def test_des_encrypt_prompt_does_not_embed_skill_body():
+    """Skills should be loaded via the `skill` tool, not injected into the prompt."""
     ctx = _minimal_ctx(
         stage_name="des encrypt",
         agent_role="des encrypt",
         task_description="Issue #13 要求对 phone 字段进行安全加密",
     )
     result = build_user_prompt(ctx)
-    assert "## 安全加密技能" in result
-    assert "# DES 安全加密接入 Skill" in result
-    assert "## GitHub 回帖技能" in result
-    assert "# GitHub Issue Feedback Skill" in result
+    assert "## 安全加密技能" not in result
+    assert "# DES 安全加密接入 Skill" not in result
+    assert "## GitHub 回帖技能" not in result
+    assert "# GitHub Issue Feedback Skill" not in result
 
 
 def test_issue_stage_instructions_follow_existing_numbered_style():

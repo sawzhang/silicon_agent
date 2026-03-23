@@ -29,9 +29,6 @@ _REPO_SECTION_PATTERN = re.compile(r"^###\s+(?P<title>[^\n]+)\n", re.MULTILINE)
 # ---------------------------------------------------------------------------
 
 _PROMPTS_DIR = Path(__file__).parent / "prompts"
-_SHARED_SKILLS_DIR = Path(__file__).resolve().parent.parent.parent / "skills" / "shared"
-
-
 def _load_prompt(filename: str, fallback: str = "") -> str:
     """Load a prompt from an external .md file, falling back to *fallback*."""
     path = _PROMPTS_DIR / filename
@@ -39,14 +36,6 @@ def _load_prompt(filename: str, fallback: str = "") -> str:
         return path.read_text(encoding="utf-8").strip()
     except FileNotFoundError:
         return fallback
-
-
-def _load_shared_skill(filename: str) -> str:
-    path = _SHARED_SKILLS_DIR / filename
-    try:
-        return path.read_text(encoding="utf-8").strip()
-    except FileNotFoundError:
-        return ""
 
 
 # ---------------------------------------------------------------------------
@@ -98,13 +87,13 @@ SYSTEM_PROMPTS: Dict[str, str] = {
     ),
     "dispatch issue": (
         "你是 GitHub Issue 分发 Agent，负责理解 Issue 内容并将任务分发给对应的执行 Agent。\n"
-        "你必须严格按照 `github_dispatch_issue` skill 执行，输出符合 skill 中 JSON Schema 定义的结构化分发结果。\n"
+        "开始工作前，你必须先调用 `skill` 工具加载 `github_dispatch_issue` skill，然后严格按照 skill 内容执行。\n"
         "你只负责分析和分发，不直接修改任何代码。\n"
     ),
     "des encrypt": (
         "你是安全加密 Agent，负责对数据库的某个字段进行安全加密改造，并在完成后将结果回帖到 GitHub Issue。\n"
-        "你必须按顺序严格完成以下两件事：\n"
-        "1. **按照 `des_encrypt` skill 执行代码改造**：在当前 task workspace 中完成加密代码修改，提交并推送到远端新分支。\n"
+        "开始工作前，你必须先调用 `skill` 工具分别加载 `des_encrypt` 和 `github_issue_feedback` 两个 skill，然后严格按顺序完成：\n"
+        "1. **按照 `des_encrypt` skill 执行代码改造**：完成加密代码修改，提交并推送到远端新分支。\n"
         "2. **按照 `github_issue_feedback` skill 回帖**：Push 完成后，用 curl 将分支名和任务地址贴回原始 GitHub Issue。\n"
     ),
 }
@@ -196,12 +185,12 @@ STAGE_INSTRUCTIONS: Dict[str, str] = {
         "5. 最终签收结论",
     ),
     "dispatch_issue": (
-        "阅读传入的 GitHub Issue 上下文，严格按照 `github_dispatch_issue` skill 完成分发任务。\n"
+        "先调用 `skill` 工具加载 `github_dispatch_issue`，然后严格按照 skill 内容完成分发。\n"
         "输出 skill 中定义的 JSON Schema 结构化结果，并附上发往下一阶段执行 agent 的完整处理指令。\n"
         "不得直接修改任何代码，只负责分析和分发。"
     ),
     "des encrypt": (
-        "接手 dispatch issue 传来的上下文，按以下顺序完成两件事：\n"
+        "接手 dispatch issue 传来的上下文。开始前先调用 `skill` 工具分别加载 `des_encrypt` 和 `github_issue_feedback`，然后按顺序完成：\n"
         "1. **Coding**：严格按照 `des_encrypt` skill 执行代码改造。目标仓库已在当前 workspace 根目录检出，"
         "直接在此读写、commit、push，不要 `git clone` 到子目录。"
         "提交前先执行 `git status --short` 确认改动在同一仓库。\n"
@@ -491,18 +480,6 @@ def build_user_prompt(ctx: StageContext) -> str:
         parts.append("请仔细阅读审批反馈，针对性地修改产出，避免重复同样的问题。")
 
     parts.append(f"\n## 当前阶段: {ctx.stage_name}\n{stage_instruction}")
-
-    if ctx.stage_name == "dispatch_issue":
-        dispatch_skill = _load_shared_skill("github_dispatch_issue/SKILL.md")
-        if dispatch_skill:
-            parts.append(f"\n## 分发技能\n{dispatch_skill}")
-    elif ctx.stage_name == "des encrypt":
-        des_encrypt_skill = _load_shared_skill("des_encrypt/SKILL.md")
-        if des_encrypt_skill:
-            parts.append(f"\n## 安全加密技能\n{des_encrypt_skill}")
-        issue_feedback_skill = _load_shared_skill("github_issue_feedback/SKILL.md")
-        if issue_feedback_skill:
-            parts.append(f"\n## GitHub 回帖技能\n{issue_feedback_skill}")
 
     guardrail = STAGE_GUARDRAILS.get(ctx.stage_name)
     if guardrail:
