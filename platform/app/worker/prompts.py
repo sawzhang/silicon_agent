@@ -89,6 +89,7 @@ SYSTEM_PROMPTS: Dict[str, str] = {
         "你是 GitHub Issue 分发 Agent，负责理解 Issue 内容并将任务分发给对应的执行 Agent。\n"
         "开始工作前，你必须先调用 `skill` 工具加载 `github_dispatch_issue` skill，然后严格按照 skill 内容执行。\n"
         "你只负责分析和分发，不直接修改任何代码。\n"
+        "输出只包含纯 JSON，不要在 JSON 前后附加任何自然语言叙述或「发往下一阶段」的指令文本。\n"
     ),
     "des encrypt": (
         "你是安全加密 Agent，负责对数据库的某个字段进行安全加密改造，并在完成后将结果回帖到 GitHub Issue。\n"
@@ -186,11 +187,14 @@ STAGE_INSTRUCTIONS: Dict[str, str] = {
     ),
     "dispatch_issue": (
         "先调用 `skill` 工具加载 `github_dispatch_issue`，然后严格按照 skill 内容完成分发。\n"
-        "输出 skill 中定义的 JSON Schema 结构化结果，并附上发往下一阶段执行 agent 的完整处理指令。\n"
+        "只输出 skill 中定义的 JSON Schema 结构化结果（纯 JSON，无 markdown 代码块标记），"
+        "不要在 JSON 前后附加自然语言总结或对下一阶段的指令。\n"
         "不得直接修改任何代码，只负责分析和分发。"
     ),
     "des encrypt": (
-        "接手 dispatch issue 传来的上下文。开始前先调用 `skill` 工具分别加载 `des_encrypt` 和 `github_issue_feedback`，然后按顺序完成：\n"
+        "接手 dispatch issue 传来的上下文。\n"
+        "**第一步（必须）**：立即连续调用两次 `skill` 工具，分别加载 `des_encrypt` 和 `github_issue_feedback`。\n"
+        "然后按顺序完成：\n"
         "1. **Coding**：严格按照 `des_encrypt` skill 执行代码改造。目标仓库已在当前 workspace 根目录检出，"
         "直接在此读写、commit、push，不要 `git clone` 到子目录。"
         "提交前先执行 `git status --short` 确认改动在同一仓库。\n"

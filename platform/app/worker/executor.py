@@ -84,6 +84,8 @@ _DEFAULT_STAGE_MAX_TURNS: dict[str, int] = {
     "coding": 6,
     "doc": 10,
     "test": 6,
+    "dispatch issue": 5,
+    "des encrypt": 15,
 }
 
 _STAGE_MAX_TURN_CAPS: dict[str, int] = {
@@ -208,12 +210,18 @@ def _stage_goal_summary(stage_name: str | None) -> str:
         return "直接完成最小必要代码修改，并提供最小验证结果。"
     if normalized == "test":
         return "直接完成最小、最相关的验证，并明确成功或阻塞结论。"
+    if normalized == "des encrypt":
+        return (
+            "继续完成加密改造的剩余工作。"
+            "如果代码文件已创建但 Entity/Mapper 还未修改，请立即修改。"
+            "如果代码改造已完成，请 git add/commit/push，然后调用 github_issue_feedback skill 回帖。"
+        )
     return "完成当前阶段的最终结果。"
 
 
 def _prefer_restart_continuations(stage_name: str | None) -> bool:
     normalized = (stage_name or "").strip().lower()
-    return normalized in {"code", "coding", "test"}
+    return normalized in {"code", "coding", "test", "des encrypt"}
 
 
 # ---------------------------------------------------------------------------
@@ -263,6 +271,12 @@ def _build_continuation_prompt(stage_name: str | None) -> str:
             "如果验证命令失败，必须直接给出失败命令、关键报错和唯一阻塞点，"
             "不要再用代码阅读代替测试结论。"
         )
+    if normalized == "des encrypt":
+        return (
+            "请继续完成加密改造。查看上方「已创建/修改的文件」列表，不要重复创建已有文件。"
+            "如果 Entity/Mapper 还未修改，立即修改；如果代码改造已完成，执行 git add/commit/push。"
+            "Push 完成后调用 github_issue_feedback skill 回帖。"
+        )
     return "请继续完成上面的输出，从你停下的地方继续。"
 
 
@@ -281,6 +295,12 @@ def _build_forced_convergence_prompt(stage_name: str | None) -> str:
             "如果验证命令失败，必须明确给出失败命令、关键报错和唯一阻塞点；"
             "不要仅凭代码阅读判断测试通过。"
         )
+    if normalized == "des encrypt":
+        return (
+            "轮次即将用完。请立即完成剩余工作："
+            "如果代码改造已完成，直接 git add/commit/push 并调用 github_issue_feedback skill 回帖。"
+            "如果代码改造未完成，只完成最关键的修改，然后 commit/push。"
+        )
     return "请立即收敛到当前阶段的最终结果，不要继续扩展。"
 
 
@@ -297,7 +317,18 @@ def _build_stage_restart_prompt(
     stage_name = str(context.get("stage_name") or tracker.stage_name).strip()
     preflight_summary = str(context.get("preflight_summary") or "").strip()
     partial_output = _clip_text((output or "").replace("[Max turns reached. Please continue the conversation.]", "").strip(), _RESTART_OUTPUT_CHARS)
-    tool_digest = _format_tool_digest(tracker.get_completed_tool_runs(), limit=2)
+    completed_runs = tracker.get_completed_tool_runs()
+    tool_digest = _format_tool_digest(completed_runs, limit=2)
+
+    # Collect all successfully written files for restart context
+    written_files: list[str] = []
+    for item in completed_runs:
+        status = str(item.get("status") or "").lower()
+        command = str(item.get("command") or "")
+        if status == "success" and command.startswith("write "):
+            fpath = command[len("write "):].strip()
+            written_files.append(fpath)
+
     action_prompt = (
         _build_forced_convergence_prompt(stage_name)
         if reason == "forced_convergence"
@@ -313,6 +344,8 @@ def _build_stage_restart_prompt(
     parts.append(_stage_goal_summary(stage_name))
     if preflight_summary:
         parts.append(f"\n## 阶段预扫摘要\n{preflight_summary}")
+    if written_files:
+        parts.append("\n## 已创建/修改的文件\n" + "\n".join(f"- {f}" for f in written_files))
     if partial_output:
         parts.append(f"\n## 当前阶段已有部分输出\n{partial_output}")
     if tool_digest:
