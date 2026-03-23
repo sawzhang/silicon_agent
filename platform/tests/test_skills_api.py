@@ -121,6 +121,47 @@ async def test_get_skill(client, skill_factory):
 
 
 @pytest.mark.asyncio
+async def test_get_skill_falls_back_to_latest_version_content_when_primary_content_empty(client):
+    name = _unique_name("skill-fallback")
+
+    async with async_session_factory() as session:
+        skill = SkillModel(
+            name=name,
+            display_name="Fallback Skill",
+            layer="L1",
+            content=None,
+        )
+        session.add(skill)
+        await session.flush()
+        session.add(
+            SkillVersionModel(
+                skill_id=skill.id,
+                version="1.0.0",
+                content="# Des Encrypt\\n\\nThis content comes from the latest version.",
+                change_summary="Seeded version content",
+            )
+        )
+        await session.commit()
+
+    resp = await client.get(f"/api/v1/skills/{name}")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["content"] == "# Des Encrypt\\n\\nThis content comes from the latest version."
+
+    async with async_session_factory() as session:
+        result = await session.execute(select(SkillModel).where(SkillModel.name == name))
+        skill = result.scalar_one_or_none()
+        if skill:
+            ver_result = await session.execute(
+                select(SkillVersionModel).where(SkillVersionModel.skill_id == skill.id)
+            )
+            for version in ver_result.scalars().all():
+                await session.delete(version)
+            await session.delete(skill)
+            await session.commit()
+
+
+@pytest.mark.asyncio
 async def test_get_skill_404(client):
     """GET /api/v1/skills/{name} returns 404 for unknown skill."""
     resp = await client.get("/api/v1/skills/nonexistent-skill-xyz")

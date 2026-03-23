@@ -673,20 +673,77 @@ async def test_seed_builtin_templates_includes_github_issue_template():
 
     assert template is not None
     assert template.is_builtin is True
-    assert template.display_name == "GitHub Issue Template"
+    assert template.display_name == "Github Issue"
     stages = json.loads(template.stages)
     assert stages == [
         {
             "name": "dispatch_issue",
-            "agent_role": "issue distribution agent",
+            "agent_role": "dispatch issue",
             "order": 0,
         },
         {
-            "name": "process_security_issue",
-            "agent_role": "安全加密agent",
+            "name": "des encrypt",
+            "agent_role": "des encrypt",
             "order": 1,
         },
     ]
+
+
+@pytest.mark.asyncio
+async def test_seed_builtin_templates_updates_existing_builtin_display_name():
+    """Existing builtin templates should be refreshed to the latest seeded display name."""
+    async with async_session_factory() as session:
+        result = await session.execute(
+            select(TaskTemplateModel).where(
+                TaskTemplateModel.name == "github_issue_template"
+            )
+        )
+        template = result.scalar_one_or_none()
+        if template is None:
+            template = TaskTemplateModel(
+                name="github_issue_template",
+                display_name="GitHub Issue Template",
+                description="outdated description",
+                stages="[]",
+                gates="[]",
+                is_builtin=True,
+            )
+            session.add(template)
+        else:
+            template.display_name = "GitHub Issue Template"
+            template.description = "outdated description"
+            template.stages = "[]"
+            template.gates = "[]"
+            template.is_builtin = True
+        await session.commit()
+
+    async with async_session_factory() as session:
+        svc = TemplateService(session)
+        await svc.seed_builtin_templates()
+
+    async with async_session_factory() as session:
+        result = await session.execute(
+            select(TaskTemplateModel).where(
+                TaskTemplateModel.name == "github_issue_template"
+            )
+        )
+        template = result.scalar_one()
+
+    assert template.display_name == "Github Issue"
+    assert template.description == "GitHub issue 统一入口模板，先分发再执行"
+    assert json.loads(template.stages) == [
+        {
+            "name": "dispatch_issue",
+            "agent_role": "dispatch issue",
+            "order": 0,
+        },
+        {
+            "name": "des encrypt",
+            "agent_role": "des encrypt",
+            "order": 1,
+        },
+    ]
+    assert json.loads(template.gates) == []
 
 
 # ── API-level tests for additional coverage ───────────────────────────────────

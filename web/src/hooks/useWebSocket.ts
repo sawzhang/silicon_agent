@@ -68,6 +68,10 @@ export function useWebSocket() {
       switch (msg.type) {
         case 'agent_status': {
           const p = msg.payload as WSAgentStatusPayload;
+          if (typeof p?.role !== 'string' || !p.role.trim()) {
+            console.warn('[WS] Skip agent_status without role', p);
+            break;
+          }
           updateAgent(p.role, {
             status: p.status as 'running' | 'idle' | 'waiting' | 'error' | 'stopped',
             current_task_id: p.current_task_id,

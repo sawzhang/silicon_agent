@@ -70,12 +70,78 @@ implementation files('lib/quickapi-client-java-x.x.x-SNAPSHOT-shaded.jar')
 
 #### 2.2 创建加密包 `{basePackage}.encryption`
 
-**EncryptionComponent.java** — 加密服务初始化
+**EncryptionComponent.java** — 加密服务初始化：
+```java
+@Slf4j
+@Component
+@RefreshScope
+public class EncryptionComponent {
+
+    @Value("${encryption.server.ip1}")
+    private String encryptionServerIp1;
+    @Value("${encryption.server.ip2}")
+    private String encryptionServerIp2;
+
+    @PostConstruct
+    public void init() {
+        log.info("--------加密组件初始化开始--------");
+        try {
+            LoadingKeyCacheWithLocalFile kekDekLoader = new LoadingKeyCacheWithLocalFile()
+                .setLocalKekPath("/opt/sec-kek/{keyId}.kek")
+                .setLocalDekPath("/opt/sec-dek/{keyId}.dek");
+            CryptoClient.Config config = CryptoClient.Config.newBuilder()
+                .setSocket(encryptionServerIp1, encryptionServerIp2)
+                .setAuthority("quickservice")
+                .setCaCertFile("/opt/sec-cert/cacert.pem")
+                .setKeyStoreFile("/opt/sec-cert/client.pfx")
+                .enableKeyCache(10, 100, 2592000)
+                .setDekCacheLoader(kekDekLoader)
+                .setKekCacheLoader(kekDekLoader)
+                .build();
+            CryptoHelper.initConfig(config);
+        } catch (CryptoClient.CryptoException e) {
+            throw new RuntimeException(e);
+        }
+        log.info("--------加密组件初始化完成--------");
+    }
+}
+```
 
 **EncryptionUtils.java** — 加解密工具类（3 个静态方法）：
 - `encodeData(String plaintext)` — SM4/GCM PB 格式加密，返回 Base64；失败返回原文
 - `deocdeData(String encodeData)` — 解密；先 isEncode 检查，非密文直接返回（兼容明文数据）
 - `isEncode(String encodeData)` — 判断是否为 PB 格式密文
+
+关键实现：
+```java
+// 加密：使用 PB 格式（优先），解密时无需传密钥/IV
+byte[] pbEnBytes = CryptoHelper.symmEncryptEx(KEYID, SymAlg.QK_SGD_SM4_GCM, plaintext.getBytes());
+return new String(Base64.getEncoder().encode(pbEnBytes), StandardCharsets.UTF_8);
+
+// 解密：PB 格式可自动还原
+byte[] pbDeBytes = CryptoHelper.symmDecrypt("", Base64.getDecoder().decode(encodeData));
+return new String(pbDeBytes, StandardCharsets.UTF_8);
+```
+
+**EncryptionFieldHelper.java** — 写入归一化（受 `encryption.switch` 开关控制）：
+- 开关 false：不填充加密字段，保持原有行为
+- 开关 true：将明文字段值复制到 `_encrypt` 字段（TypeHandler 负责实际加密）
+
+```java
+@Component
+@RefreshScope
+public class EncryptionFieldHelper {
+    @Value("${encryption.switch:false}")
+    private boolean encryptionSwitch;
+
+    public void normalizeForWrite(Entity entity) {
+        if (!encryptionSwitch) return;
+        if (StringUtils.isNotEmpty(entity.getPhone())) {
+            entity.setPhoneEncrypt(entity.getPhone());  // TypeHandler 负责加密
+        }
+    }
+}
+```
 
 #### 2.3 创建 TypeHandler
 
@@ -90,11 +156,23 @@ implementation files('lib/quickapi-client-java-x.x.x-SNAPSHOT-shaded.jar')
 
 #### 2.5 Mapper XML 改造
 
-**ResultMap** — 新增 `_encrypt` 列映射，绑定 TypeHandler。
+**ResultMap** — 新增 `_encrypt` 列映射，绑定 TypeHandler：
+```xml
+<result column="phone_encrypt" jdbcType="VARCHAR" property="phoneEncrypt"
+        typeHandler="{basePackage}.repository.handler.EncryptionTypeHandler" />
+```
 
-**SELECT** — column list 追加 `_encrypt` 列，WHERE 条件不变。
+**SELECT** — column list 追加 `_encrypt` 列，WHERE 条件不变：
+```xml
+select ..., phone, phone_encrypt, ... from table
+```
 
-**INSERT/UPDATE** — 追加 `_encrypt` 列，使用 TypeHandler。
+**INSERT/UPDATE** — 追加 `_encrypt` 列，使用 TypeHandler：
+```xml
+<if test="phoneEncrypt != null">
+  phone_encrypt = #{phoneEncrypt, typeHandler=...EncryptionTypeHandler},
+</if>
+```
 
 #### 2.6 Service 层接入
 
@@ -105,7 +183,7 @@ implementation files('lib/quickapi-client-java-x.x.x-SNAPSHOT-shaded.jar')
 各环境 bootstrap 配置添加：
 ```yaml
 encryption:
-  switch: false
+  switch: false   # 灰度期间默认 false，Nacos 动态切换
   server:
     ip1: {加密服务IP1}
     ip2: {加密服务IP2}
@@ -113,7 +191,11 @@ encryption:
 
 ### Step 3：生成 DDL
 
-自动生成 SQL 文件（存放在 `docs/des_encrypt_columns.sql`）。
+自动生成 SQL 文件（存放在 `docs/des_encrypt_columns.sql`），格式：
+```sql
+ALTER TABLE `{table}`
+  ADD COLUMN `{field}_encrypt` VARCHAR(512) DEFAULT NULL COMMENT '{字段描述}密文' AFTER `{field}`;
+```
 
 ### Step 4：输出待办清单
 
@@ -124,6 +206,8 @@ encryption:
 4. 存量数据回刷（使用 DES 回刷工具）
 5. Nacos 切换 `encryption.switch=true`
 
+---
+
 ## 设计原则
 
 - **最小改动**：不引入全局拦截器，不修改现有表结构，只新增列
@@ -131,3 +215,8 @@ encryption:
 - **单开关控制**：`encryption.switch` 一个开关管读写，Nacos 动态生效
 - **TypeHandler 显式绑定**：仅作用于 `_encrypt` 列，不影响其他 String 字段
 - **加密失败兜底**：`encodeData` 加密异常时返回原文，不阻断业务
+
+## 参考实现
+
+- OMS 项目：`oms-base-service/order_data_manager/src/main/java/com/freemud/encryption/`
+- enc-test 项目：`/Users/jowang/Desktop/enc-test/`

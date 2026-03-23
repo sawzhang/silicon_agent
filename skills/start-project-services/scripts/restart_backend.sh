@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT="/Users/abnzhang/Project/silicon_agent"
+ROOT="/Users/jowang/Documents/github/silicon_agent"
 
 pid8000=$(lsof -tiTCP:8000 -sTCP:LISTEN -n -P || true)
 if [ -n "${pid8000:-}" ]; then kill -9 $pid8000 || true; fi

@@ -37,8 +37,8 @@ _MAX_TURNS: dict[str, int] = {
     "coding": 8,
     "doc": 5,
     "test": 8,
-    "issue distribution agent": 5,
-    "安全加密agent": 8,
+    "dispatch issue": 5,
+    "des encrypt": 8,
 }
 _DEFAULT_MAX_TURNS = 5
 
@@ -51,8 +51,8 @@ ROLE_TOOLS: dict[str, set[str]] = {
     "review": {"read", "execute", "skill"},
     "smoke": {"read", "execute", "skill"},
     "doc": {"read", "write", "edit", "skill"},
-    "issue distribution agent": {"read", "execute", "skill"},
-    "安全加密agent": {"read", "write", "edit", "execute", "execute_script", "skill"},
+    "dispatch issue": {"read", "execute", "skill"},
+    "des encrypt": {"read", "write", "edit", "execute", "execute_script", "skill"},
 }
 _ALL_TOOLS: set[str] = set()
 _TOOL_ARGUMENT_HINTS: dict[str, str] = {}
@@ -70,8 +70,8 @@ _ROLE_SKILL_DIRS: dict[str, list[str]] = {
     "review": ["shared", "review"],
     "smoke": ["shared", "smoke"],
     "doc": ["shared", "doc"],
-    "issue distribution agent": ["shared"],
-    "安全加密agent": ["shared"],
+    "dispatch issue": ["shared"],
+    "des encrypt": ["shared"],
 }
 
 

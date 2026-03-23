@@ -123,7 +123,7 @@ def _normalize_github_payload(gh_event: str, event_type: str, body: dict) -> dic
         issue = body.get("issue") or {}
         labels = [lb.get("name", "") for lb in (issue.get("labels") or [])]
         base.update({
-            "issue_number": issue.get("number", ""),
+            "issue_number": issue.get("number"),
             "issue_title": issue.get("title", ""),
             "issue_body": issue.get("body", "")[:2000],
             "issue_url": issue.get("html_url", ""),
@@ -138,7 +138,7 @@ def _normalize_github_payload(gh_event: str, event_type: str, body: dict) -> dic
         comment = body.get("comment") or {}
         command = parse_silicon_agent_command(comment.get("body", ""))
         base.update({
-            "issue_number": issue.get("number", ""),
+            "issue_number": issue.get("number"),
             "issue_title": issue.get("title", ""),
             "issue_body": issue.get("body", "")[:2000],
             "issue_url": issue.get("html_url", ""),

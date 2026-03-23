@@ -13,10 +13,6 @@ from collections import defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
-from urllib.parse import urlparse
-
-import httpx
-
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -68,79 +64,6 @@ _PREFLIGHT_SKIP_DIRS = {
 _PREFLIGHT_MAX_FILES = 2000
 _PREFLIGHT_MAX_DEPTH = 6
 _PREFLIGHT_MAX_CHARS = 600
-
-
-def _parse_repo_owner_name(repo_url: str) -> tuple[str | None, str | None]:
-    normalized = (repo_url or "").strip()
-    if not normalized:
-        return None, None
-    path = urlparse(normalized).path.strip("/")
-    if path.endswith(".git"):
-        path = path[:-4]
-    parts = [part for part in path.split("/") if part]
-    if len(parts) < 2:
-        return None, None
-    return parts[-2], parts[-1]
-
-
-async def _post_github_issue_feedback(task: TaskModel, branch: str) -> bool:
-    issue_number = getattr(task, "github_issue_number", None)
-    project = getattr(task, "project", None)
-    repo_url = (getattr(project, "repo_url", "") or "").strip()
-    owner, repo = _parse_repo_owner_name(repo_url)
-    if not issue_number or not owner or not repo:
-        logger.warning(
-            "Skip GitHub issue feedback for task %s: missing issue number or repo coordinates",
-            task.id,
-        )
-        return False
-
-    parsed_repo = urlparse(repo_url)
-    repo_host = parsed_repo.hostname or ""
-    ghe_host = urlparse(settings.GHE_BASE_URL).hostname or ""
-    is_ghe_repo = bool(repo_host and ghe_host and repo_host == ghe_host)
-    if is_ghe_repo:
-        api_base = (settings.GHE_BASE_URL or "").rstrip("/")
-        token = (settings.GHE_TOKEN or "").strip()
-    else:
-        api_base = "https://api.github.com"
-        token = (settings.GITHUB_TOKEN or "").strip()
-
-    if not api_base or not token:
-        logger.warning(
-            "Skip GitHub issue feedback for task %s: missing API base or token",
-            task.id,
-        )
-        return False
-
-    comment_body = (
-        "安全加密编码已完成！\n"
-        f"- Git 分支: {branch}\n"
-        f"- Silicon Agent 任务地址: http://127.0.0.1:3000/tasks/{task.id}"
-    )
-    url = f"{api_base}/repos/{owner}/{repo}/issues/{issue_number}/comments"
-
-    try:
-        async with httpx.AsyncClient(
-            timeout=httpx.Timeout(20.0, connect=5.0),
-            transport=httpx.AsyncHTTPTransport(proxy=None),
-        ) as client:
-            response = await client.post(
-                url,
-                headers={
-                    "Authorization": f"token {token}",
-                    "Accept": "application/vnd.github.v3+json",
-                },
-                json={"body": comment_body},
-            )
-            response.raise_for_status()
-    except Exception:
-        logger.warning(
-            "Failed to post GitHub issue feedback for task %s", task.id, exc_info=True
-        )
-        return False
-
-    return True
 
 
 async def _safe_broadcast(event: str, data: dict) -> None:
@@ -521,7 +444,7 @@ async def _ensure_code_stage_has_changes(
     worktree_path: Optional[str],
 ) -> bool:
     """Code stage must produce repository changes; otherwise fail fast."""
-    change_required_stages = {"code", "coding", "process_security_issue"}
+    change_required_stages = {"code", "coding", "des encrypt"}
     if (stage.stage_name or "").lower() not in change_required_stages:
         return True
     # When worktree mode is disabled/unavailable, skip git diff verification.
@@ -1082,11 +1005,6 @@ async def _finalize_task_resources(
             if branch:
                 task.branch_name = branch
                 await session.commit()
-            if branch and getattr(task, "github_issue_number", None):
-                feedback_ok = await _post_github_issue_feedback(task, branch)
-                if not feedback_ok:
-                    await _fail_task(session, task, "GitHub issue feedback failed")
-                    return False
             if branch:
                 pr_corr = f"worktree-pr-{uuid.uuid4().hex}"
                 pr_started_at = time.monotonic()
@@ -3058,7 +2976,7 @@ def _infer_test_target(test_examples: list[str], impl_examples: list[str]) -> st
 
 def _build_stage_preflight_summary(stage_name: str, workspace_path: Optional[str]) -> Optional[str]:
     normalized = (stage_name or "").strip().lower()
-    if normalized not in {"code", "coding", "test", "process_security_issue"}:
+    if normalized not in {"code", "coding", "test", "des encrypt"}:
         return None
     if not workspace_path:
         return None
@@ -3116,7 +3034,7 @@ def _build_stage_preflight_summary(stage_name: str, workspace_path: Optional[str
     validation_command = _infer_validation_command(build_files)
 
     lines = []
-    if normalized in {"code", "coding", "process_security_issue"}:
+    if normalized in {"code", "coding", "des encrypt"}:
         lines.append(
             "- 当前工作区: 目标仓库已在当前 workspace 根目录检出；直接在这里读写、commit、push，不要再次 git clone 到子目录。"
         )

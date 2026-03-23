@@ -68,24 +68,24 @@ def test_orchestrator_no_write():
     assert "execute_script" not in tools
 
 
-def test_issue_distribution_agent_tools_are_dispatch_only():
-    tools = ROLE_TOOLS["issue distribution agent"]
+def test_issue_distribution_tools_are_dispatch_only():
+    tools = ROLE_TOOLS["dispatch issue"]
     assert tools == {"read", "execute", "skill"}
 
 
-def test_security_agent_tools_allow_coding_and_skills():
-    tools = ROLE_TOOLS["安全加密agent"]
+def test_des_encrypt_tools_allow_coding_and_skills():
+    tools = ROLE_TOOLS["des encrypt"]
     assert {"read", "write", "edit", "execute", "execute_script", "skill"} == tools
 
 
-def test_issue_distribution_agent_uses_shared_skills():
-    dirs = agents_mod._get_skill_dirs("issue distribution agent")
+def test_issue_distribution_uses_shared_skills():
+    dirs = agents_mod._get_skill_dirs("dispatch issue")
     rendered = [p.name for p in dirs]
     assert rendered == ["shared"]
 
 
-def test_security_agent_uses_shared_skills():
-    dirs = agents_mod._get_skill_dirs("安全加密agent")
+def test_des_encrypt_uses_shared_skills():
+    dirs = agents_mod._get_skill_dirs("des encrypt")
     rendered = [p.name for p in dirs]
     assert rendered == ["shared"]
 

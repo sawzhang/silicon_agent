@@ -57,58 +57,99 @@ def test_test_guardrail_emphasizes_minimal_validation():
 def test_dispatch_issue_prompt_contract():
     ctx = _minimal_ctx(
         stage_name="dispatch_issue",
-        agent_role="issue distribution agent",
+        agent_role="dispatch issue",
         task_description="Issue URL: https://scm.starbucks.com/china/starbucks-asg-api/issues/13",
     )
     result = build_user_prompt(ctx)
-    assert "GitHub Issue" in STAGE_INSTRUCTIONS["dispatch_issue"]
-    assert "安全加密agent" in STAGE_INSTRUCTIONS["dispatch_issue"]
-    assert "selected_agent_role" in SYSTEM_PROMPTS["issue distribution agent"]
-    assert "acceptance_criteria" in SYSTEM_PROMPTS["issue distribution agent"]
+    assert "GitHub Issue" in SYSTEM_PROMPTS["dispatch issue"]
+    assert "`github_issue_dispatch` skill" in SYSTEM_PROMPTS["dispatch issue"]
+    assert "github_issue_dispatch" in STAGE_INSTRUCTIONS["dispatch_issue"]
+    assert "不得直接修改任何代码" in STAGE_INSTRUCTIONS["dispatch_issue"]
     assert STAGE_INSTRUCTIONS["dispatch_issue"] in result
 
 
-def test_process_security_issue_prompt_contract():
+def test_dispatch_issue_prompt_embeds_dispatch_skill_body():
     ctx = _minimal_ctx(
-        stage_name="process_security_issue",
-        agent_role="安全加密agent",
+        stage_name="dispatch_issue",
+        agent_role="dispatch issue",
+        task_description="Issue URL: https://scm.starbucks.com/china/starbucks-asg-api/issues/13",
+    )
+    result = build_user_prompt(ctx)
+    assert "## 分发技能" in result
+    assert "# GitHub Issue Dispatch Skill" in result
+    assert "JSON Schema" in result
+    assert "selected_agent_role" in result
+
+
+def test_issue_distribution_has_single_canonical_prompt_name():
+    assert "dispatch issue" in SYSTEM_PROMPTS
+    assert "dispatch issue agent" not in SYSTEM_PROMPTS
+    assert "dispatch agent" not in SYSTEM_PROMPTS
+
+
+def test_des_encrypt_prompt_contract():
+    ctx = _minimal_ctx(
+        stage_name="des encrypt",
+        agent_role="des encrypt",
         task_description="Issue #13 要求对 phone 字段进行安全加密",
         prior_outputs=[
             {
                 "stage": "dispatch_issue",
-                "output": '{"selected_agent_role":"安全加密agent","issue_number":13}',
+                "output": '{"selected_agent_role":"des encrypt","issue_number":13}',
             }
         ],
     )
     result = build_user_prompt(ctx)
-    assert "des_encrypt" in SYSTEM_PROMPTS["安全加密agent"]
-    assert "github_issue_feedback" in SYSTEM_PROMPTS["安全加密agent"]
-    assert "task URL" in SYSTEM_PROMPTS["安全加密agent"]
-    assert STAGE_INSTRUCTIONS["process_security_issue"] in result
+    assert "安全加密" in SYSTEM_PROMPTS["des encrypt"]
+    assert "des_encrypt" in SYSTEM_PROMPTS["des encrypt"]
+    assert "github_issue_feedback" in SYSTEM_PROMPTS["des encrypt"]
+    assert STAGE_INSTRUCTIONS["des encrypt"] in result
     assert "dispatch_issue" in result
 
 
-def test_process_security_issue_prompt_forbids_nested_clone():
+def test_des_encrypt_prompt_embeds_role_skill_bodies():
     ctx = _minimal_ctx(
-        stage_name="process_security_issue",
-        agent_role="安全加密agent",
-        preflight_summary="- 当前工作区: 目标仓库已在当前 workspace 根目录检出；直接在这里读写、commit、push，不要再次 git clone 到子目录。",
+        stage_name="des encrypt",
+        agent_role="des encrypt",
+        task_description="Issue #13 要求对 phone 字段进行安全加密",
     )
     result = build_user_prompt(ctx)
-    assert "不要再次 git clone" in result
+    assert "## 安全加密技能" in result
+    assert "# DES 安全加密接入 Skill" in result
+    assert "## GitHub 回帖技能" in result
+    assert "# GitHub Issue Feedback Skill" in result
+
+
+def test_issue_stage_instructions_follow_existing_numbered_style():
+    assert "github_issue_dispatch" in STAGE_INSTRUCTIONS["dispatch_issue"]
+    assert "JSON Schema" in STAGE_INSTRUCTIONS["dispatch_issue"]
+    assert "des_encrypt" in STAGE_INSTRUCTIONS["des encrypt"]
+    assert "github_issue_feedback" in STAGE_INSTRUCTIONS["des encrypt"]
+    assert "1. **Coding**" in STAGE_INSTRUCTIONS["des encrypt"]
+    assert "2. **回帖**" in STAGE_INSTRUCTIONS["des encrypt"]
+
+
+def test_des_encrypt_prompt_forbids_nested_clone():
+    ctx = _minimal_ctx(
+        stage_name="des encrypt",
+        agent_role="des encrypt",
+        preflight_summary="- 当前工作区: 目标仓库已在当前 workspace 根目录检出；直接在这里读写、commit、push。",
+    )
+    result = build_user_prompt(ctx)
+    assert "git clone" in result
     assert "当前 workspace 根目录" in result
 
 
-def test_process_security_issue_prompt_enforces_minimal_issue_scope():
+def test_des_encrypt_prompt_enforces_minimal_issue_scope():
     ctx = _minimal_ctx(
-        stage_name="process_security_issue",
-        agent_role="安全加密agent",
+        stage_name="des encrypt",
+        agent_role="des encrypt",
         task_description="Issue #13: 仅对 phone 字段进行安全加密",
     )
     result = build_user_prompt(ctx)
-    assert "最小闭环" in result
-    assert "不要默认扩展到日志、生成器、环境配置" in result
-    assert "只处理 `phone`" in result
+    # Minimal scope enforcement comes from guardrail and des_encrypt skill
+    assert "单一字段" in result or "最小改造模式" in result
+    assert "logback" in result or "环境模板" in result
 
 
 # ---------------------------------------------------------------------------

@@ -9,6 +9,7 @@ from app.models.project import ProjectModel
 from app.models.task_log import TaskStageLogModel
 from app.models.skill_feedback import SkillFeedbackModel
 from app.models.integration import ProjectIntegrationModel
+from app.models.chat_session import ChatSessionModel
 
 __all__ = [
     "AgentModel",
@@ -24,4 +25,5 @@ __all__ = [
     "TaskStageLogModel",
     "SkillFeedbackModel",
     "ProjectIntegrationModel",
+    "ChatSessionModel",
 ]

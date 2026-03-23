@@ -29,8 +29,8 @@ AGENT_ROLES = [
     ("review", "Review Agent"),
     ("smoke", "Smoke Test Agent"),
     ("doc", "Documentation Agent"),
-    ("issue distribution agent", "Issue Distribution Agent"),
-    ("安全加密agent", "Security Encryption Agent"),
+    ("dispatch issue", "Issue Distribution"),
+    ("des encrypt", "Des Encrypt"),
 ]
 
 DEFAULT_AVAILABLE_MODELS = [
@@ -49,8 +49,8 @@ FALLBACK_ROLE_DEFAULT_MODELS = {
     "review": "claude-opus-4-20250514",
     "smoke": "claude-sonnet-4-20250514",
     "doc": "claude-sonnet-4-20250514",
-    "issue distribution agent": "claude-sonnet-4-20250514",
-    "安全加密agent": "claude-sonnet-4-20250514",
+    "dispatch issue": "claude-sonnet-4-20250514",
+    "des encrypt": "claude-sonnet-4-20250514",
 }
 
 
@@ -69,6 +69,7 @@ class AgentService:
         await self.session.commit()
 
     async def list_agents(self) -> List[AgentStatusResponse]:
+        await self.ensure_agents_exist()
         result = await self.session.execute(
             select(AgentModel).order_by(AgentModel.role)
         )

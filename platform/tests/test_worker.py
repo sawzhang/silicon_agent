@@ -156,12 +156,12 @@ class TestBuildStagePreflightSummary:
         assert "推荐最小验证命令: ./mvnw test" in result
         assert "HelloControllerTest.java" in result
 
-    def test_build_stage_preflight_summary_for_process_security_issue(self, tmp_path: Path):
+    def test_build_stage_preflight_summary_for_des_encrypt(self, tmp_path: Path):
         (tmp_path / "build.gradle").write_text("plugins {}", encoding="utf-8")
         (tmp_path / "src/main/java/demo/controller").mkdir(parents=True)
         (tmp_path / "src/main/java/demo/controller/HelloController.java").write_text("class X {}", encoding="utf-8")
 
-        result = _build_stage_preflight_summary("process_security_issue", str(tmp_path))
+        result = _build_stage_preflight_summary("des encrypt", str(tmp_path))
 
         assert result is not None
         assert "当前工作区" in result

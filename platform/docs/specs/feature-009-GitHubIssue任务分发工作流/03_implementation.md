@@ -19,9 +19,9 @@
 5. `TaskService.create_task(...)` 创建 task，并回填 `github_issue_number`。
 6. 模板自动生成两个 stages：
    - `dispatch_issue`
-   - `process_security_issue`
+   - `des encrypt`
 7. worker 执行 `dispatch_issue`，输出结构化分发结果。
-8. worker 执行 `process_security_issue`，读取 dispatch 结果后按 `des_encrypt` skill 改代码、推分支、回帖 issue。
+8. worker 执行 `des encrypt`，读取 dispatch 结果后按 `des_encrypt` skill 改代码、推分支、回帖 issue。
 
 ## 2. 关键改动点
 
@@ -33,13 +33,13 @@
 
 ### 2.2 Agent seed / 配置
 在 agent seed 路径补齐两个角色：
-- `issue distribution agent`
-- `安全加密agent`
+- `issue distribution`
+- `des encrypt`
 
 要求：
 - distribution agent 能加载 shared dispatch skill
-- 安全加密 agent 能加载 shared feedback skill 与仓库级 `des_encrypt`
-- 安全加密 agent 拥有执行 git / curl / 改代码所需工具权限
+- `des encrypt` 能加载 shared feedback skill 与仓库级 `des_encrypt`
+- `des encrypt` 拥有执行 git / curl / 改代码所需工具权限
 
 ### 2.3 webhook 元数据传播
 需要统一真实 webhook 与 mock webhook 的 issue 信息：
@@ -64,7 +64,7 @@
 #### distribution stage
 - 只能分析和分发，不直接编码
 - 必须输出结构化结果
-- 当前若识别为安全加密类问题，必须选择 `安全加密agent`
+- 当前若识别为安全加密类问题，必须选择 `des encrypt`
 
 #### security worker stage
 - 严格依据 `des_encrypt` skill 执行
@@ -78,7 +78,7 @@
 - body: `安全加密agent，对本项目的phone字段进行安全加密`
 
 distribution 预期输出：
-- `selected_agent_role = "安全加密agent"`
+- `selected_agent_role = "des encrypt"`
 - `intent = "security_encryption"`
 - `work_summary = "对 phone 字段进行安全加密改造"`
 

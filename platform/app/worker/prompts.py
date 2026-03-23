@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Optional
 
-_EXECUTION_STAGE_NAMES = {"code", "coding", "test", "process_security_issue"}
+_EXECUTION_STAGE_NAMES = {"code", "coding", "test", "des encrypt"}
 _EXECUTION_MEMORY_LIMIT = 320
 _EXECUTION_REPO_HINT_LIMIT = 720
 _EXECUTION_PRIOR_LIMITS = {
@@ -29,6 +29,7 @@ _REPO_SECTION_PATTERN = re.compile(r"^###\s+(?P<title>[^\n]+)\n", re.MULTILINE)
 # ---------------------------------------------------------------------------
 
 _PROMPTS_DIR = Path(__file__).parent / "prompts"
+_SHARED_SKILLS_DIR = Path(__file__).resolve().parent.parent.parent / "skills" / "shared"
 
 
 def _load_prompt(filename: str, fallback: str = "") -> str:
@@ -38,6 +39,14 @@ def _load_prompt(filename: str, fallback: str = "") -> str:
         return path.read_text(encoding="utf-8").strip()
     except FileNotFoundError:
         return fallback
+
+
+def _load_shared_skill(filename: str) -> str:
+    path = _SHARED_SKILLS_DIR / filename
+    try:
+        return path.read_text(encoding="utf-8").strip()
+    except FileNotFoundError:
+        return ""
 
 
 # ---------------------------------------------------------------------------
@@ -87,27 +96,16 @@ SYSTEM_PROMPTS: Dict[str, str] = {
         "你需要生成：API文档、使用说明、变更日志和架构说明。"
         "文档应清晰、准确、易于理解，面向开发者和使用者。",
     ),
-    "issue distribution agent": (
-        "你是负责理解并分发 GitHub Issue 任务的 issue distribution agent。\n"
-        "你必须先阅读完整的 GitHub Issue 上下文，再严格按照 `github_issue_dispatch` skill 输出结构化分发结果。\n"
-        "输出中必须显式包含以下字段：`selected_agent_role`、`intent`、`issue_number`、`issue_url`、"
-        "`repo_full_name`、`task_title`、`work_summary`、`acceptance_criteria`、`dispatch_reason`。\n"
-        "当前如果 issue 属于安全加密类需求，你必须把 `selected_agent_role` 指向 `安全加密agent`，"
-        "并把完整处理指令整理给下一阶段。你只负责分析和分发，不直接改代码。\n"
+    "dispatch issue": (
+        "你是 GitHub Issue 分发 Agent，负责理解 Issue 内容并将任务分发给对应的执行 Agent。\n"
+        "你必须严格按照 `github_issue_dispatch` skill 执行，输出符合 skill 中 JSON Schema 定义的结构化分发结果。\n"
+        "你只负责分析和分发，不直接修改任何代码。\n"
     ),
-    "dispatch agent": (
-        "你是负责理解并分发 GitHub Issue 任务的 issue distribution agent。\n"
-        "你必须先阅读完整的 GitHub Issue 上下文，再严格按照 `github_issue_dispatch` skill 输出结构化分发结果。\n"
-        "输出中必须显式包含以下字段：`selected_agent_role`、`intent`、`issue_number`、`issue_url`、"
-        "`repo_full_name`、`task_title`、`work_summary`、`acceptance_criteria`、`dispatch_reason`。\n"
-        "当前如果 issue 属于安全加密类需求，你必须把 `selected_agent_role` 指向 `安全加密agent`，"
-        "并把完整处理指令整理给下一阶段。你只负责分析和分发，不直接改代码。\n"
-    ),
-    "安全加密agent": (
-        "你是 '安全加密agent'。\n"
-        "你需要使用你的内置技能严格完成以下两件事情：\n"
-        "1. **使用技能进行 Coding**：结合收到的项目上下文，按照你配置的 `des_encrypt` (安全加密) 等 skill 的描述说明，找到需要加密的字段直接进行加密逻辑的代码修改。若 issue 已明确字段范围（如只提到 `phone`），默认采用最小改动方案，只修改直接承载该字段的实体、Mapper、必要支撑类与最小验证代码，不要把任务扩展成整套基础设施改造。完成后提交并推送到远端新分支。\n"
-        "2. **处理信息返回给 Github**：Coding 并 Push 完成后，必须调用 curl 按照 `github_issue_feedback` 的技能要求，将生成的 Git 分支名以及 Silicon Agent task URL 作为评论贴回到原始的 GitHub Issue 中。\n"
+    "des encrypt": (
+        "你是安全加密 Agent，负责对数据库的某个字段进行安全加密改造，并在完成后将结果回帖到 GitHub Issue。\n"
+        "你必须按顺序严格完成以下两件事：\n"
+        "1. **按照 `des_encrypt` skill 执行代码改造**：在当前 task workspace 中完成加密代码修改，提交并推送到远端新分支。\n"
+        "2. **按照 `github_issue_feedback` skill 回帖**：Push 完成后，用 curl 将分支名和任务地址贴回原始 GitHub Issue。\n"
     ),
 }
 
@@ -198,17 +196,16 @@ STAGE_INSTRUCTIONS: Dict[str, str] = {
         "5. 最终签收结论",
     ),
     "dispatch_issue": (
-        "请立即阅读传入的 GitHub Issue 上下文，执行你的 dispatch 任务。"
-        "你必须输出包含 `selected_agent_role`、`intent`、`issue_number`、`issue_url`、"
-        "`repo_full_name`、`task_title`、`work_summary`、`acceptance_criteria`、`dispatch_reason` 的结构化结果，"
-        "然后给出发往下一阶段 `安全加密agent` 的完整处理指令。"
+        "阅读传入的 GitHub Issue 上下文，严格按照 `github_issue_dispatch` skill 完成分发任务。\n"
+        "输出 skill 中定义的 JSON Schema 结构化结果，并附上发往下一阶段执行 agent 的完整处理指令。\n"
+        "不得直接修改任何代码，只负责分析和分发。"
     ),
-    "process_security_issue": (
-        "请接手 issue distribution agent 传来的上下文，立即执行代码检索、修改（按 des_encrypt 规范），"
-        "随后推送到远端，并通过 `github_issue_feedback` 技能回填 GitHub Issue 评论。\n"
-        "目标仓库已经在当前 task workspace 根目录检出；请直接在当前 workspace 根目录读写、commit、push，"
-        "不要再次 `git clone` 到子目录。提交前先在当前 workspace 根目录执行 `git status --short`，确认改动就在这个仓库里。\n"
-        "如果 issue 只要求对特定字段（例如 `phone`）做安全加密，请优先落地该字段的最小闭环，不要默认扩展到日志、生成器、环境配置或其他与该字段无直接关系的文件。"
+    "des encrypt": (
+        "接手 dispatch issue 传来的上下文，按以下顺序完成两件事：\n"
+        "1. **Coding**：严格按照 `des_encrypt` skill 执行代码改造。目标仓库已在当前 workspace 根目录检出，"
+        "直接在此读写、commit、push，不要 `git clone` 到子目录。"
+        "提交前先执行 `git status --short` 确认改动在同一仓库。\n"
+        "2. **回帖**：Push 完成后，严格按照 `github_issue_feedback` skill，用 curl 将分支名和任务地址回帖到原始 GitHub Issue。\n"
     ),
 }
 
@@ -244,7 +241,7 @@ STAGE_GUARDRAILS: Dict[str, str] = {
         "优先复用 test 阶段已经完成的最终验证结果；除非存在明确缺口，不要重复安装依赖、重跑整套测试，"
         "也不要让宿主环境差异覆盖已在正确环境中验证通过的结论。",
     ),
-    "process_security_issue": (
+    "des encrypt": (
         "只完成当前阶段，不要提前执行后续阶段任务。\n"
         "当前 task workspace 根目录已经是可提交的目标仓库，请直接在这里修改、提交和推送。\n"
         "禁止再次 `git clone` 到子目录，也不要把 read/write/edit/commit 分散到两个不同仓库路径。\n"
@@ -494,6 +491,18 @@ def build_user_prompt(ctx: StageContext) -> str:
         parts.append("请仔细阅读审批反馈，针对性地修改产出，避免重复同样的问题。")
 
     parts.append(f"\n## 当前阶段: {ctx.stage_name}\n{stage_instruction}")
+
+    if ctx.stage_name == "dispatch_issue":
+        dispatch_skill = _load_shared_skill("github_issue_dispatch/SKILL.md")
+        if dispatch_skill:
+            parts.append(f"\n## 分发技能\n{dispatch_skill}")
+    elif ctx.stage_name == "des encrypt":
+        des_encrypt_skill = _load_shared_skill("des_encrypt/SKILL.md")
+        if des_encrypt_skill:
+            parts.append(f"\n## 安全加密技能\n{des_encrypt_skill}")
+        issue_feedback_skill = _load_shared_skill("github_issue_feedback/SKILL.md")
+        if issue_feedback_skill:
+            parts.append(f"\n## GitHub 回帖技能\n{issue_feedback_skill}")
 
     guardrail = STAGE_GUARDRAILS.get(ctx.stage_name)
     if guardrail:

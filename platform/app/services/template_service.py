@@ -87,11 +87,11 @@ BUILTIN_TEMPLATES = [
     },
     {
         "name": "github_issue_template",
-        "display_name": "GitHub Issue Template",
+        "display_name": "Github Issue",
         "description": "GitHub issue 统一入口模板，先分发再执行",
         "stages": [
-            {"name": "dispatch_issue", "agent_role": "issue distribution agent", "order": 0},
-            {"name": "process_security_issue", "agent_role": "安全加密agent", "order": 1},
+            {"name": "dispatch_issue", "agent_role": "dispatch issue", "order": 0},
+            {"name": "des encrypt", "agent_role": "des encrypt", "order": 1},
         ],
         "gates": [],
     },
@@ -246,6 +246,28 @@ class TemplateService:
                 )
                 self.session.add(template)
                 logger.info("Seeded builtin template: %s", tpl_data["name"])
+                continue
+
+            changed = False
+            expected_stages = json.dumps(tpl_data["stages"], ensure_ascii=False)
+            expected_gates = json.dumps(tpl_data["gates"], ensure_ascii=False)
+            if existing.display_name != tpl_data["display_name"]:
+                existing.display_name = tpl_data["display_name"]
+                changed = True
+            if existing.description != tpl_data["description"]:
+                existing.description = tpl_data["description"]
+                changed = True
+            if existing.stages != expected_stages:
+                existing.stages = expected_stages
+                changed = True
+            if existing.gates != expected_gates:
+                existing.gates = expected_gates
+                changed = True
+            if existing.is_builtin is not True:
+                existing.is_builtin = True
+                changed = True
+            if changed:
+                logger.info("Updated builtin template: %s", tpl_data["name"])
         await self.session.commit()
 
     @staticmethod

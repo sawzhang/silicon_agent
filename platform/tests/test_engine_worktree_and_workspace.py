@@ -293,14 +293,12 @@ async def test_finalize_task_resources_memory_extraction_fails(monkeypatch):
 async def test_finalize_task_resources_commit_push_success(monkeypatch):
     """repo_url set + workspace_path set → commit_and_push_workspace called, returns True."""
     commit_push_mock = AsyncMock(return_value="feat/branch-123")
-    issue_feedback_mock = AsyncMock(return_value=True)
     monkeypatch.setattr(engine.settings, "MEMORY_ENABLED", False)
     monkeypatch.setattr(engine.settings, "SKILL_FEEDBACK_ENABLED", False)
     monkeypatch.setattr(engine, "_emit_system_log", AsyncMock(return_value="log-id"))
     monkeypatch.setattr(engine, "_close_started_system_log", AsyncMock())
     monkeypatch.setattr(engine, "_cleanup_runtime_resources", AsyncMock())
     monkeypatch.setattr(engine, "commit_and_push_workspace", commit_push_mock)
-    monkeypatch.setattr(engine, "_post_github_issue_feedback", issue_feedback_mock)
     # Also patch create_pr_for_workspace to prevent HTTP calls
     monkeypatch.setattr(engine, "create_pr_for_workspace", AsyncMock(return_value=None))
 
@@ -332,7 +330,6 @@ async def test_finalize_task_resources_commit_push_success(monkeypatch):
 
     assert result is True
     commit_push_mock.assert_awaited_once()
-    issue_feedback_mock.assert_awaited_once_with(task, "feat/branch-123")
     assert task.branch_name == "feat/branch-123"
 
 
@@ -376,20 +373,17 @@ async def test_finalize_task_resources_commit_push_fails(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_finalize_task_resources_issue_feedback_fails(monkeypatch):
-    """Issue feedback failure should fail the task after branch push."""
-    fail_task_mock = AsyncMock()
+async def test_finalize_task_resources_github_issue_number_does_not_block_success(monkeypatch):
+    """github_issue_number set → engine no longer posts feedback; task still succeeds."""
     monkeypatch.setattr(engine.settings, "MEMORY_ENABLED", False)
     monkeypatch.setattr(engine.settings, "SKILL_FEEDBACK_ENABLED", False)
     monkeypatch.setattr(engine, "_emit_system_log", AsyncMock(return_value="log-id"))
     monkeypatch.setattr(engine, "_close_started_system_log", AsyncMock())
     monkeypatch.setattr(engine, "_cleanup_runtime_resources", AsyncMock())
-    monkeypatch.setattr(engine, "_fail_task", fail_task_mock)
     monkeypatch.setattr(engine, "commit_and_push_workspace", AsyncMock(return_value="feat/branch-123"))
-    monkeypatch.setattr(engine, "_post_github_issue_feedback", AsyncMock(return_value=False))
     monkeypatch.setattr(engine, "create_pr_for_workspace", AsyncMock(return_value=None))
 
-    task = _make_task(id="tt-finalize-feedback-fail-sn-1", title="Feedback Fail Test")
+    task = _make_task(id="tt-finalize-feedback-no-block-1", title="Feedback No Block Test")
     task.project = SimpleNamespace(
         repo_url="https://github.com/test/repo",
         branch="main",
@@ -409,8 +403,9 @@ async def test_finalize_task_resources_issue_feedback_fails(monkeypatch):
         None, None,
     )
 
-    assert result is False
-    fail_task_mock.assert_awaited_once()
+    # Feedback is now agent's responsibility; engine should still succeed
+    assert result is True
+    assert task.branch_name == "feat/branch-123"
 
 
 # ── 16. _execute_single_stage paths ───────────────────────────────────────
@@ -474,8 +469,8 @@ async def test_ensure_code_stage_not_code_stage(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_ensure_process_security_issue_no_changes_false(monkeypatch):
-    """process_security_issue must also produce repository changes."""
+async def test_ensure_des_encrypt_no_changes_false(monkeypatch):
+    """des encrypt stage must also produce repository changes."""
     monkeypatch.setattr(engine, "_has_git_worktree_changes", AsyncMock(return_value=False))
     mark_failed = AsyncMock()
     fail_task = AsyncMock()
@@ -483,7 +478,7 @@ async def test_ensure_process_security_issue_no_changes_false(monkeypatch):
     monkeypatch.setattr(engine, "_fail_task", fail_task)
 
     task = _make_task()
-    stage = _make_stage(stage_name="process_security_issue")
+    stage = _make_stage(stage_name="des encrypt")
     session = SimpleNamespace(commit=AsyncMock())
 
     with patch("app.worker.agents.close_agents_for_task"):
@@ -495,7 +490,7 @@ async def test_ensure_process_security_issue_no_changes_false(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_ensure_process_security_issue_allows_clean_worktree_when_commit_exists(monkeypatch):
+async def test_ensure_des_encrypt_allows_clean_worktree_when_commit_exists(monkeypatch):
     monkeypatch.setattr(engine, "_has_git_worktree_changes", AsyncMock(return_value=False))
     monkeypatch.setattr(engine, "_has_git_committed_changes_since_base", AsyncMock(return_value=True))
     mark_failed = AsyncMock()
@@ -504,7 +499,7 @@ async def test_ensure_process_security_issue_allows_clean_worktree_when_commit_e
     monkeypatch.setattr(engine, "_fail_task", fail_task)
 
     task = _make_task(project=SimpleNamespace(branch="master"))
-    stage = _make_stage(stage_name="process_security_issue")
+    stage = _make_stage(stage_name="des encrypt")
     session = SimpleNamespace(commit=AsyncMock())
 
     result = await engine._ensure_code_stage_has_changes(session, task, stage, "/some/path")

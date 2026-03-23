@@ -149,6 +149,10 @@ def _is_signoff_stage(stage_name: str) -> bool:
     return lowered == "signoff" or "signoff" in lowered or "签收" in (stage_name or "")
 
 
+def _is_text_only_stage(stage_name: str) -> bool:
+    return False
+
+
 def _output_summary_limit(stage_name: str) -> int:
     # Cap stage output stored in DB to limit downstream prior-context injection.
     normalized = (stage_name or "").strip().lower()
@@ -693,7 +697,11 @@ async def execute_stage(
 
     runtime_overrides = _build_runtime_overrides(agent, stage_model)
     stage_max_turns = _resolve_stage_max_turns(stage.agent_role, runtime_overrides["max_turns"])
-    runner_factory = get_agent_text_only if _is_signoff_stage(stage.stage_name) else get_agent
+    runner_factory = (
+        get_agent_text_only
+        if _is_signoff_stage(stage.stage_name) or _is_text_only_stage(stage.stage_name)
+        else get_agent
+    )
     runner = runner_factory(
         stage.agent_role,
         task_id,

@@ -68,13 +68,13 @@ class TemplateService:
   "stages": [
     {
       "name": "dispatch_issue",
-      "agent_role": "issue distribution agent",
+      "agent_role": "issue distribution",
       "order": 0,
       "instruction": "读取 GitHub issue 上下文并输出结构化分发结果"
     },
     {
-      "name": "process_security_issue",
-      "agent_role": "安全加密agent",
+      "name": "des encrypt",
+      "agent_role": "des encrypt",
       "order": 1,
       "instruction": "基于 dispatch 产出执行安全加密改造并回帖 GitHub issue"
     }
@@ -88,7 +88,7 @@ class TemplateService:
 ### 4.1 结构化字段
 ```json
 {
-  "selected_agent_role": "安全加密agent",
+  "selected_agent_role": "des encrypt",
   "intent": "security_encryption",
   "issue_number": 13,
   "issue_url": "https://scm.starbucks.com/china/starbucks-asg-api/issues/13",
@@ -176,8 +176,8 @@ class TaskDetailResponse(BaseModel):
   "github_issue_number": 13,
   "branch_name": "silicon_agent/abc123",
   "stages": [
-    {"stage_name": "dispatch_issue", "agent_role": "issue distribution agent"},
-    {"stage_name": "process_security_issue", "agent_role": "安全加密agent"}
+    {"stage_name": "dispatch_issue", "agent_role": "issue distribution"},
+    {"stage_name": "des encrypt", "agent_role": "des encrypt"}
   ]
 }
 ```

@@ -66,20 +66,20 @@ async def main():
                 )
                 session.add(skill_version)
 
-        # 2. Create Agent "安全加密agent"
-        result = await session.execute(select(AgentModel).where(AgentModel.role == '安全加密agent'))
+        # 2. Create Agent "des encrypt"
+        result = await session.execute(select(AgentModel).where(AgentModel.role == 'des encrypt'))
         agent = result.scalars().first()
         
         if not agent:
             agent = AgentModel(
                 id=str(uuid.uuid4()),
-                role="安全加密agent",
-                display_name="安全加密专家",
+                role="des encrypt",
+                display_name="Des Encrypt",
                 status="idle",
                 model_name=settings.LLM_MODEL,
                 config={
                     "skills": ["des_encrypt", "github-issue", "github-repo-manager"],
-                    "system_prompt": "You are a specialized agent for security and encryption. Your job is to read GitHub issues regarding security encryption, modify or write code using the des_encrypt skill, push to a remote repository branch, and then update the issue status."
+                    "system_prompt": "You are the des encrypt agent. Read GitHub issues about encryption work, update code with the des_encrypt skill, push a remote branch, and then update the issue status."
                 }
             )
             session.add(agent)
@@ -101,8 +101,8 @@ async def main():
                 is_builtin=False,
                 stages=json.dumps([
                     {
-                        "stage_name": "process_security_issue",
-                        "agent_role": "安全加密agent"
+                        "stage_name": "des encrypt",
+                        "agent_role": "des encrypt"
                     }
                 ]),
                 gates="[]"
