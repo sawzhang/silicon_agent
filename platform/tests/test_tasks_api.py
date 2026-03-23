@@ -941,3 +941,46 @@ def test_task_detail_response_null_tokens():
     })
     assert task.total_tokens == 0
     assert task.total_cost_rmb == 0.0
+
+
+def test_task_detail_response_assumes_utc_for_naive_datetimes():
+    """Naive task timestamps should be normalized to UTC-aware values for API output."""
+    from app.schemas.task import TaskDetailResponse
+
+    task = TaskDetailResponse.model_validate({
+        "id": "fake-task",
+        "title": "Test",
+        "status": "pending",
+        "created_at": "2026-03-23T10:41:08",
+        "completed_at": "2026-03-23T10:45:24.303349",
+        "total_tokens": 1,
+        "total_cost_rmb": 0.01,
+    })
+
+    assert task.created_at.tzinfo is not None
+    assert task.completed_at is not None and task.completed_at.tzinfo is not None
+    dumped = task.model_dump(mode="json")
+    assert dumped["created_at"].endswith("Z") or dumped["created_at"].endswith("+00:00")
+    assert dumped["completed_at"].endswith("Z") or dumped["completed_at"].endswith("+00:00")
+
+
+def test_task_stage_response_assumes_utc_for_naive_datetimes():
+    """Naive stage timestamps should be normalized to UTC-aware values for API output."""
+    from app.schemas.task import TaskStageResponse
+
+    stage = TaskStageResponse.model_validate({
+        "id": "stage-1",
+        "task_id": "task-1",
+        "stage_name": "des encrypt",
+        "agent_role": "des encrypt",
+        "status": "completed",
+        "started_at": "2026-03-23T10:41:50",
+        "completed_at": "2026-03-23T10:45:24.303349",
+        "tokens_used": 100,
+    })
+
+    assert stage.started_at is not None and stage.started_at.tzinfo is not None
+    assert stage.completed_at is not None and stage.completed_at.tzinfo is not None
+    dumped = stage.model_dump(mode="json")
+    assert dumped["started_at"].endswith("Z") or dumped["started_at"].endswith("+00:00")
+    assert dumped["completed_at"].endswith("Z") or dumped["completed_at"].endswith("+00:00")

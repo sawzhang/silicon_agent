@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import List, Optional
 
 from pydantic import BaseModel, field_validator
@@ -11,6 +11,14 @@ def _validate_auto_target_branch(value: Optional[str]) -> Optional[str]:
     if normalized:
         raise ValueError("target_branch 由系统自动创建，请不要填写。")
     return None
+
+
+def _assume_utc_for_naive_datetime(value: Optional[datetime]) -> Optional[datetime]:
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value
 
 
 class TaskCreateRequest(BaseModel):
@@ -56,6 +64,11 @@ class TaskStageResponse(BaseModel):
     def _none_to_zero(cls, v: object) -> int:
         return v if v is not None else 0
 
+    @field_validator("started_at", "completed_at", mode="after")
+    @classmethod
+    def _datetime_assume_utc(cls, value: Optional[datetime]) -> Optional[datetime]:
+        return _assume_utc_for_naive_datetime(value)
+
     model_config = {"from_attributes": True}
 
 
@@ -89,6 +102,11 @@ class TaskDetailResponse(BaseModel):
     @classmethod
     def _cost_none(cls, v: object) -> float:
         return v if v is not None else 0.0
+
+    @field_validator("created_at", "completed_at", mode="after")
+    @classmethod
+    def _datetime_assume_utc(cls, value: Optional[datetime]) -> Optional[datetime]:
+        return _assume_utc_for_naive_datetime(value)
 
     model_config = {"from_attributes": True}
 
