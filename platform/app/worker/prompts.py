@@ -98,7 +98,7 @@ SYSTEM_PROMPTS: Dict[str, str] = {
     ),
     "dispatch issue": (
         "你是 GitHub Issue 分发 Agent，负责理解 Issue 内容并将任务分发给对应的执行 Agent。\n"
-        "你必须严格按照 `github_issue_dispatch` skill 执行，输出符合 skill 中 JSON Schema 定义的结构化分发结果。\n"
+        "你必须严格按照 `github_dispatch_issue` skill 执行，输出符合 skill 中 JSON Schema 定义的结构化分发结果。\n"
         "你只负责分析和分发，不直接修改任何代码。\n"
     ),
     "des encrypt": (
@@ -196,7 +196,7 @@ STAGE_INSTRUCTIONS: Dict[str, str] = {
         "5. 最终签收结论",
     ),
     "dispatch_issue": (
-        "阅读传入的 GitHub Issue 上下文，严格按照 `github_issue_dispatch` skill 完成分发任务。\n"
+        "阅读传入的 GitHub Issue 上下文，严格按照 `github_dispatch_issue` skill 完成分发任务。\n"
         "输出 skill 中定义的 JSON Schema 结构化结果，并附上发往下一阶段执行 agent 的完整处理指令。\n"
         "不得直接修改任何代码，只负责分析和分发。"
     ),
@@ -493,7 +493,7 @@ def build_user_prompt(ctx: StageContext) -> str:
     parts.append(f"\n## 当前阶段: {ctx.stage_name}\n{stage_instruction}")
 
     if ctx.stage_name == "dispatch_issue":
-        dispatch_skill = _load_shared_skill("github_issue_dispatch/SKILL.md")
+        dispatch_skill = _load_shared_skill("github_dispatch_issue/SKILL.md")
         if dispatch_skill:
             parts.append(f"\n## 分发技能\n{dispatch_skill}")
     elif ctx.stage_name == "des encrypt":

@@ -62,8 +62,8 @@ def test_dispatch_issue_prompt_contract():
     )
     result = build_user_prompt(ctx)
     assert "GitHub Issue" in SYSTEM_PROMPTS["dispatch issue"]
-    assert "`github_issue_dispatch` skill" in SYSTEM_PROMPTS["dispatch issue"]
-    assert "github_issue_dispatch" in STAGE_INSTRUCTIONS["dispatch_issue"]
+    assert "`github_dispatch_issue` skill" in SYSTEM_PROMPTS["dispatch issue"]
+    assert "github_dispatch_issue" in STAGE_INSTRUCTIONS["dispatch_issue"]
     assert "不得直接修改任何代码" in STAGE_INSTRUCTIONS["dispatch_issue"]
     assert STAGE_INSTRUCTIONS["dispatch_issue"] in result
 
@@ -121,7 +121,7 @@ def test_des_encrypt_prompt_embeds_role_skill_bodies():
 
 
 def test_issue_stage_instructions_follow_existing_numbered_style():
-    assert "github_issue_dispatch" in STAGE_INSTRUCTIONS["dispatch_issue"]
+    assert "github_dispatch_issue" in STAGE_INSTRUCTIONS["dispatch_issue"]
     assert "JSON Schema" in STAGE_INSTRUCTIONS["dispatch_issue"]
     assert "des_encrypt" in STAGE_INSTRUCTIONS["des encrypt"]
     assert "github_issue_feedback" in STAGE_INSTRUCTIONS["des encrypt"]

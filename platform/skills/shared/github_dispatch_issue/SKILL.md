@@ -1,5 +1,5 @@
 ---
-name: github_issue_dispatch
+name: github_dispatch_issue
 display_name: GitHub Issue Dispatch
 description: Understands the Github Issue and dispatches tasks to execution agents.
 layer: L1
