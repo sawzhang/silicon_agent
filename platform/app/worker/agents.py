@@ -38,7 +38,7 @@ _MAX_TURNS: dict[str, int] = {
     "doc": 5,
     "test": 8,
     "dispatch issue": 5,
-    "des encrypt": 8,
+    "des encrypt": 15,
 }
 _DEFAULT_MAX_TURNS = 5
 
