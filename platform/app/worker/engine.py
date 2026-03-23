@@ -1859,6 +1859,15 @@ async def _execute_single_stage(
     if stage.error_message or stage.output_summary:
         # Stage has prior failure info — inject it for smarter retry
         if stage.error_message:
+            # Classify failure and generate agent-facing recovery hint
+            recovery_hint = ""
+            try:
+                from app.worker.failure import classify_failure, get_recovery_hint
+                failure_category = classify_failure(error_message=stage.error_message)
+                recovery_hint = get_recovery_hint(failure_category, stage.error_message)
+            except (ImportError, AttributeError):
+                pass
+
             if settings.SKILL_REFLECTION_ENABLED:
                 try:
                     from app.worker.failure import generate_structured_reflection
@@ -1872,6 +1881,7 @@ async def _execute_single_stage(
                         "error": reflection.get("root_cause", stage.error_message),
                         "lesson": reflection.get("lesson", ""),
                         "suggestion": reflection.get("suggestion", ""),
+                        "recovery_hint": recovery_hint,
                         "prior_output": (stage.output_summary or "")[:2000],
                     }
                     # Persist lesson to project memory
@@ -1901,11 +1911,13 @@ async def _execute_single_stage(
                     )
                     retry_context = {
                         "error": stage.error_message,
+                        "recovery_hint": recovery_hint,
                         "prior_output": (stage.output_summary or "")[:2000],
                     }
             else:
                 retry_context = {
                     "error": stage.error_message,
+                    "recovery_hint": recovery_hint,
                     "prior_output": (stage.output_summary or "")[:2000],
                 }
 

@@ -172,6 +172,57 @@ async def generate_structured_reflection(
     return fallback
 
 
+# ---------------------------------------------------------------------------
+# Agent-first recovery hints per failure category
+# ---------------------------------------------------------------------------
+
+RECOVERY_HINTS: Dict[str, str] = {
+    FailureCategory.TRANSIENT: (
+        "上一次执行因网络超时或连接问题失败。这通常是暂时性问题。"
+        "请直接重新执行原任务，无需修改方案。"
+    ),
+    FailureCategory.TOOL_ERROR: (
+        "上一次执行因工具调用失败（无效参数或格式错误）。"
+        "请检查工具调用参数是否正确，或换用其他工具完成同样目标。"
+        "避免使用上次失败的工具调用格式。"
+    ),
+    FailureCategory.RESOURCE: (
+        "上一次执行因资源限制中断（token上限或成本限额）。"
+        "请精简你的方案，减少不必要的探索和输出。"
+        "聚焦核心任务，避免广泛扫描或冗长解释。"
+    ),
+    FailureCategory.SEMANTIC: (
+        "上一次执行的产出质量不达标。"
+        "请仔细审视上次产出的具体问题，针对性改进。"
+        "不要简单重复上次的方案，而是换一种思路。"
+    ),
+    FailureCategory.GATE_REJECTED: (
+        "上一次产出被人工审批拒绝。"
+        "请仔细阅读审批反馈，针对具体问题逐条改进。"
+        "不要忽略反馈中提到的任何问题。"
+    ),
+    FailureCategory.UNKNOWN: (
+        "上一次执行失败，原因未能自动分类。"
+        "请分析错误信息，尝试不同的实现路径。"
+    ),
+}
+
+
+def get_recovery_hint(
+    category: FailureCategory,
+    error_message: str | None = None,
+) -> str:
+    """Get an agent-facing recovery hint for a failure category.
+
+    Returns a Chinese-language hint that can be injected into the retry prompt
+    to guide the agent toward a better approach.
+    """
+    hint = RECOVERY_HINTS.get(category, RECOVERY_HINTS[FailureCategory.UNKNOWN])
+    if error_message:
+        hint += f"\n\n**原始错误:** {error_message[:500]}"
+    return hint
+
+
 def is_auto_retryable(category: FailureCategory, auto_retry_categories: str) -> bool:
     """Check if a failure category is configured for automatic retry.
 

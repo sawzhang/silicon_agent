@@ -2,28 +2,37 @@ from pydantic_settings import BaseSettings
 
 
 class Settings(BaseSettings):
+    # =========================================================================
+    # Core infrastructure
+    # =========================================================================
     DATABASE_URL: str = "sqlite+aiosqlite:///./agent_platform.db"
     REDIS_URL: str = "redis://localhost:6379"
     JWT_SECRET: str = "dev-secret-change-in-production"
     JWT_ENABLED: bool = False
     SKILLKIT_ENABLED: bool = False
     DEBUG: bool = True
+    CORS_ORIGINS: str = "http://localhost:3000,http://localhost:5173"
 
+    # Database pool
+    DB_POOL_SIZE: int = 5
+    DB_MAX_OVERFLOW: int = 10
+    DB_POOL_TIMEOUT: int = 30
+
+    # =========================================================================
     # LLM configuration
+    # =========================================================================
     LLM_API_KEY: str = ""
     LLM_BASE_URL: str = "https://api.openai.com"
     LLM_MODEL: str = "gpt-4o-mini"
     LLM_TIMEOUT: float = 120.0
-
     # Per-role model routing (JSON string: {"coding": "gpt-4o", "review": "claude-sonnet-4-20250514"})
-    # Unspecified roles fall back to LLM_MODEL. Keep lightweight defaults on
-    # orchestrator/test so parse + signoff stay cheaper unless env overrides them.
     LLM_ROLE_MODEL_MAP: str = '{"orchestrator":"gpt-4o-mini","test":"gpt-4o-mini"}'
     # Comma-separated absolute path prefixes allowed in agent config `extra_skill_dirs`.
-    # Empty means only built-in platform/skills directory is allowed.
     EXTRA_SKILL_DIR_WHITELIST: str = ""
 
-    # Worker configuration
+    # =========================================================================
+    # Worker engine
+    # =========================================================================
     WORKER_ENABLED: bool = True
     WORKER_POLL_INTERVAL: float = 5.0
     WORKER_GATE_POLL_INTERVAL: float = 3.0
@@ -33,50 +42,25 @@ class Settings(BaseSettings):
     WORKER_STAGE_TIMEOUT: float = 300.0          # single LLM call timeout (seconds)
     WORKER_TASK_TIMEOUT: float = 1800.0          # entire task timeout (seconds)
 
-    # Database pool
-    DB_POOL_SIZE: int = 5
-    DB_MAX_OVERFLOW: int = 10
-    DB_POOL_TIMEOUT: int = 30
-
-    # Circuit breaker configuration
+    # =========================================================================
+    # Cost control — circuit breaker
+    # =========================================================================
     CB_MAX_TOKENS_PER_TASK: int = 400000
     CB_MAX_COST_PER_TASK_RMB: float = 100.0
     CB_TOKEN_PRICE_PER_1K: float = 0.01
-    # Per-stage token budgets (JSON string). Empty means disabled.
-    # Example: {"parse": 60000, "code": 250000}
+    # Per-stage token budgets (JSON). Empty means disabled.
     CB_STAGE_TOKEN_BUDGETS: str = '{"parse": 60000, "code": 250000}'
 
-    # Webhook secrets (empty = skip verification)
-    JIRA_WEBHOOK_SECRET: str = ""
-    GITLAB_WEBHOOK_SECRET: str = ""
-    GITHUB_WEBHOOK_SECRET: str = ""
-
-    # External notification (webhook URL for task events)
-    NOTIFY_WEBHOOK_URL: str = ""
-    NOTIFY_EVENTS: str = "task_failed,task_completed,gate_created"
-
-    # CORS
-    CORS_ORIGINS: str = "http://localhost:3000,http://localhost:5173"
-
-    # GitHub integration (optional, raises rate limit)
-    GITHUB_TOKEN: str = ""
-
-    # GitHub Enterprise integration (e.g. scm.starbucks.com)
-    GHE_BASE_URL: str = ""       # e.g. "https://scm.starbucks.com/api/v3"
-    GHE_USERNAME: str = ""       # Git username for HTTPS auth (recommended for GHE git operations)
-    GHE_TOKEN: str = ""          # Personal access token for the GHE instance
-
-    # ROI benchmark: estimated manual effort per task
-    ESTIMATED_HOURS_PER_TASK: float = 8.0
-    HOURLY_RATE_RMB: float = 150.0
-
-    # Workspace: true=worktree, false=tmp clone
+    # =========================================================================
+    # Git workspace — worktree isolation
+    # =========================================================================
     WORKTREE_ENABLED: bool = False
     WORKTREE_BASE_DIR: str = "/var/lib/silicon_agent/worktrees"
-    # Empty means `${WORKTREE_BASE_DIR}/repos`
-    WORKTREE_REPO_CACHE_DIR: str = ""
+    WORKTREE_REPO_CACHE_DIR: str = ""  # Empty → ${WORKTREE_BASE_DIR}/repos
 
-    # Container sandbox configuration
+    # =========================================================================
+    # Container sandbox
+    # =========================================================================
     SANDBOX_BACKEND: str = "docker"  # "docker" | "boxlite"
     SANDBOX_ENABLED: bool = False
     SANDBOX_IMAGE: str = "silicon-agent-sandbox:coding"
@@ -90,13 +74,9 @@ class Settings(BaseSettings):
     SANDBOX_RUN_AS_WORKSPACE_OWNER: bool = True
     SANDBOX_WORKSPACE_BASE_DIR: str = "/tmp/silicon_agent/tasks"
     SANDBOX_FALLBACK_MODE: str = "graceful"
-    SANDBOX_MEMORY_MIB: int = 4096  # BoxLite memory limit (MiB); Docker uses SANDBOX_MEMORY
+    SANDBOX_MEMORY_MIB: int = 4096  # BoxLite memory limit
     # Per-role sandbox resource profiles (JSON)
-    # Format: {"role": {"cpus": N, "memory_mib": N, "image": "...", "mount_mode": "rw|ro"}}
-    # Roles not listed use SANDBOX_CPUS/SANDBOX_MEMORY_MIB defaults
-    # Roles with null value don't get sandbox (run in-process)
     SANDBOX_ROLE_RESOURCES: str = "{}"
-    # Which roles can use sandbox (JSON list)
     SANDBOX_ROLES: str = '["coding", "test"]'
     SANDBOX_DUMP_MODEL_API_RESPONSE: bool = True
     SANDBOX_MODEL_API_RAW_LOG_HOST_DIR: str = "/tmp/silicon_agent/model_api_logs"
@@ -107,26 +87,65 @@ class Settings(BaseSettings):
     SANDBOX_GRADLE_WRAPPER_PREWARM: bool = True
     SANDBOX_GRADLE_WRAPPER_PREWARM_TIMEOUT_SECONDS: int = 180
 
-    # Memory & compression configuration
+    # =========================================================================
+    # Project memory & compression
+    # =========================================================================
     MEMORY_ENABLED: bool = True
     MEMORY_COMPRESSION_ENABLED: bool = True
     MEMORY_MAX_ENTRIES_PER_CATEGORY: int = 50
     MEMORY_MAX_CONTEXT_TOKENS: int = 2000
 
-    # Phase 1: Structured contracts & failure handling
+    # =========================================================================
+    # External integrations
+    # =========================================================================
+    # Webhooks
+    JIRA_WEBHOOK_SECRET: str = ""
+    GITLAB_WEBHOOK_SECRET: str = ""
+    GITHUB_WEBHOOK_SECRET: str = ""
+    NOTIFY_WEBHOOK_URL: str = ""
+    NOTIFY_EVENTS: str = "task_failed,task_completed,gate_created"
+
+    # GitHub
+    GITHUB_TOKEN: str = ""
+    GHE_BASE_URL: str = ""
+    GHE_USERNAME: str = ""
+    GHE_TOKEN: str = ""
+
+    # ROI
+    ESTIMATED_HOURS_PER_TASK: float = 8.0
+    HOURLY_RATE_RMB: float = 150.0
+
+    # =========================================================================
+    # Pipeline features — stable
+    # =========================================================================
     STAGE_CONTRACTS_ENABLED: bool = True
     FAILURE_AUTO_RETRY_CATEGORIES: str = "transient,tool_error"
     GATE_DEFAULT_MAX_RETRIES: int = 2
-
-    # Phase 2: Adaptive orchestration
     CONDITIONS_ENABLED: bool = True
-    EVALUATOR_DEFAULT_MIN_CONFIDENCE: float = 0.7
-    EVALUATOR_MAX_ITERATIONS: int = 3
-    DYNAMIC_GATE_ENABLED: bool = False
-    DYNAMIC_GATE_CONFIDENCE_THRESHOLD: float = 0.5
     STAGE_DEFAULT_MAX_RETRIES: int = 3
 
-    # Phase 3: Intelligent orchestration
+    # Skill self-learning
+    SKILL_FEEDBACK_ENABLED: bool = True
+    SKILL_REFLECTION_ENABLED: bool = True
+    SKILL_REFLECTION_MODEL: str = ""
+
+    # Evaluator / verifier
+    EVALUATOR_DEFAULT_MIN_CONFIDENCE: float = 0.7
+    EVALUATOR_MAX_ITERATIONS: int = 3
+    VERIFIER_CMD_TIMEOUT: float = 120.0
+    VERIFIER_MAX_ITERATIONS: int = 5
+    VERIFIER_TOKEN_BUDGET: int = 50000
+
+    # Task log pipeline
+    TASK_LOG_PIPELINE_QUEUE_SIZE: int = 4000
+    TASK_LOG_PIPELINE_FLUSH_INTERVAL_SECONDS: float = 1.0
+    TASK_LOG_PIPELINE_BATCH_SIZE: int = 200
+
+    # =========================================================================
+    # Experimental features — default OFF, enable with caution
+    # =========================================================================
+    DYNAMIC_GATE_ENABLED: bool = False
+    DYNAMIC_GATE_CONFIDENCE_THRESHOLD: float = 0.5
     GRAPH_EXECUTION_ENABLED: bool = False
     GRAPH_MAX_LOOP_ITERATIONS: int = 5
     INTERACTIVE_PLANNING_ENABLED: bool = False
@@ -134,16 +153,6 @@ class Settings(BaseSettings):
     DYNAMIC_ROUTING_ENABLED: bool = False
     DYNAMIC_ROUTING_MODEL: str = ""
     TEMPLATE_VERSIONING_ENABLED: bool = False
-
-    # Skill self-learning (Phase 1)
-    SKILL_FEEDBACK_ENABLED: bool = True       # Enable skill effectiveness metrics
-    SKILL_REFLECTION_ENABLED: bool = True     # Enable structured reflection on failure
-    SKILL_REFLECTION_MODEL: str = ""          # Model for reflection (empty = default)
-
-    # Task log pipeline
-    TASK_LOG_PIPELINE_QUEUE_SIZE: int = 4000
-    TASK_LOG_PIPELINE_FLUSH_INTERVAL_SECONDS: float = 1.0
-    TASK_LOG_PIPELINE_BATCH_SIZE: int = 200
 
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8", "extra": "ignore"}
 

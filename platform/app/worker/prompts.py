@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Dict, List, Optional
 
 _EXECUTION_STAGE_NAMES = {"code", "coding", "test", "process_security_issue"}
@@ -24,43 +25,67 @@ _REPO_SECTION_PATTERN = re.compile(r"^###\s+(?P<title>[^\n]+)\n", re.MULTILINE)
 
 
 # ---------------------------------------------------------------------------
+# Prompt file loader
+# ---------------------------------------------------------------------------
+
+_PROMPTS_DIR = Path(__file__).parent / "prompts"
+
+
+def _load_prompt(filename: str, fallback: str = "") -> str:
+    """Load a prompt from an external .md file, falling back to *fallback*."""
+    path = _PROMPTS_DIR / filename
+    try:
+        return path.read_text(encoding="utf-8").strip()
+    except FileNotFoundError:
+        return fallback
+
+
+# ---------------------------------------------------------------------------
 # System prompts per agent role
 # ---------------------------------------------------------------------------
 
 SYSTEM_PROMPTS: Dict[str, str] = {
-    "orchestrator": (
+    "orchestrator": _load_prompt(
+        "system_orchestrator.md",
         "你是一个项目编排Agent，负责解析用户需求、协调各阶段工作流程、"
         "以及最终签收验收。你需要将模糊需求转化为结构化的执行计划，"
-        "并在签收阶段综合评估所有产出物的质量。"
+        "并在签收阶段综合评估所有产出物的质量。",
     ),
-    "spec": (
+    "spec": _load_prompt(
+        "system_spec.md",
         "你是一个技术规格Agent，擅长将需求描述转化为详细的技术方案。"
         "你的输出应包含：接口设计、数据模型、技术选型、实现步骤和风险评估。"
-        "请以结构化的Markdown格式输出。"
+        "请以结构化的Markdown格式输出。",
     ),
-    "coding": (
+    "coding": _load_prompt(
+        "system_coding.md",
         "你是一个代码生成Agent，擅长根据技术规格编写高质量代码。"
         "你需要遵循最佳实践，包括：清晰的代码结构、适当的错误处理、"
-        "必要的注释、以及符合项目规范的命名约定。请输出完整可运行的代码。"
+        "必要的注释、以及符合项目规范的命名约定。请输出完整可运行的代码。",
     ),
-    "test": (
+    "test": _load_prompt(
+        "system_test.md",
         "你是一个测试Agent，擅长编写全面的测试用例。"
         "你需要覆盖：正常路径、边界条件、异常处理和性能场景。"
-        "请使用项目对应的测试框架，输出可直接运行的测试代码。"
+        "请使用项目对应的测试框架，输出可直接运行的测试代码。",
     ),
-    "review": (
+    "review": _load_prompt(
+        "system_review.md",
         "你是一个代码审查Agent，负责对代码进行全面的质量审查。"
         "你需要检查：代码规范、安全漏洞（OWASP Top 10）、性能问题、"
-        "可维护性和架构合理性。请按严重程度分级列出发现的问题。"
+        "可维护性和架构合理性。请按严重程度分级列出发现的问题。",
     ),
-    "smoke": (
+    "smoke": _load_prompt(
+        "system_smoke.md",
         "你是一个冒烟测试Agent，负责设计端到端的冒烟测试方案。"
         "你需要验证系统的核心功能路径是否正常工作，"
-        "包括关键用户场景、API端点可用性和数据流完整性。"
+        "包括关键用户场景、API端点可用性和数据流完整性。",
     ),
-    "doc": (
+    "doc": _load_prompt(
+        "system_doc.md",
+        "你是一个文档生成Agent，负责编写技术文档。"
         "你需要生成：API文档、使用说明、变更日志和架构说明。"
-        "文档应清晰、准确、易于理解，面向开发者和使用者。"
+        "文档应清晰、准确、易于理解，面向开发者和使用者。",
     ),
     "issue distribution agent": (
         "你是负责理解并分发 GitHub Issue 任务的 issue distribution agent。\n"
@@ -91,77 +116,86 @@ SYSTEM_PROMPTS: Dict[str, str] = {
 # ---------------------------------------------------------------------------
 
 STAGE_INSTRUCTIONS: Dict[str, str] = {
-    "parse": (
+    "parse": _load_prompt(
+        "stage_parse.md",
         "请解析以下任务需求，输出结构化的执行计划：\n"
         "1. 需求要点提炼\n"
         "2. 技术可行性初步评估\n"
         "3. 建议的实施步骤\n"
         "4. 预期产出物\n"
-        "5. 潜在风险和依赖"
+        "5. 潜在风险和依赖",
     ),
-    "spec": (
+    "spec": _load_prompt(
+        "stage_spec.md",
         "请根据需求解析结果，编写详细的技术规格方案：\n"
         "1. 接口设计（输入/输出/协议）\n"
         "2. 数据模型设计\n"
         "3. 技术选型和理由\n"
         "4. 详细实现步骤\n"
         "5. 测试策略建议\n"
-        "6. 风险评估和缓解措施"
+        "6. 风险评估和缓解措施",
     ),
-    "approve": (
+    "approve": _load_prompt(
+        "stage_approve.md",
         "请审批以下技术方案，给出你的评估意见：\n"
         "1. 方案完整性评估\n"
         "2. 技术可行性确认\n"
         "3. 风险点识别\n"
         "4. 改进建议（如有）\n"
-        "5. 最终结论：批准/需修改"
+        "5. 最终结论：批准/需修改",
     ),
-    "code": (
+    "code": _load_prompt(
+        "stage_code.md",
         "请根据技术规格方案，生成实现代码：\n"
         "1. 按照规格中的接口设计实现\n"
         "2. 包含必要的错误处理\n"
         "3. 遵循项目代码规范\n"
         "4. 添加关键逻辑的注释\n"
-        "5. 列出修改的文件清单"
+        "5. 列出修改的文件清单",
     ),
-    "test": (
+    "test": _load_prompt(
+        "stage_test.md",
         "请为以下代码实现编写测试用例：\n"
         "1. 单元测试（覆盖核心逻辑）\n"
         "2. 边界条件测试\n"
         "3. 异常处理测试\n"
         "4. 测试覆盖率目标 ≥ 80%\n"
-        "5. 模拟数据和fixtures"
+        "5. 模拟数据和fixtures",
     ),
-    "review": (
+    "review": _load_prompt(
+        "stage_review.md",
         "请对以下代码进行全面审查：\n"
         "1. 代码规范检查\n"
         "2. 安全漏洞扫描（SQL注入、XSS等）\n"
         "3. 性能瓶颈识别\n"
         "4. 架构合理性评估\n"
-        "5. 按严重程度（Critical/Major/Minor）分类列出问题"
+        "5. 按严重程度（Critical/Major/Minor）分类列出问题",
     ),
-    "smoke": (
+    "smoke": _load_prompt(
+        "stage_smoke.md",
         "请设计冒烟测试方案：\n"
         "1. 核心功能场景验证步骤\n"
         "2. API端点可用性检查\n"
         "3. 数据流完整性验证\n"
         "4. 预期结果和通过标准\n"
-        "5. 测试环境要求"
+        "5. 测试环境要求",
     ),
-    "doc": (
+    "doc": _load_prompt(
+        "stage_doc.md",
         "请生成以下技术文档：\n"
         "1. API接口文档（端点、参数、响应示例）\n"
         "2. 使用说明（快速开始、配置项）\n"
         "3. 变更日志（本次修改内容）\n"
-        "4. 架构说明（如涉及架构变更）"
+        "4. 架构说明（如涉及架构变更）",
     ),
-    "signoff": (
+    "signoff": _load_prompt(
+        "stage_signoff.md",
         "请综合评估所有阶段的产出物，进行最终签收：\n"
         "1. 各阶段产出物完整性检查\n"
         "2. 需求满足度评估\n"
         "3. 质量指标总结\n"
         "4. 遗留问题清单（如有）\n"
-        "5. 最终签收结论"
+        "5. 最终签收结论",
     ),
     "dispatch_issue": (
         "请立即阅读传入的 GitHub Issue 上下文，执行你的 dispatch 任务。"
@@ -180,22 +214,35 @@ STAGE_INSTRUCTIONS: Dict[str, str] = {
 
 
 STAGE_GUARDRAILS: Dict[str, str] = {
-    "code": (
+    "code": _load_prompt(
+        "guardrail_code.md",
         "只完成当前阶段，不要提前执行后续阶段任务。\n"
         "不要为了理解整个仓库而广泛探索，优先基于已知信息直接实现。\n"
         "只有在缺少关键实现信息时才少量补读文件；最多再检查 3 个关键文件或执行 1 次探索性目录命令，"
         "之后必须开始修改代码。\n"
         "你可以为了验证实现而运行必要命令，但目标必须是最小必要验证。\n"
         "不要提前生成最终签收/验收报告，也不要调用 signoff、review、smoke、e2e-test 等后续阶段能力。\n"
-        "完成实现并简要总结本阶段改动后结束。"
+        "完成实现并简要总结本阶段改动后结束。",
     ),
-    "test": (
+    "test": _load_prompt(
+        "guardrail_test.md",
         "只完成当前阶段，不要提前执行后续阶段任务。\n"
         "请聚焦当前任务直接相关的自动化测试与验证，优先最小、最相关、最快的验证路径。\n"
         "最多再补读 2 个关键文件、执行 2 条验证命令；超过后必须停止扩展并给出结论。\n"
         "如果验证命令失败，必须明确给出失败命令、关键报错和阻塞点；不要只根据代码阅读就判定测试通过。\n"
         "如果相关测试已经通过，且已满足验收标准，请立即停止。\n"
-        "不要继续扩展额外类型的测试，例如 E2E、冒烟、性能或签收报告，除非任务明确要求。"
+        "不要继续扩展额外类型的测试，例如 E2E、冒烟、性能或签收报告，除非任务明确要求。",
+    ),
+    "signoff": _load_prompt(
+        "guardrail_signoff.md",
+        "此阶段负责输出最终签收结果。\n"
+        "请基于已有阶段产出进行总结和结论，不要再回头扩展实现或测试范围。\n"
+        "前序阶段产出里可能包含中间态、自修复前描述或已过时结论；如果它们与当前阶段直接读取到的文件内容、"
+        "命令结果或已完成阶段的最终产出冲突，请以当前阶段直接核验到的最新事实为准。\n"
+        "只有在 signoff 阶段再次核验后仍然成立的问题，才可以写入遗留问题或影响最终结论；"
+        "已经被后续修改修复的问题，应标记为已解决，不要继续当作遗留问题。\n"
+        "优先复用 test 阶段已经完成的最终验证结果；除非存在明确缺口，不要重复安装依赖、重跑整套测试，"
+        "也不要让宿主环境差异覆盖已在正确环境中验证通过的结论。",
     ),
     "process_security_issue": (
         "只完成当前阶段，不要提前执行后续阶段任务。\n"
@@ -204,16 +251,6 @@ STAGE_GUARDRAILS: Dict[str, str] = {
         "开始提交前必须先在当前 workspace 根目录执行 `git status --short`，确认改动出现在同一个仓库。\n"
         "如果 issue 已明确只处理 `phone` 等单一字段，请把改动限制在直接相关的实体、Mapper、必要支撑类和最小验证；不要顺手修改 logback、代码生成器、环境模板或其他无直接关联文件。\n"
         "如果没有产生 git 变更，不要伪造完成结果；必须继续定位原因或明确失败点。"
-    ),
-    "signoff": (
-        "此阶段负责输出最终签收结果。\n"
-        "请基于已有阶段产出进行总结和结论，不要再回头扩展实现或测试范围。\n"
-        "前序阶段产出里可能包含中间态、自修复前描述或已过时结论；如果它们与当前阶段直接读取到的文件内容、"
-        "命令结果或已完成阶段的最终产出冲突，请以当前阶段直接核验到的最新事实为准。\n"
-        "只有在 signoff 阶段再次核验后仍然成立的问题，才可以写入遗留问题或影响最终结论；"
-        "已经被后续修改修复的问题，应标记为已解决，不要继续当作遗留问题。\n"
-        "优先复用 test 阶段已经完成的最终验证结果；除非存在明确缺口，不要重复安装依赖、重跑整套测试，"
-        "也不要让宿主环境差异覆盖已在正确环境中验证通过的结论。"
     ),
 }
 
@@ -434,6 +471,9 @@ def build_user_prompt(ctx: StageContext) -> str:
         suggestion = ctx.retry_context.get("suggestion", "")
         if suggestion:
             parts.append(f"**建议:** {suggestion}")
+        recovery_hint = ctx.retry_context.get("recovery_hint", "")
+        if recovery_hint:
+            parts.append(f"**恢复指引:** {recovery_hint}")
         if prior_output:
             # Truncate to avoid bloating context
             truncated = prior_output[:2000]
