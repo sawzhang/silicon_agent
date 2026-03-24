@@ -381,7 +381,13 @@ class SandboxedAgentRunner(ToolExecutionPolicyMixin, _BaseRunner):  # type: igno
 
     def __init__(self, *args, default_cwd: str | None = None,
                  allowed_tools: set[str] | None = None, **kwargs):
-        super().__init__(*args, **kwargs)
+        try:
+            super().__init__(*args, **kwargs)
+        except TypeError:
+            # Newer skillkit versions use a no-arg __init__; set attrs directly
+            super().__init__()
+            for k, v in kwargs.items():
+                setattr(self, k, v)
         self.default_cwd = default_cwd
         self.allowed_tools = allowed_tools or _ALL_TOOLS
         self._tool_argument_hints = _TOOL_ARGUMENT_HINTS
