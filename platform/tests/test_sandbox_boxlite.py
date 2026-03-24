@@ -10,8 +10,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 # ---------------------------------------------------------------------------
-# Mock boxlite SDK AND skillkit.runtime.boxlite so they can be imported
-# even when the BoxLite SDK is not installed.
+# Mock boxlite SDK and the entire skillkit runtime tree so these tests do not
+# depend on the installed skillkit package shape during collection.
 # ---------------------------------------------------------------------------
 
 if "boxlite" not in sys.modules:
@@ -23,24 +23,35 @@ if "boxlite" not in sys.modules:
     _mock_boxlite.Execution = MagicMock  # type: ignore[attr-defined]
     sys.modules["boxlite"] = _mock_boxlite
 
-# Create a stub skillkit.runtime.boxlite module if it doesn't exist
+if "skillkit" not in sys.modules:
+    _stub_skillkit_mod = types.ModuleType("skillkit")
+    _stub_skillkit_mod.AgentConfig = MagicMock  # type: ignore[attr-defined]
+    _stub_skillkit_mod.SkillsConfig = MagicMock  # type: ignore[attr-defined]
+    _stub_skillkit_mod.SkillsEngine = MagicMock  # type: ignore[attr-defined]
+    sys.modules["skillkit"] = _stub_skillkit_mod
+
+if "skillkit.runtime" not in sys.modules:
+    _stub_runtime_mod = types.ModuleType("skillkit.runtime")
+    sys.modules["skillkit.runtime"] = _stub_runtime_mod
+    sys.modules["skillkit"].runtime = _stub_runtime_mod  # type: ignore[attr-defined]
+
 if "skillkit.runtime.boxlite" not in sys.modules:
     _stub_boxlite_mod = types.ModuleType("skillkit.runtime.boxlite")
     _stub_boxlite_mod.BoxLiteRuntime = MagicMock  # type: ignore[attr-defined]
     _stub_boxlite_mod.SecurityLevel = MagicMock  # type: ignore[attr-defined]
     sys.modules["skillkit.runtime.boxlite"] = _stub_boxlite_mod
-    # Also make it accessible via attribute on the parent module
-    import skillkit.runtime as _rt_mod  # noqa: E402
-    _rt_mod.boxlite = _stub_boxlite_mod  # type: ignore[attr-defined]
+    sys.modules["skillkit.runtime"].boxlite = _stub_boxlite_mod  # type: ignore[attr-defined]
 
 # Now we can also stub skillkit.sandbox.runner for execute_stage tests
 if "skillkit.sandbox" not in sys.modules:
     _stub_sandbox_mod = types.ModuleType("skillkit.sandbox")
     sys.modules["skillkit.sandbox"] = _stub_sandbox_mod
+    sys.modules["skillkit"].sandbox = _stub_sandbox_mod  # type: ignore[attr-defined]
 if "skillkit.sandbox.runner" not in sys.modules:
     _stub_runner_mod = types.ModuleType("skillkit.sandbox.runner")
     _stub_runner_mod.SandboxedAgentRunner = MagicMock  # type: ignore[attr-defined]
     sys.modules["skillkit.sandbox.runner"] = _stub_runner_mod
+    sys.modules["skillkit.sandbox"].runner = _stub_runner_mod  # type: ignore[attr-defined]
 
 from app.worker.sandbox_boxlite import BoxLiteSandboxBackend, _register_event_bridge  # noqa: E402
 
