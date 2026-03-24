@@ -30,7 +30,13 @@ if "skillkit.runtime.boxlite" not in sys.modules:
     _stub_boxlite_mod.SecurityLevel = MagicMock  # type: ignore[attr-defined]
     sys.modules["skillkit.runtime.boxlite"] = _stub_boxlite_mod
     # Also make it accessible via attribute on the parent module
-    import skillkit.runtime as _rt_mod  # noqa: E402
+    try:
+        import skillkit.runtime as _rt_mod  # noqa: E402
+    except (ImportError, AttributeError):
+        # skillkit may have breaking changes; create a stub runtime module
+        _stub_runtime = types.ModuleType("skillkit.runtime")
+        sys.modules["skillkit.runtime"] = _stub_runtime
+        _rt_mod = _stub_runtime
     _rt_mod.boxlite = _stub_boxlite_mod  # type: ignore[attr-defined]
 
 # Now we can also stub skillkit.sandbox.runner for execute_stage tests
