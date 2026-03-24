@@ -1,67 +1,95 @@
-# Silicon Agent Platform
+# Silicon Agent
+
+**Multi-agent platform that turns LLMs into a software engineering team.**
+
+Define roles, wire a pipeline, add human gates — ship code with AI agents that spec, code, test, review, and document automatically.
 
 [![CI](https://github.com/sawzhang/silicon_agent/actions/workflows/ci.yml/badge.svg)](https://github.com/sawzhang/silicon_agent/actions/workflows/ci.yml)
 [![E2E Smoke Test](https://github.com/sawzhang/silicon_agent/actions/workflows/e2e.yml/badge.svg)](https://github.com/sawzhang/silicon_agent/actions/workflows/e2e.yml)
+[![Python](https://img.shields.io/badge/python-3.11+-blue)]()
+[![License](https://img.shields.io/badge/license-proprietary-lightgrey)]()
 
-硅基数字员工集群管理平台 — 基于 LLM 驱动的多 Agent 协作软件研发系统。
+## The Problem
 
-## 架构概览
+Copilot autocompletes lines. ChatGPT answers questions. But neither can **own a task end-to-end** — from requirement to spec to code to test to review to deployment.
+
+Real software delivery needs multiple specialists collaborating in a structured process with human oversight at critical points. Single-agent tools can't do this.
+
+## The Solution
+
+Silicon Agent is a **multi-agent orchestration platform** where each AI agent has a defined role in the software delivery lifecycle. They collaborate through a pipeline with built-in human approval gates, cost controls, and project memory.
+
+```
+Task In → Orchestrator → Spec Agent → Coding Agent → Test Agent → Review Agent → Smoke Agent → Doc Agent → Done
+                              ↑              ↑              ↑
+                          [Human Gate]   [Human Gate]   [Human Gate]
+```
+
+**7 specialized agents**, one pipeline, full human control.
+
+## What You Get
+
+### Multi-Agent Pipeline
+- **7 roles**: orchestrator, spec, coding, test, review, smoke, doc — each with specialized skills and prompts
+- **Automatic stage sequencing**: parse → spec → coding → test → review → smoke → doc
+- **Checkpoint resume**: failed tasks restart from the failure point, completed stages are skipped
+- **Per-role sandbox isolation**: each agent runs in its own sandbox with configurable resource limits
+
+### Human-in-the-Loop
+- **Approval gates** at critical stages — approve, reject, or redirect with comments
+- **Real-time WebSocket** push for agent status, task progress, and gate notifications
+- **Audit trail** for every agent action, LLM call, and human decision
+
+### Production Safety
+- **Circuit breaker**: auto-halt when token/cost limits are exceeded per task
+- **KPI & ROI dashboard**: token usage, cost analysis, efficiency metrics, trend tracking
+- **Project memory**: cross-task context accumulation — agents learn from previous tasks in the same project
+- **LLM fallback**: tool calling failure auto-degrades to plain text mode
+
+### Full-Stack Platform
+- **Backend**: FastAPI + SQLAlchemy 2.0 (async) + WebSocket
+- **Frontend**: React 18 + TypeScript + Ant Design + Zustand
+- **12 dashboard pages**: Cockpit, Tasks, Gates, Skills, KPI, ROI, Audit, Config, and more
+- **113 tests** passing (integration + unit)
+
+## Architecture
 
 ```
 silicon_agent/
-├── platform/          # 后端 — FastAPI + SQLAlchemy + AsyncIO
+├── platform/              # Backend — FastAPI + SQLAlchemy + AsyncIO
 │   ├── app/
-│   │   ├── api/v1/    # REST API (tasks, gates, skills, projects, kpi, audit...)
-│   │   ├── worker/    # Agent Worker 引擎 (engine → executor → agents)
-│   │   ├── models/    # SQLAlchemy ORM 模型
-│   │   ├── services/  # 业务逻辑层
-│   │   ├── schemas/   # Pydantic 请求/响应模型
-│   │   ├── websocket/ # 实时事件广播
-│   │   └── middleware/ # Auth, 错误处理, 请求日志
-│   ├── skills/        # Agent 技能定义 (per-role)
-│   ├── memory/        # 项目记忆存储
-│   ├── tests/         # 113 个集成/单元测试
-│   └── alembic/       # 数据库迁移
-├── web/               # 前端 — React + TypeScript + Ant Design
-│   └── src/
-│       ├── pages/     # Dashboard, Cockpit, Tasks, TaskLogs, Gates, Skills, KPI, ROI...
-│       ├── hooks/     # React Query hooks
-│       ├── services/  # API 调用层
-│       └── stores/    # Zustand 状态管理
-├── docs/              # 设计文档与分析
-│   ├── design/        # 系统设计方案、战略白皮书
-│   └── media/         # PDF/视频资料 (不纳入版本控制)
-└── .github/workflows/ # CI 配置
+│   │   ├── api/v1/        # REST API (tasks, gates, skills, projects, kpi, audit...)
+│   │   ├── worker/        # Agent Worker engine
+│   │   │   ├── engine.py      # Pipeline orchestration
+│   │   │   ├── executor.py    # Stage execution
+│   │   │   ├── agents.py      # Role-based agent factory
+│   │   │   ├── sandbox.py     # Per-role sandbox isolation
+│   │   │   ├── memory.py      # Project memory system
+│   │   │   └── gate_orchestrator.py  # Human approval flow
+│   │   ├── models/        # SQLAlchemy ORM
+│   │   ├── services/      # Business logic
+│   │   └── websocket/     # Real-time event broadcast
+│   └── tests/             # 113 tests
+├── web/                   # Frontend — React + TypeScript + Ant Design
+│   └── src/pages/         # Dashboard, Cockpit, Tasks, Gates, Skills, KPI, ROI...
+├── skills/                # Agent skill definitions (per-role)
+└── docs/design/           # Strategy whitepapers & architecture docs
 ```
 
-## 核心功能
+## Quick Start
 
-- **多角色 Agent 协作**：orchestrator / spec / coding / test / review / smoke / doc 七个角色按流水线协作
-- **任务流水线引擎**：自动编排 parse → spec → coding → test → review → smoke → doc 阶段
-- **断点续跑**：任务失败后可从失败阶段重试，已完成阶段自动跳过
-- **人工审批门控 (Gate)**：关键阶段插入 human-in-the-loop 审批，支持 approve/reject
-- **LLM 兼容性**：支持 OpenAI / MiniMax / 其他兼容 API，tool calling 失败自动降级纯文本模式
-- **实时状态推送**：WebSocket 推送 Agent 状态、任务进度、Gate 通知
-- **任务日志查询**：侧边栏”任务日志”页面，支持按 `task` 必填、`project`/`stage` 可选筛选，统一查看 LLM 与 tool call 日志
-- **KPI / ROI 监控**：Token 用量、成本分析、效率指标
-- **止损熔断**：单任务 Token/成本超限自动触发 Circuit Breaker
-- **项目记忆**：跨任务积累项目上下文，Agent 自动加载相关记忆
-- **Skills 管理**：技能版本控制、回滚、按层级分类
-
-## 快速开始
-
-### 环境要求
+### Requirements
 
 - Python 3.11+
 - Node.js 18+
-- SQLite (默认) 或 PostgreSQL
+- SQLite (default) or PostgreSQL
 
-### 后端启动
+### Backend
 
 ```bash
 cd platform
 cp .env.example .env
-# 编辑 .env 配置 LLM_API_KEY、LLM_BASE_URL（如用 GHE，再配置 GHE_BASE_URL/GHE_USERNAME/GHE_TOKEN）
+# Edit .env: set LLM_API_KEY, LLM_BASE_URL
 
 python -m venv .venv
 source .venv/bin/activate
@@ -70,53 +98,79 @@ pip install -e ".[dev]"
 uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
-### 前端启动
+### Frontend
 
 ```bash
 cd web
 npm install
 npm run dev
-# 访问 http://localhost:3000
+# Open http://localhost:3000
 ```
 
-### 运行测试
+### Tests
 
 ```bash
 cd platform
-source .venv/bin/activate
-pytest tests/ -v
+pytest tests/ -v    # 113 tests
 ```
 
-## 技术栈
+## API Endpoints
 
-| 层级 | 技术 |
-|------|------|
-| 后端框架 | FastAPI + Uvicorn |
+| Module | Path | Description |
+|--------|------|-------------|
+| Tasks | `/api/v1/tasks` | CRUD, batch create, cancel, retry |
+| Gates | `/api/v1/gates` | Approval list, approve/reject |
+| Skills | `/api/v1/skills` | Skill management, versioning, rollback |
+| Projects | `/api/v1/projects` | Project management, repo analysis |
+| Templates | `/api/v1/templates` | Pipeline template management |
+| KPI | `/api/v1/kpi` | Metrics, trends, comparisons |
+| Agents | `/api/v1/agents` | Agent status, configuration |
+| Audit | `/api/v1/audit` | Audit log queries |
+| Task Logs | `/api/v1/task-logs` | LLM & tool call log queries |
+| Circuit Breaker | `/api/v1/circuit-breaker` | Cost control & halt management |
+
+## Agent Roles
+
+| Role | Stage | Responsibility |
+|------|-------|---------------|
+| **Orchestrator** | parse | Break down requirements into actionable tasks |
+| **Spec** | spec | Write technical specifications and acceptance criteria |
+| **Coding** | coding | Implement the solution according to spec |
+| **Test** | test | Write and run tests, verify correctness |
+| **Review** | review | Code review for quality, security, and best practices |
+| **Smoke** | smoke | End-to-end smoke testing in staging environment |
+| **Doc** | doc | Generate documentation and changelogs |
+
+## Tech Stack
+
+| Layer | Technology |
+|-------|-----------|
+| Backend | FastAPI + Uvicorn |
 | ORM | SQLAlchemy 2.0 (async) |
-| 数据库 | SQLite (dev) / PostgreSQL (prod) |
-| Agent 引擎 | SkillKit AgentRunner |
-| LLM | OpenAI 兼容 API (MiniMax M2.5 等) |
-| 前端框架 | React 18 + TypeScript |
-| UI 组件 | Ant Design + ProComponents |
-| 状态管理 | Zustand + React Query |
-| 实时通信 | WebSocket |
+| Database | SQLite (dev) / PostgreSQL (prod) |
+| Agent Engine | SkillKit AgentRunner |
+| LLM | OpenAI-compatible API (MiniMax, GPT, Claude, etc.) |
+| Frontend | React 18 + TypeScript |
+| UI | Ant Design + ProComponents |
+| State | Zustand + React Query |
+| Real-time | WebSocket |
 | CI | GitHub Actions |
 
-## API 端点
+## Roadmap
 
-| 模块 | 路径 | 说明 |
-|------|------|------|
-| Tasks | `/api/v1/tasks` | 任务 CRUD、批量创建、取消、重试 |
-| Gates | `/api/v1/gates` | 审批门控列表、approve/reject |
-| Skills | `/api/v1/skills` | 技能管理、版本、回滚 |
-| Projects | `/api/v1/projects` | 项目管理、仓库分析 |
-| Templates | `/api/v1/templates` | 流水线模板管理 |
-| KPI | `/api/v1/kpi` | 指标汇总、趋势、对比 |
-| Agents | `/api/v1/agents` | Agent 状态、配置 |
-| Audit | `/api/v1/audit` | 审计日志查询 |
-| Task Logs | `/api/v1/task-logs` | 任务日志查询 |
-| Circuit Breaker | `/api/v1/circuit-breaker` | 熔断状态管理 |
+- [ ] Multi-repo support (monorepo and polyrepo project structures)
+- [ ] Agent marketplace (plug-in custom roles and skills)
+- [ ] GitOps integration (auto-create PRs, link to CI/CD)
+- [ ] SaaS mode (multi-tenant, team management, billing)
+- [ ] VS Code / IDE extension for in-editor agent interaction
+
+## Docs
+
+- [Architecture Overview](docs/architecture-overview.html)
+- [SkillKit Integration](docs/skillkit-architecture.html)
+- [QA & CI Architecture](docs/qa-ci-architecture.html)
+- [Context Flow Diagram](docs/context-flow-diagram.html)
 
 ## License
 
-Proprietary - SITC Internal Use
+Proprietary
