@@ -277,10 +277,11 @@ def test_is_tool_call_error_matches_gemini_thought_signature_error():
 
 
 def test_classify_tool_activity_marks_exploration_implementation_and_verification():
-    assert executor._classify_tool_activity('read', {}) == 'exploration'
-    assert executor._classify_tool_activity('edit', {}) == 'implementation'
-    assert executor._classify_tool_activity('execute', {'command': 'find src -name "*.java"'}) == 'exploration'
-    assert executor._classify_tool_activity('execute', {'command': './gradlew test'}) == 'verification'
+    from app.worker.stage_event_tracker import _classify_tool_activity
+    assert _classify_tool_activity('read', {}) == 'exploration'
+    assert _classify_tool_activity('edit', {}) == 'implementation'
+    assert _classify_tool_activity('execute', {'command': 'find src -name "*.java"'}) == 'exploration'
+    assert _classify_tool_activity('execute', {'command': './gradlew test'}) == 'verification'
 
 
 def test_stage_event_tracker_force_convergence_budget_for_code_and_test():

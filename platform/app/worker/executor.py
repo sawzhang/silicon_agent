@@ -18,18 +18,14 @@ from app.models.agent import AgentModel
 from app.models.task import TaskModel, TaskStageModel
 from app.services.task_log_pipeline import get_task_log_pipeline
 from app.websocket.events import AGENT_STATUS_CHANGED, TASK_LOG_STREAM_UPDATE, TASK_STAGE_UPDATE
-from app.websocket.manager import ws_manager
+from app.websocket.manager import ws_manager  # noqa: F401 — accessed by stage_event_tracker._safe_broadcast
 from app.worker.agents import get_agent, get_agent_text_only
 from app.worker.prompts import StageContext, build_user_prompt
 from app.worker.stage_event_tracker import (
     StageEventTracker,
-    _TOOL_FAILURE_PREFIXES,
     _append_output_summary,
-    _classify_tool_activity,
-    _EXPLORATION_EXECUTE_PREFIXES,
     _safe_broadcast,
     _summarize_tool_command,
-    _VERIFICATION_EXECUTE_MARKERS,
     infer_tool_status,
 )
 
