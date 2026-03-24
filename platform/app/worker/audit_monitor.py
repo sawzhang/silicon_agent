@@ -9,7 +9,6 @@ from typing import Any, Optional
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.config import settings
 from app.integration.event_collector import event_collector
 from app.models.audit import CircuitBreakerModel
 from app.models.task import TaskModel, TaskStageModel
