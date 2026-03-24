@@ -26,7 +26,7 @@ const CircuitBreakerPage: React.FC = () => {
         try {
           await Promise.all(
             Object.keys(agents)
-              .filter((role) => agents[role].status !== 'stopped')
+              .filter((role) => agents[role] && agents[role].status !== 'stopped')
               .map((role) => stopAgent(role)),
           );
           message.success('所有 Agent 已停止');
@@ -43,7 +43,7 @@ const CircuitBreakerPage: React.FC = () => {
     try {
       await Promise.all(
         Object.keys(agents)
-          .filter((role) => agents[role].status === 'stopped')
+          .filter((role) => agents[role] && agents[role].status === 'stopped')
           .map((role) => startAgent(role)),
       );
       message.success('所有 Agent 已启动');

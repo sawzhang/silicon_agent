@@ -438,6 +438,75 @@ async def test_execute_stage_uses_text_only_runner_for_signoff(monkeypatch):
     assert text_only_called['value'] is True
 
 
+@pytest.mark.asyncio
+async def test_execute_stage_uses_tool_enabled_runner_for_dispatch_issue(monkeypatch):
+    session = SimpleNamespace(commit=AsyncMock())
+    task = SimpleNamespace(
+        id='task-dispatch-issue-1',
+        title='task title',
+        description='task description',
+        total_tokens=0,
+        total_cost_rmb=0.0,
+    )
+    stage = SimpleNamespace(
+        id='stage-dispatch-issue-1',
+        stage_name='dispatch_issue',
+        agent_role='dispatch issue',
+        status='pending',
+        started_at=None,
+        completed_at=None,
+        duration_seconds=None,
+        tokens_used=0,
+        output_summary=None,
+    )
+
+    fake_pipeline = _FakePipeline()
+    tool_runner_called = {'value': False}
+
+    monkeypatch.setattr(executor, 'get_task_log_pipeline', lambda: fake_pipeline)
+    monkeypatch.setattr(executor, '_get_agent', AsyncMock(return_value=None))
+    monkeypatch.setattr(executor, '_safe_broadcast', AsyncMock())
+    monkeypatch.setattr(executor, 'build_user_prompt', lambda _ctx: 'dispatch prompt')
+
+    def _tool_runner(
+        _role,
+        _task_id,
+        model=None,
+        temperature=None,
+        max_tokens=None,
+        max_turns=None,
+        extra_skill_dirs=None,
+        system_prompt_append=None,
+    ):
+        tool_runner_called['value'] = True
+        return _FakeRunner()
+
+    def _text_only_runner(
+        _role,
+        _task_id,
+        model=None,
+        temperature=None,
+        max_tokens=None,
+        max_turns=None,
+        extra_skill_dirs=None,
+        system_prompt_append=None,
+    ):
+        raise AssertionError('dispatch_issue should not use text-only runner')
+
+    monkeypatch.setattr(executor, 'get_agent', _tool_runner)
+    monkeypatch.setattr(executor, 'get_agent_text_only', _text_only_runner)
+
+    result = await executor.execute_stage(
+        session=session,
+        task=task,
+        stage=stage,
+        prior_outputs=[],
+    )
+
+    assert result == 'stage output'
+    assert tool_runner_called['value'] is True
+
+
 def test_apply_runner_workspace_override_replaces_prompt_and_cwd():
     runner = SimpleNamespace(
         default_cwd='/tmp/old-workspace',

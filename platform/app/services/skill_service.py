@@ -20,6 +20,24 @@ class SkillService:
     def __init__(self, session: AsyncSession):
         self.session = session
 
+    async def _hydrate_skill_content(self, skill: SkillModel) -> SkillModel:
+        if (skill.content or "").strip():
+            return skill
+
+        version_result = await self.session.execute(
+            select(SkillVersionModel)
+            .where(
+                SkillVersionModel.skill_id == skill.id,
+                SkillVersionModel.content.isnot(None),
+            )
+            .order_by(SkillVersionModel.created_at.desc())
+            .limit(1)
+        )
+        latest_version = version_result.scalar_one_or_none()
+        if latest_version and (latest_version.content or "").strip():
+            skill.content = latest_version.content
+        return skill
+
     async def list_skills(
         self,
         page: int = 1,
@@ -100,6 +118,7 @@ class SkillService:
         skill = result.scalar_one_or_none()
         if skill is None:
             return None
+        skill = await self._hydrate_skill_content(skill)
         return SkillDetailResponse.model_validate(skill)
 
     async def update_skill(self, name: str, request: SkillUpdateRequest) -> Optional[SkillDetailResponse]:

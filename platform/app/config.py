@@ -111,6 +111,9 @@ class Settings(BaseSettings):
     GHE_USERNAME: str = ""
     GHE_TOKEN: str = ""
 
+    # App
+    APP_BASE_URL: str = "http://127.0.0.1:3000"
+
     # ROI
     ESTIMATED_HOURS_PER_TASK: float = 8.0
     HOURLY_RATE_RMB: float = 150.0

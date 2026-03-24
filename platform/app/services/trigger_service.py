@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.trigger import TriggerEventModel, TriggerRuleModel
 from app.schemas.task import TaskCreateRequest
 from app.schemas.trigger import MockWebhookRequest, MockWebhookResponse, TriggerRuleResponse
+from app.services.github_comment_commands import parse_silicon_agent_command
 from app.services.task_service import TaskService
 
 logger = logging.getLogger(__name__)
@@ -87,7 +88,14 @@ class TriggerService:
 
             # 3. 创建任务（首条命中，立即返回，不继续评估后续规则）
             title = _render_template(rule.title_template, payload)
-            description = _render_template(rule.desc_template or "", payload) or None
+            rendered_description = _render_template(rule.desc_template or "", payload) or None
+            description = _build_task_description(
+                source=source,
+                event_type=event_type,
+                payload=payload,
+                rendered_description=rendered_description,
+            )
+            github_issue_number = _extract_github_issue_number(source, payload)
 
             task_service = TaskService(self.session)
             task = await task_service.create_task(TaskCreateRequest(
@@ -95,6 +103,7 @@ class TriggerService:
                 description=description,
                 template_id=rule.template_id,
                 project_id=rule.project_id,
+                github_issue_number=github_issue_number,
             ))
 
             await self._log_event(
@@ -444,6 +453,12 @@ def _eval_leaf(node: dict, payload: dict) -> bool:
         )
         return str(author) not in [str(a) for a in (v or [])]
 
+    if t == "field_equals":
+        field = str(node.get("field") or "").strip()
+        if not field:
+            return False
+        return flat.get(field) == v
+
     # 未知类型：放行
     return True
 
@@ -498,6 +513,42 @@ def _build_normalized_payload(request: MockWebhookRequest) -> dict:
 
         if request.event_type.startswith("issues"):
             payload["issue"] = issue_or_pr
+            payload["issue_title"] = request.title
+            payload["issue_body"] = request.body or ""
+            payload["issue_author"] = request.author or "mock-user"
+        elif request.event_type.startswith("issue_comment") or request.event_type.startswith("issue_comment."):
+            issue_body = ""
+            issue_url = ""
+            comment_id = None
+            comment_url = ""
+            if request.extra:
+                issue_body = str(request.extra.get("issue_body") or "")
+                issue_url = str(request.extra.get("issue_url") or "")
+                comment_id = request.extra.get("comment_id")
+                comment_url = str(request.extra.get("comment_url") or "")
+
+            payload["issue"] = {
+                "title": request.title,
+                "body": issue_body,
+                "number": request.number,
+                "html_url": issue_url,
+                "user": {"login": request.author or "mock-user"},
+            }
+            payload["comment"] = {
+                "id": comment_id,
+                "body": request.body or "",
+                "html_url": comment_url,
+                "user": {"login": request.author or "mock-user"},
+            }
+            payload["issue_title"] = request.title
+            payload["issue_body"] = issue_body
+            payload["issue_url"] = issue_url
+            payload["issue_author"] = request.author or "mock-user"
+            payload["comment_id"] = comment_id
+            payload["comment_url"] = comment_url
+            payload["comment_body"] = request.body or ""
+            payload["comment_author"] = request.author or "mock-user"
+            payload.update(parse_silicon_agent_command(request.body or ""))
         elif request.event_type.startswith("pull_request"):
             issue_or_pr["head"] = {"ref": request.ref or "feature-branch"}
             issue_or_pr["base"] = {"ref": "main"}
@@ -637,3 +688,80 @@ def _passes_filters(filters: dict, payload: dict) -> bool:
             return False
 
     return True
+
+
+def _extract_github_issue_number(source: str, payload: dict) -> int | None:
+    """Extract a GitHub issue number from normalized or mock payloads."""
+    if (source or "").strip().lower() != "github":
+        return None
+
+    candidates = [
+        payload.get("issue_number"),
+        payload.get("issue", {}).get("number") if isinstance(payload.get("issue"), dict) else None,
+        payload.get("number"),
+    ]
+    for candidate in candidates:
+        try:
+            if candidate in (None, ""):
+                continue
+            return int(candidate)
+        except (TypeError, ValueError):
+            continue
+    return None
+
+
+def _build_task_description(
+    *,
+    source: str,
+    event_type: str,
+    payload: dict,
+    rendered_description: str | None,
+) -> str | None:
+    """Build a task description, falling back to normalized GitHub issue context."""
+    description = (rendered_description or "").strip()
+    if description:
+        return description
+
+    if (source or "").strip().lower() != "github":
+        return None
+
+    if "issue" not in (event_type or "").lower():
+        return None
+
+    issue_url = str(payload.get("issue_url") or "").strip()
+    repo_full_name = str(payload.get("repo_full_name") or "").strip()
+    issue_author = str(payload.get("issue_author") or payload.get("author") or "").strip()
+    issue_title = str(payload.get("issue_title") or payload.get("title") or "").strip()
+    issue_body = str(payload.get("issue_body") or "").strip()
+    comment_body = str(payload.get("comment_body") or "").strip()
+    comment_url = str(payload.get("comment_url") or "").strip()
+    comment_author = str(payload.get("comment_author") or "").strip()
+    command_style = str(payload.get("silicon_agent_command_style") or "").strip()
+    command_note = str(payload.get("silicon_agent_command_note") or "").strip()
+    issue_number = _extract_github_issue_number(source, payload)
+
+    parts: list[str] = []
+    if issue_number is not None:
+        parts.append(f"Issue Number: {issue_number}")
+    if issue_title:
+        parts.append(f"Issue Title: {issue_title}")
+    if issue_url:
+        parts.append(f"Issue URL: {issue_url}")
+    if repo_full_name:
+        parts.append(f"Repo: {repo_full_name}")
+    if issue_author:
+        parts.append(f"Issue Author: {issue_author}")
+    if issue_body:
+        parts.append(f"Body: {issue_body}")
+    if comment_url:
+        parts.append(f"Comment URL: {comment_url}")
+    if comment_author:
+        parts.append(f"Comment Author: {comment_author}")
+    if comment_body:
+        parts.append(f"Comment Body: {comment_body}")
+    if command_style:
+        parts.append(f"Command Style: {command_style}")
+    if command_note:
+        parts.append(f"Command Note: {command_note}")
+
+    return "\n".join(parts) if parts else None

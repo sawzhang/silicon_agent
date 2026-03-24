@@ -6,6 +6,8 @@ export const AGENT_ROLES = [
   { key: 'review', name: '审计官', color: '#eb2f96' },
   { key: 'smoke', name: '巡检官', color: '#13c2c2' },
   { key: 'doc', name: '文档官', color: '#fa8c16' },
+  { key: 'dispatch issue', name: 'GitHub Issue分发Agent', color: '#2f54eb' },
+  { key: 'des encrypt', name: '安全加密Agent', color: '#389e0d' },
 ] as const;
 
 export const ROLE_DISPLAY_NAMES: Record<string, string> = {
@@ -16,6 +18,8 @@ export const ROLE_DISPLAY_NAMES: Record<string, string> = {
   review: '审计官',
   smoke: '巡检官',
   doc: '文档官',
+  'dispatch issue': 'GitHub Issue分发Agent',
+  'des encrypt': '安全加密Agent',
 };
 
 export const STATUS_COLORS: Record<string, string> = {

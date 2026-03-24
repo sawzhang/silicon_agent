@@ -1,7 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT="/Users/abnzhang/Project/silicon_agent"
+ROOT="/Users/jowang/Documents/github/silicon_agent"
+export PATH="/opt/homebrew/bin:$PATH"
+
+NPM_BIN="$(command -v npm || true)"
+if [ -z "${NPM_BIN:-}" ] && [ -x "/opt/homebrew/bin/npm" ]; then
+  NPM_BIN="/opt/homebrew/bin/npm"
+fi
 
 # cleanup old listeners
 pid8000=$(lsof -tiTCP:8000 -sTCP:LISTEN -n -P || true)
@@ -15,9 +21,9 @@ nohup ./.venv/bin/python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 >/tm
 
 # start frontend
 cd "$ROOT/web"
-nohup env NODE_OPTIONS=--dns-result-order=ipv4first npm run dev -- --host 0.0.0.0 --port 3000 >/tmp/silicon_web_3000.log 2>&1 &
+nohup env NODE_OPTIONS=--dns-result-order=ipv4first "${NPM_BIN}" run dev -- --host 0.0.0.0 --port 3000 >/tmp/silicon_web_3000.log 2>&1 &
 
-sleep 1
+sleep 3
 
 echo "== ports =="
 lsof -nP -iTCP:8000 -sTCP:LISTEN || true

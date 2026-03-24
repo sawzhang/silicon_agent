@@ -12,6 +12,7 @@ from uuid import uuid4
 from app.db.session import async_session_factory
 from app.models.project import ProjectModel
 from app.models.integration import ProjectIntegrationModel
+from app.models.task import TaskModel
 from app.models.trigger import TriggerRuleModel, TriggerEventModel
 from sqlalchemy import delete
 
@@ -153,6 +154,251 @@ async def test_github_project_webhook_no_integration(client):
         },
     )
     assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_github_issue_project_webhook_persists_issue_metadata(client):
+    name = _unique_name()
+    resp = await client.post("/api/v1/projects", json={
+        "name": name,
+        "display_name": f"Display {name}",
+    })
+    assert resp.status_code == 201
+    project = resp.json()
+    pid = project["id"]
+
+    resp = await client.post(f"/api/v1/projects/{pid}/integrations", json={
+        "provider": "github",
+    })
+    assert resp.status_code == 201
+    integration = resp.json()
+    secret = integration["webhook_secret"]
+
+    async with async_session_factory() as session:
+        rule = TriggerRuleModel(
+            name="test-github-issue-rule",
+            source="github",
+            event_type="issue_opened",
+            project_id=pid,
+            title_template="Issue: {issue_title}",
+            template_id=None,
+            enabled=True,
+        )
+        session.add(rule)
+        await session.commit()
+
+    payload = {
+        "action": "opened",
+        "issue": {
+            "number": 13,
+            "title": "安全加密",
+            "body": "安全加密agent，对本项目的phone字段进行安全加密",
+            "html_url": "https://scm.starbucks.com/china/starbucks-asg-api/issues/13",
+            "user": {"login": "jowang"},
+            "labels": [],
+        },
+        "repository": {"name": "starbucks-asg-api", "full_name": "china/starbucks-asg-api"},
+        "sender": {"login": "jowang"},
+    }
+    body = json.dumps(payload).encode()
+    signature = _github_signature(body, secret)
+
+    resp = await client.post(
+        f"/webhooks/github/{pid}",
+        content=body,
+        headers={
+            "X-GitHub-Event": "issues",
+            "X-Hub-Signature-256": signature,
+            "Content-Type": "application/json",
+        },
+    )
+    assert resp.status_code == 200
+    task_id = resp.json()["task_id"]
+    assert task_id is not None
+
+    task_resp = await client.get(f"/api/v1/tasks/{task_id}")
+    assert task_resp.status_code == 200
+    task_data = task_resp.json()
+    assert task_data["github_issue_number"] == 13
+    assert "china/starbucks-asg-api" in (task_data["description"] or "")
+    assert "https://scm.starbucks.com/china/starbucks-asg-api/issues/13" in (task_data["description"] or "")
+    assert "phone字段进行安全加密" in (task_data["description"] or "")
+
+    async with async_session_factory() as session:
+        await session.execute(
+            delete(TriggerEventModel).where(TriggerEventModel.project_id == pid)
+        )
+        await session.execute(
+            delete(TriggerRuleModel).where(TriggerRuleModel.project_id == pid)
+        )
+        await session.execute(
+            delete(ProjectIntegrationModel).where(
+                ProjectIntegrationModel.project_id == pid
+            )
+        )
+        task = await session.get(TaskModel, task_id)
+        if task:
+            await session.delete(task)
+        proj = await session.get(ProjectModel, pid)
+        if proj:
+            await session.delete(proj)
+        await session.commit()
+
+
+def test_normalize_github_issue_comment_payload_extracts_silicon_agent_command():
+    from app.api.webhooks.github import _normalize_github_payload
+
+    payload = {
+        "action": "created",
+        "issue": {
+            "number": 13,
+            "title": "安全加密",
+            "body": "安全加密agent，对本项目的phone字段进行安全加密",
+            "html_url": "https://scm.starbucks.com/china/starbucks-asg-api/issues/13",
+            "user": {"login": "issue-owner"},
+        },
+        "comment": {
+            "id": 1001,
+            "body": "/silicon_agent 只处理 phone 字段",
+            "html_url": "https://scm.starbucks.com/china/starbucks-asg-api/issues/13#issuecomment-1001",
+            "user": {"login": "commenter"},
+        },
+        "repository": {"name": "starbucks-asg-api", "full_name": "china/starbucks-asg-api"},
+        "sender": {"login": "commenter"},
+    }
+
+    normalized = _normalize_github_payload("issue_comment", "issue_comment_created", payload)
+
+    assert normalized["issue_number"] == 13
+    assert normalized["issue_title"] == "安全加密"
+    assert normalized["issue_url"].endswith("/issues/13")
+    assert normalized["issue_body"] == "安全加密agent，对本项目的phone字段进行安全加密"
+    assert normalized["issue_author"] == "issue-owner"
+    assert normalized["comment_id"] == 1001
+    assert normalized["comment_author"] == "commenter"
+    assert normalized["comment_body"] == "/silicon_agent 只处理 phone 字段"
+    assert normalized["silicon_agent_command_triggered"] is True
+    assert normalized["silicon_agent_command_style"] == "slash"
+    assert normalized["silicon_agent_command_text"] == "/silicon_agent"
+    assert normalized["silicon_agent_command_note"] == "只处理 phone 字段"
+
+
+@pytest.mark.asyncio
+async def test_github_issue_comment_project_webhook_triggers_command_rule(client):
+    name = _unique_name()
+    resp = await client.post("/api/v1/projects", json={
+        "name": name,
+        "display_name": f"Display {name}",
+    })
+    assert resp.status_code == 201
+    project = resp.json()
+    pid = project["id"]
+
+    resp = await client.post(f"/api/v1/projects/{pid}/integrations", json={
+        "provider": "github",
+    })
+    assert resp.status_code == 201
+    integration = resp.json()
+    secret = integration["webhook_secret"]
+
+    async with async_session_factory() as session:
+        rule = TriggerRuleModel(
+            name="test-github-issue-comment-rule",
+            source="github",
+            event_type="issue_comment_created",
+            project_id=pid,
+            title_template="Issue Command: {issue_title}",
+            dedup_key_template="github:{repo_full_name}:issue_comment:{comment_id}",
+            filters={
+                "op": "and",
+                "conditions": [
+                    {
+                        "type": "field_equals",
+                        "field": "silicon_agent_command_triggered",
+                        "value": True,
+                    }
+                ],
+            },
+            enabled=True,
+        )
+        session.add(rule)
+        await session.commit()
+
+    payload = {
+        "action": "created",
+        "issue": {
+            "number": 13,
+            "title": "安全加密",
+            "body": "安全加密agent，对本项目的phone字段进行安全加密",
+            "html_url": "https://scm.starbucks.com/china/starbucks-asg-api/issues/13",
+            "user": {"login": "issue-owner"},
+        },
+        "comment": {
+            "id": 1001,
+            "body": "@silicon_agent 只处理 phone 字段",
+            "html_url": "https://scm.starbucks.com/china/starbucks-asg-api/issues/13#issuecomment-1001",
+            "user": {"login": "commenter"},
+        },
+        "repository": {"name": "starbucks-asg-api", "full_name": "china/starbucks-asg-api"},
+        "sender": {"login": "commenter"},
+    }
+    body = json.dumps(payload).encode()
+    signature = _github_signature(body, secret)
+
+    resp = await client.post(
+        f"/webhooks/github/{pid}",
+        content=body,
+        headers={
+            "X-GitHub-Event": "issue_comment",
+            "X-Hub-Signature-256": signature,
+            "Content-Type": "application/json",
+        },
+    )
+    assert resp.status_code == 200
+    task_id = resp.json()["task_id"]
+    assert task_id is not None
+
+    task_resp = await client.get(f"/api/v1/tasks/{task_id}")
+    assert task_resp.status_code == 200
+    task_data = task_resp.json()
+    assert task_data["github_issue_number"] == 13
+    assert "Issue URL: https://scm.starbucks.com/china/starbucks-asg-api/issues/13" in (task_data["description"] or "")
+    assert "Body: 安全加密agent，对本项目的phone字段进行安全加密" in (task_data["description"] or "")
+    assert "Comment Body: @silicon_agent 只处理 phone 字段" in (task_data["description"] or "")
+    assert "Command Style: mention" in (task_data["description"] or "")
+    assert "Command Note: 只处理 phone 字段" in (task_data["description"] or "")
+
+    second_resp = await client.post(
+        f"/webhooks/github/{pid}",
+        content=body,
+        headers={
+            "X-GitHub-Event": "issue_comment",
+            "X-Hub-Signature-256": signature,
+            "Content-Type": "application/json",
+        },
+    )
+    assert second_resp.status_code == 200
+    assert second_resp.json()["task_id"] is None
+
+    async with async_session_factory() as session:
+        await session.execute(
+            delete(TriggerEventModel).where(TriggerEventModel.project_id == pid)
+        )
+        await session.execute(
+            delete(TriggerRuleModel).where(TriggerRuleModel.project_id == pid)
+        )
+        await session.execute(
+            delete(ProjectIntegrationModel).where(
+                ProjectIntegrationModel.project_id == pid
+            )
+        )
+        task = await session.get(TaskModel, task_id)
+        if task:
+            await session.delete(task)
+        proj = await session.get(ProjectModel, pid)
+        if proj:
+            await session.delete(proj)
+        await session.commit()
 
 
 # ── Jira project-level webhook ────────────────────────────────

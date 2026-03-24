@@ -5,7 +5,6 @@ import asyncio
 import logging
 import time
 import uuid
-from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 from sqlalchemy.ext.asyncio import AsyncSession

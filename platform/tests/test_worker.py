@@ -156,6 +156,18 @@ class TestBuildStagePreflightSummary:
         assert "推荐最小验证命令: ./mvnw test" in result
         assert "HelloControllerTest.java" in result
 
+    def test_build_stage_preflight_summary_for_des_encrypt(self, tmp_path: Path):
+        (tmp_path / "build.gradle").write_text("plugins {}", encoding="utf-8")
+        (tmp_path / "src/main/java/demo/controller").mkdir(parents=True)
+        (tmp_path / "src/main/java/demo/controller/HelloController.java").write_text("class X {}", encoding="utf-8")
+
+        result = _build_stage_preflight_summary("des encrypt", str(tmp_path))
+
+        assert result is not None
+        assert "当前工作区" in result
+        assert "不要再次 git clone" in result
+        assert "推荐修改落点" in result
+
     def test_build_stage_preflight_summary_prioritizes_controller_tests(self, tmp_path: Path):
         (tmp_path / "build.gradle").write_text("plugins {}", encoding="utf-8")
         (tmp_path / "src/test/java/demo/sdk").mkdir(parents=True)

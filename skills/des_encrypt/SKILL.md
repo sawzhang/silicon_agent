@@ -1,0 +1,212 @@
+# DES 安全加密接入 Skill
+
+为 Spring Boot + MyBatis 项目接入国安 DES (Data Encryption Service) 加密服务，对数据库中的敏感字段（手机号、邮箱等）进行 SM4/GCM 加密存储。
+
+---
+
+## 使用方式
+
+```
+/des-encrypt
+```
+
+执行后 Claude 会引导你完成以下流程。你只需回答几个问题即可。
+
+---
+
+## 前置条件
+
+- Spring Boot 项目（2.x 或 3.x），使用 MyBatis XML Mapper
+- 已从 DES 团队获取：quickapi-client-java JAR 包、密钥 ID、加密服务 IP、证书文件
+- 已明确需要加密的表和字段
+
+---
+
+## 执行流程
+
+### Step 1：收集信息
+
+请用户提供以下信息（若未提供则逐一询问）：
+
+1. **需要加密的表和字段**，格式如：
+   - `表名: 字段1, 字段2`
+   - 例：`alipay_refund: phone`、`alipay_receipt: phone, email`
+2. **密钥 ID**（DES 平台申请的 keyId，如 `o2oomsorder`、`asg-api`）
+3. **加密 JAR 包路径**（quickapi-client-java-*.jar 的位置）
+4. **加密服务 IP**（至少一个，最多两个双机）
+5. **项目构建工具**（Gradle 或 Maven）
+
+### Step 2：实施改造
+
+按以下顺序自动完成代码改造：
+
+#### 2.1 引入依赖
+
+**Gradle：**
+```groovy
+implementation files('lib/quickapi-client-java-x.x.x-SNAPSHOT-shaded.jar')
+```
+
+**Maven：**
+```xml
+<dependency>
+    <groupId>org.quickssl</groupId>
+    <artifactId>quickapi-client-java</artifactId>
+    <version>x.x.x-SNAPSHOT</version>
+    <scope>system</scope>
+    <systemPath>${pom.basedir}/lib/quickapi-client-java-x.x.x-SNAPSHOT-shaded.jar</systemPath>
+</dependency>
+```
+
+#### 2.2 创建加密包 `{basePackage}.encryption`
+
+**EncryptionComponent.java** — 加密服务初始化：
+```java
+@Slf4j
+@Component
+@RefreshScope
+public class EncryptionComponent {
+
+    @Value("${encryption.server.ip1}")
+    private String encryptionServerIp1;
+    @Value("${encryption.server.ip2}")
+    private String encryptionServerIp2;
+
+    @PostConstruct
+    public void init() {
+        log.info("--------加密组件初始化开始--------");
+        try {
+            LoadingKeyCacheWithLocalFile kekDekLoader = new LoadingKeyCacheWithLocalFile()
+                .setLocalKekPath("/opt/sec-kek/{keyId}.kek")
+                .setLocalDekPath("/opt/sec-dek/{keyId}.dek");
+            CryptoClient.Config config = CryptoClient.Config.newBuilder()
+                .setSocket(encryptionServerIp1, encryptionServerIp2)
+                .setAuthority("quickservice")
+                .setCaCertFile("/opt/sec-cert/cacert.pem")
+                .setKeyStoreFile("/opt/sec-cert/client.pfx")
+                .enableKeyCache(10, 100, 2592000)
+                .setDekCacheLoader(kekDekLoader)
+                .setKekCacheLoader(kekDekLoader)
+                .build();
+            CryptoHelper.initConfig(config);
+        } catch (CryptoClient.CryptoException e) {
+            throw new RuntimeException(e);
+        }
+        log.info("--------加密组件初始化完成--------");
+    }
+}
+```
+
+**EncryptionUtils.java** — 加解密工具类（3 个静态方法）：
+- `encodeData(String plaintext)` — SM4/GCM PB 格式加密，返回 Base64；失败返回原文
+- `deocdeData(String encodeData)` — 解密；先 isEncode 检查，非密文直接返回（兼容明文数据）
+- `isEncode(String encodeData)` — 判断是否为 PB 格式密文
+
+关键实现：
+```java
+// 加密：使用 PB 格式（优先），解密时无需传密钥/IV
+byte[] pbEnBytes = CryptoHelper.symmEncryptEx(KEYID, SymAlg.QK_SGD_SM4_GCM, plaintext.getBytes());
+return new String(Base64.getEncoder().encode(pbEnBytes), StandardCharsets.UTF_8);
+
+// 解密：PB 格式可自动还原
+byte[] pbDeBytes = CryptoHelper.symmDecrypt("", Base64.getDecoder().decode(encodeData));
+return new String(pbDeBytes, StandardCharsets.UTF_8);
+```
+
+**EncryptionFieldHelper.java** — 写入归一化（受 `encryption.switch` 开关控制）：
+- 开关 false：不填充加密字段，保持原有行为
+- 开关 true：将明文字段值复制到 `_encrypt` 字段（TypeHandler 负责实际加密）
+
+```java
+@Component
+@RefreshScope
+public class EncryptionFieldHelper {
+    @Value("${encryption.switch:false}")
+    private boolean encryptionSwitch;
+
+    public void normalizeForWrite(Entity entity) {
+        if (!encryptionSwitch) return;
+        if (StringUtils.isNotEmpty(entity.getPhone())) {
+            entity.setPhoneEncrypt(entity.getPhone());  // TypeHandler 负责加密
+        }
+    }
+}
+```
+
+#### 2.3 创建 TypeHandler
+
+**EncryptionTypeHandler.java** — 继承 `BaseTypeHandler<String>`：
+- 写入时自动加密（`EncryptionUtils.encodeData`）
+- 读取时自动解密（`EncryptionUtils.deocdeData`）
+- **禁止** `@MappedTypes(String.class)`，必须在 Mapper XML 中显式绑定到 `_encrypt` 列
+
+#### 2.4 实体类新增字段
+
+每个加密字段新增对应的 `{field}Encrypt` 属性。
+
+#### 2.5 Mapper XML 改造
+
+**ResultMap** — 新增 `_encrypt` 列映射，绑定 TypeHandler：
+```xml
+<result column="phone_encrypt" jdbcType="VARCHAR" property="phoneEncrypt"
+        typeHandler="{basePackage}.repository.handler.EncryptionTypeHandler" />
+```
+
+**SELECT** — column list 追加 `_encrypt` 列，WHERE 条件不变：
+```xml
+select ..., phone, phone_encrypt, ... from table
+```
+
+**INSERT/UPDATE** — 追加 `_encrypt` 列，使用 TypeHandler：
+```xml
+<if test="phoneEncrypt != null">
+  phone_encrypt = #{phoneEncrypt, typeHandler=...EncryptionTypeHandler},
+</if>
+```
+
+#### 2.6 Service 层接入
+
+在所有 insert/update 调用前，加入 `encryptionFieldHelper.normalizeXxxForWrite(entity)`。
+
+#### 2.7 配置文件
+
+各环境 bootstrap 配置添加：
+```yaml
+encryption:
+  switch: false   # 灰度期间默认 false，Nacos 动态切换
+  server:
+    ip1: {加密服务IP1}
+    ip2: {加密服务IP2}
+```
+
+### Step 3：生成 DDL
+
+自动生成 SQL 文件（存放在 `docs/des_encrypt_columns.sql`），格式：
+```sql
+ALTER TABLE `{table}`
+  ADD COLUMN `{field}_encrypt` VARCHAR(512) DEFAULT NULL COMMENT '{字段描述}密文' AFTER `{field}`;
+```
+
+### Step 4：输出待办清单
+
+完成后输出后续待办：
+1. 确认 KEYID、生产环境 IP、证书/密钥文件部署
+2. 各环境执行 DDL
+3. 部署代码（switch=false），验证无回归
+4. 存量数据回刷（使用 DES 回刷工具）
+5. Nacos 切换 `encryption.switch=true`
+
+---
+
+## 设计原则
+
+- **最小改动**：不引入全局拦截器，不修改现有表结构，只新增列
+- **保留明文列**：迁移期间原字段不动，确保可回滚
+- **单开关控制**：`encryption.switch` 一个开关管读写，Nacos 动态生效
+- **TypeHandler 显式绑定**：仅作用于 `_encrypt` 列，不影响其他 String 字段
+- **加密失败兜底**：`encodeData` 加密异常时返回原文，不阻断业务
+
+## 参考实现
+
+- OMS 项目：`oms-base-service/order_data_manager/src/main/java/com/freemud/encryption/`
+- enc-test 项目：`/Users/jowang/Desktop/enc-test/`

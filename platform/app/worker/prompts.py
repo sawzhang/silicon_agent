@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Optional
 
-_EXECUTION_STAGE_NAMES = {"code", "coding", "test"}
+_EXECUTION_STAGE_NAMES = {"code", "coding", "test", "des encrypt"}
 _EXECUTION_MEMORY_LIMIT = 320
 _EXECUTION_REPO_HINT_LIMIT = 720
 _EXECUTION_PRIOR_LIMITS = {
@@ -29,8 +29,6 @@ _REPO_SECTION_PATTERN = re.compile(r"^###\s+(?P<title>[^\n]+)\n", re.MULTILINE)
 # ---------------------------------------------------------------------------
 
 _PROMPTS_DIR = Path(__file__).parent / "prompts"
-
-
 def _load_prompt(filename: str, fallback: str = "") -> str:
     """Load a prompt from an external .md file, falling back to *fallback*."""
     path = _PROMPTS_DIR / filename
@@ -86,6 +84,18 @@ SYSTEM_PROMPTS: Dict[str, str] = {
         "你是一个文档生成Agent，负责编写技术文档。"
         "你需要生成：API文档、使用说明、变更日志和架构说明。"
         "文档应清晰、准确、易于理解，面向开发者和使用者。",
+    ),
+    "dispatch issue": (
+        "你是 GitHub Issue 分发 Agent，负责理解 Issue 内容并将任务分发给对应的执行 Agent。\n"
+        "开始工作前，你必须先调用 `skill` 工具加载 `github_dispatch_issue` skill，然后严格按照 skill 内容执行。\n"
+        "你只负责分析和分发，不直接修改任何代码。\n"
+        "输出只包含纯 JSON，不要在 JSON 前后附加任何自然语言叙述或「发往下一阶段」的指令文本。\n"
+    ),
+    "des encrypt": (
+        "你是安全加密 Agent，负责对数据库的某个字段进行安全加密改造，并在完成后将结果回帖到 GitHub Issue。\n"
+        "开始工作前，你必须先调用 `skill` 工具分别加载 `des_encrypt` 和 `github_issue_feedback` 两个 skill，然后严格按顺序完成：\n"
+        "1. **按照 `des_encrypt` skill 执行代码改造**：完成加密代码修改，提交并推送到远端新分支。\n"
+        "2. **按照 `github_issue_feedback` skill 回帖**：Push 完成后，用 curl 将分支名和任务地址贴回原始 GitHub Issue。\n"
     ),
 }
 
@@ -175,6 +185,21 @@ STAGE_INSTRUCTIONS: Dict[str, str] = {
         "4. 遗留问题清单（如有）\n"
         "5. 最终签收结论",
     ),
+    "dispatch_issue": (
+        "先调用 `skill` 工具加载 `github_dispatch_issue`，然后严格按照 skill 内容完成分发。\n"
+        "只输出 skill 中定义的 JSON Schema 结构化结果（纯 JSON，无 markdown 代码块标记），"
+        "不要在 JSON 前后附加自然语言总结或对下一阶段的指令。\n"
+        "不得直接修改任何代码，只负责分析和分发。"
+    ),
+    "des encrypt": (
+        "接手 dispatch issue 传来的上下文。\n"
+        "**第一步（必须）**：立即连续调用两次 `skill` 工具，分别加载 `des_encrypt` 和 `github_issue_feedback`。\n"
+        "然后按顺序完成：\n"
+        "1. **Coding**：严格按照 `des_encrypt` skill 执行代码改造。目标仓库已在当前 workspace 根目录检出，"
+        "直接在此读写、commit、push，不要 `git clone` 到子目录。"
+        "提交前先执行 `git status --short` 确认改动在同一仓库。\n"
+        "2. **回帖**：Push 完成后，严格按照 `github_issue_feedback` skill，用 curl 将分支名和任务地址回帖到原始 GitHub Issue。\n"
+    ),
 }
 
 
@@ -208,6 +233,14 @@ STAGE_GUARDRAILS: Dict[str, str] = {
         "已经被后续修改修复的问题，应标记为已解决，不要继续当作遗留问题。\n"
         "优先复用 test 阶段已经完成的最终验证结果；除非存在明确缺口，不要重复安装依赖、重跑整套测试，"
         "也不要让宿主环境差异覆盖已在正确环境中验证通过的结论。",
+    ),
+    "des encrypt": (
+        "只完成当前阶段，不要提前执行后续阶段任务。\n"
+        "当前 task workspace 根目录已经是可提交的目标仓库，请直接在这里修改、提交和推送。\n"
+        "禁止再次 `git clone` 到子目录，也不要把 read/write/edit/commit 分散到两个不同仓库路径。\n"
+        "开始提交前必须先在当前 workspace 根目录执行 `git status --short`，确认改动出现在同一个仓库。\n"
+        "如果 issue 已明确只处理 `phone` 等单一字段，请把改动限制在直接相关的实体、Mapper、必要支撑类和最小验证；不要顺手修改 logback、代码生成器、环境模板或其他无直接关联文件。\n"
+        "如果没有产生 git 变更，不要伪造完成结果；必须继续定位原因或明确失败点。"
     ),
 }
 

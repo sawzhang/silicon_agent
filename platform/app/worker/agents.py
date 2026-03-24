@@ -1,9 +1,12 @@
 """Agent pool: create and cache SandboxedAgentRunner instances per (role, task_id)."""
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
+import os
 import tempfile
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
@@ -26,6 +29,7 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 _agents: dict[str, AgentRunner] = {}
+_TOOL_ENV_LOCK = asyncio.Lock()
 
 # Roles that need more turns for deep exploration / code generation
 _MAX_TURNS: dict[str, int] = {
@@ -33,18 +37,22 @@ _MAX_TURNS: dict[str, int] = {
     "coding": 8,
     "doc": 5,
     "test": 8,
+    "dispatch issue": 5,
+    "des encrypt": 15,
 }
 _DEFAULT_MAX_TURNS = 5
 
 # Per-role tool whitelist (SkillKit built-in: read, write, edit, execute, execute_script, skill)
 ROLE_TOOLS: dict[str, set[str]] = {
     "orchestrator": {"read", "execute", "skill"},
-    "spec":         {"read", "write", "edit", "skill"},
-    "coding":       {"read", "write", "edit", "execute", "execute_script"},
-    "test":         {"read", "write", "edit", "execute", "execute_script"},
-    "review":       {"read", "execute", "skill"},
-    "smoke":        {"read", "execute", "skill"},
-    "doc":          {"read", "write", "edit", "skill"},
+    "spec": {"read", "write", "edit", "skill"},
+    "coding": {"read", "write", "edit", "execute", "execute_script"},
+    "test": {"read", "write", "edit", "execute", "execute_script"},
+    "review": {"read", "execute", "skill"},
+    "smoke": {"read", "execute", "skill"},
+    "doc": {"read", "write", "edit", "skill"},
+    "dispatch issue": {"read", "execute", "skill"},
+    "des encrypt": {"read", "write", "edit", "execute", "execute_script", "skill"},
 }
 _ALL_TOOLS: set[str] = set()
 _TOOL_ARGUMENT_HINTS: dict[str, str] = {}
@@ -56,12 +64,14 @@ _SKILLS_ROOT = Path(__file__).resolve().parent.parent.parent / "skills"
 
 _ROLE_SKILL_DIRS: dict[str, list[str]] = {
     "orchestrator": ["shared", "orchestrator"],
-    "spec":         ["shared", "spec"],
-    "coding":       [],
-    "test":         [],
-    "review":       ["shared", "review"],
-    "smoke":        ["shared", "smoke"],
-    "doc":          ["shared", "doc"],
+    "spec": ["shared", "spec"],
+    "coding": [],
+    "test": [],
+    "review": ["shared", "review"],
+    "smoke": ["shared", "smoke"],
+    "doc": ["shared", "doc"],
+    "dispatch issue": ["shared"],
+    "des encrypt": ["shared"],
 }
 
 
@@ -305,6 +315,39 @@ def _resolve_max_turns(role: str, override: int | None) -> int:
     return _MAX_TURNS.get(role, _DEFAULT_MAX_TURNS)
 
 
+def _build_tool_runtime_env(task_id: str | None) -> dict[str, str]:
+    env: dict[str, str] = {}
+    ghe_token = (settings.GHE_TOKEN or "").strip()
+    ghe_base_url = (settings.GHE_BASE_URL or "").strip()
+    if ghe_token:
+        env["GHE_TOKEN"] = ghe_token
+    if ghe_base_url:
+        env["GHE_BASE_URL"] = ghe_base_url
+    if task_id:
+        env["SILICON_AGENT_TASK_URL"] = f"http://127.0.0.1:3000/tasks/{task_id}"
+    return env
+
+
+@contextmanager
+def _temporary_env(overrides: dict[str, str]):
+    if not overrides:
+        yield
+        return
+
+    previous: dict[str, str | None] = {}
+    try:
+        for key, value in overrides.items():
+            previous[key] = os.environ.get(key)
+            os.environ[key] = value
+        yield
+    finally:
+        for key, old_value in previous.items():
+            if old_value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = old_value
+
+
 def _normalize_prompt_append(value: str | None) -> str | None:
     text = (value or "").strip()
     return text or None
@@ -386,6 +429,7 @@ class SandboxedAgentRunner(ToolExecutionPolicyMixin, _BaseRunner):  # type: igno
         self.allowed_tools = allowed_tools or _ALL_TOOLS
         self._tool_argument_hints = _TOOL_ARGUMENT_HINTS
         self._gemini_tool_call_signatures: dict[str, str] = {}
+        self.task_id: str | None = None
 
     def _resolve_workspace_path(self, path: str) -> tuple[str, str | None]:
         """Resolve a possibly-relative path into task workspace safely."""
@@ -460,7 +504,14 @@ class SandboxedAgentRunner(ToolExecutionPolicyMixin, _BaseRunner):  # type: igno
             self.client.chat.completions.create = original_create
 
     async def _execute_tool_base(self, tool_call, on_output=None) -> str:
-        return await super()._execute_tool(tool_call, on_output)
+        tool_name = str(tool_call.get("name") or "").strip().lower()
+        if tool_name not in {"execute", "execute_script"}:
+            return await super()._execute_tool(tool_call, on_output)
+
+        runtime_env = _build_tool_runtime_env(getattr(self, "task_id", None))
+        async with _TOOL_ENV_LOCK:
+            with _temporary_env(runtime_env):
+                return await super()._execute_tool(tool_call, on_output)
 
     async def _execute_tool(self, tool_call, on_output=None):
         return await self._execute_tool_with_policy(tool_call, on_output=on_output)
@@ -566,6 +617,7 @@ def _create_runner(
         default_cwd=str(workdir),
         allowed_tools=allowed,
     )
+    runner.task_id = task_id
     configured_model = getattr(runner.config, "model", None)
     configured_temperature = getattr(runner.config, "temperature", None)
     configured_max_tokens = getattr(runner.config, "max_tokens", None)

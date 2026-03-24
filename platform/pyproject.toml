@@ -17,7 +17,7 @@ dependencies = [
     "httpx>=0.27.0",
     "alembic>=1.13.0",
     "croniter>=2.0.0",
-    "skillkit @ git+ssh://git@github.com/sawzhang/agent-skills-engine.git@master",
+    "skillkit @ git+ssh://git@github.com/sawzhang/agent-skills-engine.git@7ec2d07c19b8c18c479eb8c78af8afb76fabe04d",
 ]
 
 [project.optional-dependencies]

@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.db.session import get_db
+from app.services.github_comment_commands import parse_silicon_agent_command
 from app.services.trigger_service import TriggerService
 
 logger = logging.getLogger(__name__)
@@ -118,13 +119,13 @@ def _normalize_github_payload(gh_event: str, event_type: str, body: dict) -> dic
             "title": f"push to {push_branch}",
         })
 
-    # Issues 事件
     elif gh_event == "issues":
         issue = body.get("issue") or {}
         labels = [lb.get("name", "") for lb in (issue.get("labels") or [])]
         base.update({
-            "issue_number": issue.get("number", ""),
+            "issue_number": issue.get("number"),
             "issue_title": issue.get("title", ""),
+            "issue_body": issue.get("body", "")[:2000],
             "issue_url": issue.get("html_url", ""),
             "issue_author": (issue.get("user") or {}).get("login", ""),
             "labels": labels,
@@ -135,12 +136,20 @@ def _normalize_github_payload(gh_event: str, event_type: str, body: dict) -> dic
     elif gh_event == "issue_comment":
         issue = body.get("issue") or {}
         comment = body.get("comment") or {}
+        command = parse_silicon_agent_command(comment.get("body", ""))
         base.update({
-            "issue_number": issue.get("number", ""),
+            "issue_number": issue.get("number"),
             "issue_title": issue.get("title", ""),
-            "comment_body": comment.get("body", "")[:200],
+            "issue_body": issue.get("body", "")[:2000],
+            "issue_url": issue.get("html_url", ""),
+            "issue_author": (issue.get("user") or {}).get("login", ""),
+            "comment_id": comment.get("id", ""),
+            "comment_url": comment.get("html_url", ""),
+            "comment_body": comment.get("body", "")[:2000],
+            "comment_author": (comment.get("user") or {}).get("login", ""),
             "title": issue.get("title", ""),
         })
+        base.update(command)
 
     # 保留原始 body 供模板使用（顶层字段）
     for k, v in body.items():

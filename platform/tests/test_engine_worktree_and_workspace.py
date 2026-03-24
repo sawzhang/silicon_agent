@@ -309,6 +309,8 @@ async def test_finalize_task_resources_commit_push_success(monkeypatch):
         branch="main",
     )
     task.target_branch = None
+    task.github_issue_number = 13
+    task.branch_name = None
 
     session = SimpleNamespace(commit=AsyncMock())
 
@@ -328,6 +330,7 @@ async def test_finalize_task_resources_commit_push_success(monkeypatch):
 
     assert result is True
     commit_push_mock.assert_awaited_once()
+    assert task.branch_name == "feat/branch-123"
 
 
 @pytest.mark.asyncio
@@ -367,6 +370,42 @@ async def test_finalize_task_resources_commit_push_fails(monkeypatch):
 
     assert result is False
     fail_task_mock.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_finalize_task_resources_github_issue_number_does_not_block_success(monkeypatch):
+    """github_issue_number set → engine no longer posts feedback; task still succeeds."""
+    monkeypatch.setattr(engine.settings, "MEMORY_ENABLED", False)
+    monkeypatch.setattr(engine.settings, "SKILL_FEEDBACK_ENABLED", False)
+    monkeypatch.setattr(engine, "_emit_system_log", AsyncMock(return_value="log-id"))
+    monkeypatch.setattr(engine, "_close_started_system_log", AsyncMock())
+    monkeypatch.setattr(engine, "_cleanup_runtime_resources", AsyncMock())
+    monkeypatch.setattr(engine, "commit_and_push_workspace", AsyncMock(return_value="feat/branch-123"))
+    monkeypatch.setattr(engine, "create_pr_for_workspace", AsyncMock(return_value=None))
+
+    task = _make_task(id="tt-finalize-feedback-no-block-1", title="Feedback No Block Test")
+    task.project = SimpleNamespace(
+        repo_url="https://github.com/test/repo",
+        branch="main",
+    )
+    task.target_branch = None
+    task.github_issue_number = 13
+    task.branch_name = None
+
+    session = SimpleNamespace(commit=AsyncMock())
+
+    result = await engine._finalize_task_resources(
+        session,  # type: ignore[arg-type]
+        task,  # type: ignore[arg-type]
+        [],
+        None,
+        None, None, "/tmp/test_ws", "tmp_cloned", "feat/branch-123",
+        None, None,
+    )
+
+    # Feedback is now agent's responsibility; engine should still succeed
+    assert result is True
+    assert task.branch_name == "feat/branch-123"
 
 
 # ── 16. _execute_single_stage paths ───────────────────────────────────────
@@ -427,6 +466,47 @@ async def test_ensure_code_stage_not_code_stage(monkeypatch):
     result = await engine._ensure_code_stage_has_changes(session, task, stage, "/some/path")
     assert result is True
     git_check.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_ensure_des_encrypt_no_changes_false(monkeypatch):
+    """des encrypt stage must also produce repository changes."""
+    monkeypatch.setattr(engine, "_has_git_worktree_changes", AsyncMock(return_value=False))
+    mark_failed = AsyncMock()
+    fail_task = AsyncMock()
+    monkeypatch.setattr(engine, "mark_stage_failed", mark_failed)
+    monkeypatch.setattr(engine, "_fail_task", fail_task)
+
+    task = _make_task()
+    stage = _make_stage(stage_name="des encrypt")
+    session = SimpleNamespace(commit=AsyncMock())
+
+    with patch("app.worker.agents.close_agents_for_task"):
+        result = await engine._ensure_code_stage_has_changes(session, task, stage, "/some/path")
+
+    assert result is False
+    mark_failed.assert_awaited_once()
+    fail_task.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_ensure_des_encrypt_allows_clean_worktree_when_commit_exists(monkeypatch):
+    monkeypatch.setattr(engine, "_has_git_worktree_changes", AsyncMock(return_value=False))
+    monkeypatch.setattr(engine, "_has_git_committed_changes_since_base", AsyncMock(return_value=True))
+    mark_failed = AsyncMock()
+    fail_task = AsyncMock()
+    monkeypatch.setattr(engine, "mark_stage_failed", mark_failed)
+    monkeypatch.setattr(engine, "_fail_task", fail_task)
+
+    task = _make_task(project=SimpleNamespace(branch="master"))
+    stage = _make_stage(stage_name="des encrypt")
+    session = SimpleNamespace(commit=AsyncMock())
+
+    result = await engine._ensure_code_stage_has_changes(session, task, stage, "/some/path")
+
+    assert result is True
+    mark_failed.assert_not_awaited()
+    fail_task.assert_not_awaited()
 
 
 # ═══════════════════════════════════════════════════════════════════════

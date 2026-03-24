@@ -15,10 +15,31 @@ const STATUS_BADGE: Record<string, 'success' | 'processing' | 'warning' | 'error
 };
 
 interface AgentCardProps {
-  agent: AgentState;
+  agent?: AgentState;
 }
 
 const AgentCard: React.FC<AgentCardProps> = ({ agent }) => {
+  if (!agent) {
+    return (
+      <Card size="small" style={{ minWidth: 160, height: '100%' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+          <RobotOutlined style={{ fontSize: 20 }} />
+          <div>
+            <Text strong>未注册 Agent</Text>
+            <br />
+            <Text type="secondary" style={{ fontSize: 12 }}>unknown</Text>
+          </div>
+        </div>
+        <div style={{ marginBottom: 4 }}>
+          <Badge status="default" text={<Tag color="default">stopped</Tag>} />
+        </div>
+        <Text type="secondary" style={{ fontSize: 12 }}>
+          未配置
+        </Text>
+      </Card>
+    );
+  }
+
   const displayName = ROLE_DISPLAY_NAMES[agent.role] || agent.role;
   const badgeStatus = STATUS_BADGE[agent.status] || 'default';
 

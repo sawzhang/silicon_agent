@@ -13,7 +13,6 @@ from collections import defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
-
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -410,6 +409,34 @@ async def _has_git_worktree_changes(worktree_path: Optional[str]) -> Optional[bo
         return None
 
 
+async def _has_git_committed_changes_since_base(
+    worktree_path: Optional[str],
+    base_branch: Optional[str],
+) -> Optional[bool]:
+    """Return whether HEAD is ahead of origin/base_branch; None when check cannot be performed."""
+    if not worktree_path or not (base_branch or "").strip():
+        return None
+    try:
+        proc = await asyncio.create_subprocess_shell(
+            f"git rev-list --count origin/{base_branch.strip()}..HEAD",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            cwd=worktree_path,
+        )
+        stdout, _ = await proc.communicate()
+        if proc.returncode != 0:
+            return None
+        return int(stdout.decode().strip() or "0") > 0
+    except Exception:
+        logger.warning(
+            "Failed to verify committed git changes for worktree %s against %s",
+            worktree_path,
+            base_branch,
+            exc_info=True,
+        )
+        return None
+
+
 async def _ensure_code_stage_has_changes(
     session: AsyncSession,
     task: TaskModel,
@@ -417,7 +444,8 @@ async def _ensure_code_stage_has_changes(
     worktree_path: Optional[str],
 ) -> bool:
     """Code stage must produce repository changes; otherwise fail fast."""
-    if (stage.stage_name or "").lower() != "code":
+    change_required_stages = {"code", "coding", "des encrypt"}
+    if (stage.stage_name or "").lower() not in change_required_stages:
         return True
     # When worktree mode is disabled/unavailable, skip git diff verification.
     # Some tasks still complete via sandbox workspace edits without a git worktree.
@@ -431,13 +459,22 @@ async def _ensure_code_stage_has_changes(
     changed = await _has_git_worktree_changes(worktree_path)
     if changed:
         return True
+    if changed is False:
+        project = getattr(task, "project", None)
+        committed = await _has_git_committed_changes_since_base(
+            worktree_path,
+            getattr(project, "branch", None) if project else None,
+        )
+        if committed:
+            return True
 
+    stage_name = stage.stage_name or "unknown"
     reason = (
-        "Code stage produced no repository file changes."
+        f"Stage {stage_name} produced no repository file changes."
         if changed is False
-        else "Code stage change verification failed (worktree unavailable or git status failed)."
+        else f"Stage {stage_name} change verification failed (worktree unavailable or git status failed)."
     )
-    logger.error("Task %s code stage has no detectable changes: %s", task.id, reason)
+    logger.error("Task %s stage %s has no detectable changes: %s", task.id, stage_name, reason)
     await mark_stage_failed(session, task, stage, reason)
     from app.worker.agents import close_agents_for_task
 
@@ -2939,7 +2976,7 @@ def _infer_test_target(test_examples: list[str], impl_examples: list[str]) -> st
 
 def _build_stage_preflight_summary(stage_name: str, workspace_path: Optional[str]) -> Optional[str]:
     normalized = (stage_name or "").strip().lower()
-    if normalized not in {"code", "coding", "test"}:
+    if normalized not in {"code", "coding", "test", "des encrypt"}:
         return None
     if not workspace_path:
         return None
@@ -2997,7 +3034,10 @@ def _build_stage_preflight_summary(stage_name: str, workspace_path: Optional[str
     validation_command = _infer_validation_command(build_files)
 
     lines = []
-    if normalized in {"code", "coding"}:
+    if normalized in {"code", "coding", "des encrypt"}:
+        lines.append(
+            "- 当前工作区: 目标仓库已在当前 workspace 根目录检出；直接在这里读写、commit、push，不要再次 git clone 到子目录。"
+        )
         lines.append(_format_preflight_section("构建入口", build_files, limit=2))
         lines.append(f"- 推荐修改落点: {_infer_coding_edit_target(source_roots, impl_examples)}")
         lines.append(_format_preflight_section("最相关实现参考", impl_examples, limit=2))

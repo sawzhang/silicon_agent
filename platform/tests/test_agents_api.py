@@ -49,6 +49,16 @@ async def test_list_agents(client, seed_agent):
 
 
 @pytest.mark.asyncio
+async def test_list_agents_includes_github_issue_workflow_roles(client):
+    """GET /api/v1/agents should expose the built-in GitHub issue workflow roles."""
+    resp = await client.get("/api/v1/agents")
+    assert resp.status_code == 200
+    roles = [a["role"] for a in resp.json()["agents"]]
+    assert "dispatch issue" in roles
+    assert "des encrypt" in roles
+
+
+@pytest.mark.asyncio
 async def test_get_agent(client, seed_agent):
     """GET /api/v1/agents/{role} returns the agent with correct fields."""
     resp = await client.get("/api/v1/agents/ag-test-coding")
@@ -234,3 +244,13 @@ async def test_agent_session_404(client):
     """GET /api/v1/agents/nonexistent/session returns 404."""
     resp = await client.get("/api/v1/agents/nonexistent/session")
     assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_get_agent_config_options_include_issue_roles(client):
+    """Config options should expose defaults for the GitHub issue workflow roles."""
+    resp = await client.get("/api/v1/agents/config/options")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "dispatch issue" in data["role_defaults"]
+    assert "des encrypt" in data["role_defaults"]
