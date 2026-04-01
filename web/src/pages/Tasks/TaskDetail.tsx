@@ -1,7 +1,7 @@
 import React, { useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { Card, Collapse, Descriptions, Empty, Tag, Button, Spin, Typography, Space, message, Timeline, Tabs } from 'antd';
+import { Alert, Card, Collapse, Descriptions, Empty, Tag, Button, Spin, Typography, Space, message, Timeline, Tabs } from 'antd';
 import { ArrowLeftOutlined, StopOutlined, ReloadOutlined, CodeOutlined, RobotOutlined, LoadingOutlined, DownOutlined, LeftOutlined } from '@ant-design/icons';
 import { useTask, useCancelTask, useRetryTaskFromStage } from '@/hooks/useTasks';
 import { useStageLogStore } from '@/stores/stageLogStore';
@@ -13,6 +13,8 @@ import { STAGE_NAMES } from '@/utils/constants';
 import { formatTimestamp, formatTokens, formatCost, formatDuration } from '@/utils/formatters';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
+import { oneLight } from 'react-syntax-highlighter/dist/esm/styles/prism';
 
 const { Title } = Typography;
 
@@ -111,6 +113,36 @@ const StageReActDetails: React.FC<{ taskId: string; stageId: string; stageName: 
   return <ReActTimeline logs={historicalLogs} loading={isLoading} />;
 };
 
+const CodeBlockRenderer = ({ className, children, ...props }: any) => {
+  const match = /language-(\w+)/.exec(className || '');
+  const code = String(children).replace(/\n$/, '');
+  if (match) {
+    return (
+      <div style={{ position: 'relative' }}>
+        <Typography.Text
+          copyable={{ text: code }}
+          style={{ position: 'absolute', top: 4, right: 8, zIndex: 1 }}
+        />
+        <SyntaxHighlighter
+          style={oneLight}
+          language={match[1]}
+          PreTag="div"
+          customStyle={{ margin: 0, borderRadius: 6, fontSize: 13 }}
+        >
+          {code}
+        </SyntaxHighlighter>
+      </div>
+    );
+  }
+  return (
+    <code className={className} {...props}>
+      {children}
+    </code>
+  );
+};
+
+const markdownComponents = { code: CodeBlockRenderer };
+
 const ExpandableReport: React.FC<{ content: string; maxHeight?: number }> = ({ content, maxHeight = 400 }) => {
   const [expanded, setExpanded] = React.useState(false);
   const [isOverflowing, setIsOverflowing] = React.useState(false);
@@ -150,7 +182,7 @@ const ExpandableReport: React.FC<{ content: string; maxHeight?: number }> = ({ c
         }}
       >
         <div ref={contentRef}>
-          <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
+          <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>{content}</ReactMarkdown>
         </div>
         {!expanded && isOverflowing && (
           <div
@@ -247,6 +279,25 @@ const TaskDetail: React.FC = () => {
       </Space>
 
       <Title level={4}>{task.title}</Title>
+
+      {task.status === 'failed' && (task.error_reason || firstFailedStage) && (
+        <Alert
+          type="error"
+          showIcon
+          style={{ marginBottom: 16 }}
+          message="任务执行失败"
+          description={
+            <div>
+              <div>{task.error_reason || firstFailedStage?.error_message || '未知错误'}</div>
+              {firstFailedStage?.failure_category && (
+                <Tag color="volcano" style={{ marginTop: 8 }}>
+                  {firstFailedStage.failure_category}
+                </Tag>
+              )}
+            </div>
+          }
+        />
+      )}
 
       <Card style={{ marginBottom: 16 }}>
         <PipelineView stages={task.stages.map((stage, idx) => {

@@ -48,6 +48,7 @@ export interface Task {
   project_name: string | null;
   target_branch: string | null;
   yunxiao_task_id: string | null;
+  error_reason: string | null;
 }
 
 export interface YunxiaoTask {

@@ -3034,6 +3034,7 @@ async def _fail_task(session: AsyncSession, task: TaskModel, reason: str) -> Non
         .values(
             status="failed",
             completed_at=failed_at,
+            error_reason=reason,
         )
     )
     await session.commit()
@@ -3044,6 +3045,7 @@ async def _fail_task(session: AsyncSession, task: TaskModel, reason: str) -> Non
 
     task.status = "failed"
     task.completed_at = failed_at
+    task.error_reason = reason
 
     await _safe_broadcast(TASK_STATUS_CHANGED, {
         "task_id": task.id,
